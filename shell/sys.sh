@@ -175,7 +175,7 @@ function update_script() {
     fi
 
     # 下载新的 sys.sh
-    $DOWNLOAD_CMD https://raw.githubusercontent.com/csosiis/iis-VPS-Shell/refs/heads/main/shell/sys.sh
+    $DOWNLOAD_CMD https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sys.sh
     if [ $? -ne 0 ]; then
         echo "下载失败，请检查网络连接或下载源。"
         return 1
