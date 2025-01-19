@@ -65,6 +65,7 @@ curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/s
 
 ##### 拉取前端项目
 ```
+curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
 curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
 ```
 
@@ -99,7 +100,7 @@ Wants=network-online.target systemd-networkd-wait-online.service
 [Service]
 LimitNOFILE=32767
 Type=simple
-Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/sfslfdjslfj"
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/unAY8K2wAr5LJ3RLs2tVBWru2bc"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
 Environment="SUB_STORE_FRONTEND_PATH=/root/sub-store/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=0.0.0.0"
@@ -201,16 +202,19 @@ vim sub-store.conf
 server {
   listen 443 ssl http2;
   listen [::]:443 ssl http2;
-  server_name haxus3-store.yumen.ip-ddns.com;
-  ssl_certificate /etc/letsencrypt/live/haxus3-store.yumen.ip-ddns.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/haxus3-store.yumen.ip-ddns.com/privkey.pem;
+  server_name haxus.yumen.sbs;
+ 
+  ssl_certificate /etc/letsencrypt/live/haxus.yumen.sbs/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/haxus.yumen.sbs/privkey.pem;
+ 
   location / {
     proxy_pass http://127.0.0.1:3001;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
-
+ 
+}
 ```
 
 
@@ -228,7 +232,7 @@ nginx -t          # 查看配置是否正确
 ##### 访问地址：
 
 ```
-https://haxus3-store.yumen.ip-ddns.com/?api=https://haxus3-store.yumen.ip-ddns.com/122333
+https://haxus.yumen.sbs/?api=https://haxus.yumen.sbs/unAY8K2wAr5LJ3RLs2tVBWru2bc
 ```
 
 
