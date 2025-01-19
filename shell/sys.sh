@@ -262,7 +262,7 @@ function setup_ssh_key() {
 # 搭建 Sing-Box 节点
 function setup_singbox() {
     echo "开始搭建 sing-sox 节点... "
-    wget https://raw.githubusercontent.com/csosiis/iis-VPS-Shell/refs/heads/main/shell/singbox.sh
+    wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/singbox.sh
     chmod +x singbox.sh
     ./singbox.sh
     rm singbox.sh
