@@ -1,51 +1,65 @@
 #!/bin/bash
 
-# 绿色文本输出函数
-echo_green() {
-  echo -e "\033[32m$1\033[0m"
+# 定义全局变量
+SUB_STORE_FRONTEND_BACKEND_PATH=""
+PROXY_DOMAIN=""
+EXTERNAL_IP=""
+OPENSSL_CMD=$(command -v openssl)
+
+# 安装依赖项
+install_dependencies() {
+    echo_green "检查并安装所需组件..."
+    apt update -y
+    apt install unzip curl wget git sudo openssl nginx certbot -y
 }
 
-# 步骤 1: 安装所需组件
-echo_green "正在静默安装所需组件（unzip curl wget git）..."
-sudo apt update -y
-sudo apt install unzip curl wget git sudo -y --quiet --show-progress
-echo_green "所需组件已成功安装！"
+# 生成随机密码
+generate_random_password() {
+    if [ -z "$OPENSSL_CMD" ]; then
+        echo_green "未安装 openssl，正在安装..."
+        apt install openssl -y
+    fi
+    echo "/$(openssl rand -base64 15 | tr -d '/+')"
+}
 
-# 步骤 2: 安装 FNM 版本管理器
-echo_green "正在安装 FNM 版本管理器..."
-curl -fsSL https://fnm.vercel.app/install | bash
-source /root/.bashrc
-echo_green "FNM 版本管理器已成功安装！"
+# 安装并配置 FNM 版本管理器
+install_fnm() {
+    echo_green "安装 FNM 版本管理器..."
+    curl -fsSL https://fnm.vercel.app/install | bash
+    source /root/.bashrc
+}
 
-# 步骤 3: 安装 Node.js v20.18.0
-echo_green "正在使用 FNM 安装 Node.js v20.18.0..."
-fnm install v20.18.0
-fnm use v20.18.0
-echo_green "Node.js v20.18.0 已成功安装！"
+# 安装 Node.js
+install_node() {
+    echo_green "安装 Node.js v20.18.0..."
+    fnm install v20.18.0
+}
 
-# 步骤 4: 安装 PNPM 软件包管理器
-echo_green "正在安装 PNPM 软件包管理器..."
-curl -fsSL https://get.pnpm.io/install.sh | sh -
-source /root/.bashrc
-echo_green "PNPM 软件包管理器已成功安装！"
+# 安装 PNPM
+install_pnpm() {
+    echo_green "安装 PNPM 软件包管理器..."
+    curl -fsSL https://get.pnpm.io/install.sh | sh -
+    source /root/.bashrc
+}
 
-# 步骤 5: 安装 Sub-Store
-echo_green "正在安装 Sub-Store..."
-mkdir -p /root/sub-store && cd /root/sub-store
-curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-unzip dist.zip
-mv dist frontend
-rm dist.zip
-echo_green "Sub-Store 已成功安装！"
+# 安装 Sub-Store
+install_sub_store() {
+    echo_green "安装 Sub-Store..."
+    mkdir -p /root/sub-store && cd /root/sub-store
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    unzip dist.zip && mv dist frontend && rm dist.zip
+}
 
-# 步骤 6: 随机生成 SUB_STORE_FRONTEND_BACKEND_PATH
-RANDOM_PATH=$(openssl rand -base64 26 | tr -d '/+=')  # 生成长度为26的随机字符串
-echo_green "随机生成的 SUB_STORE_FRONTEND_BACKEND_PATH: $RANDOM_PATH"
+# 创建 systemd 服务
+create_service() {
+    echo_green "创建 systemd 服务..."
+    SERVICE_FILE="/etc/systemd/system/sub-store.service"
+    touch $SERVICE_FILE
 
-# 步骤 7: 创建系统服务
-echo_green "正在创建 Sub-Store 系统服务..."
-cat <<EOF | sudo tee /etc/systemd/system/sub-store.service > /dev/null
+    SUB_STORE_FRONTEND_BACKEND_PATH=$(generate_random_password)
+
+    cat <<EOL > $SERVICE_FILE
 [Unit]
 Description=Sub-Store
 After=network-online.target
@@ -54,14 +68,14 @@ Wants=network-online.target systemd-networkd-wait-online.service
 [Service]
 LimitNOFILE=32767
 Type=simple
-Environment="SUB_STORE_FRONTEND_BACKEND_PATH=$RANDOM_PATH"
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_STORE_FRONTEND_BACKEND_PATH"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
 Environment="SUB_STORE_FRONTEND_PATH=/root/sub-store/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=0.0.0.0"
 Environment="SUB_STORE_FRONTEND_PORT=3001"
 Environment="SUB_STORE_DATA_BASE_PATH=/root/sub-store"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
-Environment="SUB_STORE_BACKEND_API_PORT=3000"
+Environment="SUB_STORE_BACKEND_API_PORT=3001"
 ExecStart=/root/.local/share/fnm/fnm exec --using v20.18.0 node /root/sub-store/sub-store.bundle.js
 User=root
 Group=root
@@ -73,83 +87,110 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
-# 重新加载 systemd 服务并启动服务
-sudo systemctl daemon-reload
-sudo systemctl enable sub-store.service
-sudo systemctl start sub-store.service
-echo_green "Sub-Store 系统服务已创建并启动！"
+    systemctl start sub-store.service
+    systemctl status sub-store.service
+    systemctl enable sub-store.service
+}
 
-# 步骤 8: 配置 Nginx 反向代理并申请 SSL 证书
-read -p "是否需要配置 Nginx 反向代理？(y/n): " SET_NGINX
+# 获取外部 IP
+get_external_ip() {
+    EXTERNAL_IP=$(curl -s http://whatismyip.akamai.com/)
+}
 
-if [[ "$SET_NGINX" == "y" ]]; then
-  # 配置 Nginx 反向代理
-  read -p "请输入你的反代域名: " DOMAIN
+# 检查是否已存在证书
+check_existing_certificate() {
+    if [ -d "/etc/letsencrypt/live/$PROXY_DOMAIN" ]; then
+        echo_green "域名 $PROXY_DOMAIN 的 SSL 证书已存在。"
+        read -p "$(echo_green "是否覆盖现有证书? (Yes/No) 默认是 No: ")" OVERWRITE_CERT
+        OVERWRITE_CERT=${OVERWRITE_CERT:-No}
 
-  # 检测域名证书是否存在
-  if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
-    echo_green "域名证书不存在，正在申请证书..."
+        if [ "$OVERWRITE_CERT" == "No" ]; then
+            echo_green "跳过证书申请步骤，继续后续操作。"
+            return 0
+        else
+            echo_green "正在覆盖现有证书..."
+            certbot renew --cert-name "$PROXY_DOMAIN"
+            if [ $? -ne 0 ]; then
+                echo_green "证书覆盖失败，请检查错误日志。"
+                exit 1
+            fi
+            echo_green "证书已更新！"
+        fi
+    else
+        echo_green "域名 $PROXY_DOMAIN 未找到现有证书，开始申请新的证书..."
+        certbot certonly --standalone -d "$PROXY_DOMAIN"
+        if [ $? -ne 0 ]; then
+            echo_green "证书申请失败，请检查域名配置或选择 No。"
+            exit 1
+        fi
+        echo_green "证书申请成功！"
+    fi
+}
 
-    # 安装 certbot 和 Nginx 插件
-    sudo apt update -y
-    sudo apt install certbot python3-certbot-nginx -y
+# 更新 Nginx 配置
+update_nginx_config() {
+    NGINX_CONFIG_FILE="/etc/nginx/sites-enabled/sub-store.conf"
+    touch $NGINX_CONFIG_FILE
+    chmod 644 $NGINX_CONFIG_FILE
 
-    # 申请证书
-    sudo certbot --nginx -d $DOMAIN --agree-tos --non-interactive --email your-email@example.com
-
-    echo_green "证书申请完成！"
-  else
-    echo_green "域名证书已存在，无需重新申请。"
-  fi
-
-  # 检测 Nginx 是否已安装
-  if ! command -v nginx &> /dev/null
-  then
-    echo_green "Nginx 未安装，正在安装 Nginx..."
-    sudo apt install nginx -y
-    echo_green "Nginx 安装完成！"
-  else
-    echo_green "Nginx 已安装，继续配置反向代理..."
-  fi
-
-  # 配置 Nginx 反向代理
-  echo_green "正在配置 Nginx 反向代理..."
-
-  # 生成 Nginx 配置文件
-  cat <<EOF | sudo tee /etc/nginx/sites-available/$DOMAIN > /dev/null
+    cat <<EOL > $NGINX_CONFIG_FILE
 server {
   listen 443 ssl http2;
   listen [::]:443 ssl http2;
-  server_name $DOMAIN;
+  server_name $PROXY_DOMAIN;
 
-  ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+  ssl_certificate /etc/letsencrypt/live/$PROXY_DOMAIN/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/$PROXY_DOMAIN/privkey.pem;
 
   location / {
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass http://localhost:3001;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
 }
-EOF
+EOL
 
-  # 启用 Nginx 配置并重新加载服务
-  sudo ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
-  sudo nginx -t  # 检查配置是否正确
-  sudo systemctl restart nginx  # 重启 Nginx 服务
+    nginx -s reload
+    nginx -t
+    if [ $? -ne 0 ]; then
+        echo_green "Nginx 配置有误，请检查错误日志。"
+        exit 1
+    fi
+}
 
-  echo_green "Nginx 反向代理配置完成，$DOMAIN 已成功设置为反代域名！"
+# 配置反向代理（包含证书检查和申请）
+configure_reverse_proxy() {
+    get_external_ip
+    read -p "$(echo_green "是否为服务设置反向代理 (Yes/No)? 默认是 No: ")" SET_PROXY
+    SET_PROXY=${SET_PROXY:-No}
 
-  # 输出 Sub-Store 访问地址
-  ACCESS_URL="https://$DOMAIN/?api=https://$DOMAIN/$RANDOM_PATH"
-  echo_green "Sub-Store 访问地址: $ACCESS_URL"
+    if [ "$SET_PROXY" == "No" ]; then
+        echo_green "请访问链接: http://$EXTERNAL_IP:3001/?api=http://$EXTERNAL_IP:3001$SUB_STORE_FRONTEND_BACKEND_PATH"
+    else
+        read -p "$(echo_green "请输入反向代理的域名 (确保已在 Cloudflare 中解析): ")" PROXY_DOMAIN
+        check_existing_certificate
+        install_nginx
+        update_nginx_config
+    fi
+}
 
-else
-  # 如果不配置 Nginx 反向代理
-  LOCAL_IP=$(hostname -I | awk '{print $1}')  # 获取本机 IP 地址
-  ACCESS_URL="http://$LOCAL_IP/?api=http://$LOCAL_IP/$RANDOM_PATH"
-  echo_green "Sub-Store 访问地址: $ACCESS_URL"
-fi
+# 打印绿色字体
+echo_green() {
+    echo -e "\033[32m$1\033[0m"
+}
+
+# 主程序
+main() {
+    install_dependencies
+    install_fnm
+    install_node
+    install_pnpm
+    install_sub_store
+    create_service
+    configure_reverse_proxy
+}
+
+main
