@@ -200,11 +200,11 @@ function optimize_dns() {
     # 设置优化后的 DNS 地址
     sudo bash -c 'echo "nameserver 1.1.1.1" >> /etc/resolv.conf'
     sudo bash -c 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2606:4700:4700::1111" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2001:4860:4860::8888" >> /etc/resolv.conf'
     sudo bash -c 'echo "nameserver 2a00:1098:2b::1" > /etc/resolv.conf'
     sudo bash -c 'echo "nameserver 2a00:1098:2c::1" >> /etc/resolv.conf'
     sudo bash -c 'echo "nameserver 2a01:4f8:c2c:123f::1" >> /etc/resolv.conf'
+    sudo bash -c 'echo "nameserver 2606:4700:4700::1111" >> /etc/resolv.conf'
+    sudo bash -c 'echo "nameserver 2001:4860:4860::8888" >> /etc/resolv.conf'
     echo -e "${GREEN}DNS优化完成！${RESET}
     "
 }
