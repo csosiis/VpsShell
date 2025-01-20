@@ -88,7 +88,7 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOL
-
+    systemctl daemon-reload
     systemctl start sub-store.service
     systemctl status sub-store.service
     systemctl enable sub-store.service
