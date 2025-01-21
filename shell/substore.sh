@@ -136,20 +136,46 @@ update_nginx_config() {
     chmod 644 $NGINX_CONFIG_FILE
 
     cat <<EOL > $NGINX_CONFIG_FILE
+    server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name $PROXY_DOMAIN;
+
+    # SSL 配置
+    ssl_certificate /etc/letsencrypt/live/$PROXY_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$PROXY_DOMAIN/privkey.pem;
+
+    # 强制使用 TLS 1.2 或 1.3（提高安全性）
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_prefer_server_ciphers off;
+
+    # 设置 HTTP Strict Transport Security (HSTS)，防止中间人攻击
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;  # 传递原始协议 (HTTP/HTTPS)
+        proxy_set_header X-Forwarded-Port $server_port;  # 传递原始端口
+    }
+
+}
 server {
-  listen 443 ssl http2;
-  listen [::]:443 ssl http2;
-  server_name $PROXY_DOMAIN;
+    if ($host = $PROXY_DOMAIN) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
 
-  ssl_certificate /etc/letsencrypt/live/$PROXY_DOMAIN/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/$PROXY_DOMAIN/privkey.pem;
 
-  location / {
-    proxy_pass http://localhost:3001;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-  }
+  listen 80 ;
+  listen [::]:80 ;
+    server_name $PROXY_DOMAIN;
+    return 404; # managed by Certbot
+
+
 }
 EOL
 
