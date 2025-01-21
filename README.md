@@ -14,6 +14,12 @@ wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sy
 wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store-install.sh && chmod +x sub-store-install.sh && ./sub-store-install.sh
 ```
 
+#### 一键卸载Sub-Store
+
+```
+wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store-uninstall.sh && chmod +x sub-store-uninstall.sh && ./sub-store-uninstall.sh
+```
+
 
 
 #### 自用Sing-Box节点搭建脚本

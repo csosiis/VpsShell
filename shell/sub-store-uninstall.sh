@@ -47,7 +47,7 @@ rm -f /usr/local/bin/fnm
 # 第六步：删除Nginx反代配置
 divider
 echo -e "${GREEN}删除Nginx反代配置..."
-if [ -f /etc/nginx/sites-enabled/sub-store.conf ]; then
+if [ -f /etc/nginx/sites-enabled/sub-store ]; then
     rm /etc/nginx/sites-enabled/sub-store.conf
     echo -e "${GREEN}sub-store反代配置已删除"
 else
