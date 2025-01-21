@@ -115,10 +115,10 @@ get_external_ip() {
     fi
 }
 
-# 获取 SUB_STORE_BACKEND_API_PORT 值
-get_backend_api_port() {
-    BACKEND_API_PORT=$(grep -oP 'Environment="SUB_STORE_BACKEND_API_PORT=\K[0-9]+' /etc/systemd/system/sub-store.service)
-    echo "$BACKEND_API_PORT"
+# 获取 SUB_STORE_FRONTEND_PORT 值（用来构建访问链接）
+get_frontend_port() {
+    FRONTEND_PORT=$(grep -oP 'Environment="SUB_STORE_FRONTEND_PORT=\K[0-9]+' /etc/systemd/system/sub-store.service)
+    echo "$FRONTEND_PORT"
 }
 
 # 输出访问链接
@@ -126,11 +126,11 @@ output_link() {
     print_green "Sub-Store 已成功安装并启动！"
     EXTERNAL_IP=$(get_external_ip)
 
-    # 获取端口号
-    BACKEND_API_PORT=$(get_backend_api_port)
+    # 获取前端端口号
+    FRONTEND_PORT=$(get_frontend_port)
 
     print_green "请访问以下链接进行使用："
-    print_green "http://$EXTERNAL_IP:$BACKEND_API_PORT/?api=http://$EXTERNAL_IP:$BACKEND_API_PORT/9vUgbmi2oP5v0FevHvuW"
+    print_green "http://$EXTERNAL_IP:$FRONTEND_PORT/?api=http://$EXTERNAL_IP:$FRONTEND_PORT/9vUgbmi2oP5v0FevHvuW"
 }
 
 # 主执行逻辑
