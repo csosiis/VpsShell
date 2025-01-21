@@ -105,13 +105,13 @@ start_service() {
 get_external_ip() {
     EXTERNAL_IP=$(curl -s https://api.ipify.org)
 
-    # 判断是否是 IPv4 或 IPv6
+    # 判断是否是 IPv6
     if [[ $EXTERNAL_IP =~ ":" ]]; then
-        # 如果是 IPv6，直接输出
-        echo "$EXTERNAL_IP"
-    else
-        # 如果是 IPv4，用 [] 包裹
+        # 如果是 IPv6，使用 [] 包裹
         echo "[$EXTERNAL_IP]"
+    else
+        # 如果是 IPv4，直接返回
+        echo "$EXTERNAL_IP"
     fi
 }
 
@@ -119,8 +119,10 @@ get_external_ip() {
 output_link() {
     print_green "Sub-Store 已成功安装并启动！"
     EXTERNAL_IP=$(get_external_ip)
+    # 获取 SUB_STORE_BACKEND_API_PORT 端口值
+    BACKEND_API_PORT=$(grep "SUB_STORE_BACKEND_API_PORT" /etc/systemd/system/sub-store.service | cut -d'=' -f2)
     print_green "请访问以下链接进行使用："
-    print_green "http://$EXTERNAL_IP:3001/?api=http://$EXTERNAL_IP:3001/9vUgbmi2oP5v0FevHvuW"
+    print_green "http://$EXTERNAL_IP:$BACKEND_API_PORT/?api=http://$EXTERNAL_IP:$BACKEND_API_PORT/9vUgbmi2oP5v0FevHvuW"
 }
 
 # 主执行逻辑
