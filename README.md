@@ -19,6 +19,6 @@ wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/su
 #### 自用Sing-Box节点搭建脚本
 
 ```
-wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/singbox.sh chmod +x singbox.sh && ./singbox.sh
+wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sing-box-install.sh chmod +x sing-box-install.sh && ./sing-box-install.sh
 ```
 
