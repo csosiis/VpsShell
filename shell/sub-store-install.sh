@@ -129,6 +129,7 @@ request_certificate() {
             print_green "证书申请成功！"
         else
             print_green "证书申请失败，请检查 Certbot 配置和 DNS 设置。"
+            print_green "访问链接：http://$EXTERNAL_IP:3000/?api=http://$EXTERNAL_IP:3000/$RANDOM_PASSWORD"
             exit 1
         fi
 
