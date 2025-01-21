@@ -109,18 +109,7 @@ request_certificate() {
 
     if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
         print_green "证书不存在，正在申请证书..."
-        systemctl stop nginx
         # 检查 80 端口是否被占用
-        if lsof -i:80 &>/dev/null; then
-            print_green "80 端口已被占用，正在停止占用该端口的服务..."
-
-            # 停止 Nginx 服务
-            if command_exists nginx; then
-                systemctl stop nginx
-                print_green "已停止 Nginx 服务以释放 80 端口。"
-            fi
-        fi
-
         # 申请证书
         certbot certonly --standalone -d "$DOMAIN_NAME" --agree-tos --non-interactive --email your-email@example.com
 
@@ -132,6 +121,7 @@ request_certificate() {
             print_green "证书申请失败，请检查 Certbot 配置和 DNS 设置。"
             EXTERNAL_IP=$(get_ip_with_brackets)
             print_green "访问链接：http://$EXTERNAL_IP:3000/?api=http://$EXTERNAL_IP:3000/$RANDOM_PASSWORD"
+            systemctl start nginx
             exit 1
         fi
 
@@ -154,36 +144,48 @@ configure_nginx_reverse_proxy() {
     print_green "配置 Nginx 反向代理..."
 
     cat > /etc/nginx/sites-available/sub-store <<EOF
-server {
-    listen 80;
-    server_name $DOMAIN_NAME;
+    server {
+        listen 443 ssl http2;
+        listen [::]:443 ssl http2;
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        server_name $DOMAIN_NAME;
+
+        # SSL 配置
+        ssl_certificate /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem;
+
+        # 强制使用 TLS 1.2 或 1.3（提高安全性）
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+        ssl_prefer_server_ciphers off;
+
+        # 设置 HTTP Strict Transport Security (HSTS)，防止中间人攻击
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # 配置代理到 127.0.0.1:3000 的请求
+        location / {
+            proxy_pass http://127.0.0.1:3000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;  # 传递原始协议 (HTTP/HTTPS)
+            proxy_set_header X-Forwarded-Port $server_port;  # 传递原始端口
+        }
+
     }
+    server {
+        if ($host = $DOMAIN_NAME) {
+            return 301 https://$host$request_uri;
+        } # managed by Certbot
 
-    return 301 https://\$host\$request_uri;
-}
 
-server {
-    listen 443 ssl;
-    server_name $DOMAIN_NAME;
+        listen 80 ;
+        listen [::]:80 ;
+        server_name $DOMAIN_NAME;
+        return 404; # managed by Certbot
 
-    ssl_certificate $CERT_PATH;
-    ssl_certificate_key $KEY_PATH;
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
-}
 EOF
 
     # 启用站点配置并重启 Nginx
@@ -199,8 +201,10 @@ install_nginx() {
         print_green "Nginx 未安装，正在安装 Nginx..."
         apt update -y
         apt install nginx -y
+        systemctl stop nginx
     else
         print_green "Nginx 已安装，跳过安装。"
+        systemctl stop nginx
     fi
 }
 
