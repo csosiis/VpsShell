@@ -82,4 +82,5 @@ fi
 
 # 第九步：输出完成信息
 divider
+rm sub-store-uninstall.sh sub-store-install.sh
 echo -e "${GREEN}Sub-Store已经完全卸载${NC}"
