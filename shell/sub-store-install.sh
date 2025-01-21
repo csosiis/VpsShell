@@ -165,15 +165,15 @@ server {
     # 配置代理到 127.0.0.1:23458 的请求
     location / {
         proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;  # 传递原始协议 (HTTP/HTTPS)
-        proxy_set_header X-Forwarded-Port $server_port;  # 传递原始端口
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;  # 传递原始协议 (HTTP/HTTPS)
+        proxy_set_header X-Forwarded-Port \$server_port;  # 传递原始端口
     }
 }
 server {
-    if ($host = $DOMAIN_NAME) {
+    if (\$host = $DOMAIN_NAME) {
         return 301 https://$host$request_uri;
     } # managed by Certbot
 
