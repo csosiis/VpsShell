@@ -11,7 +11,7 @@ wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sy
 #### 一键搭建Sub-Store — 订阅节点管理
 
 ```
-wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/substore.sh && chmod +x substore.sh && ./substore.sh
+wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store-install.sh && chmod +x sub-store-install.sh && ./sub-store-install.sh
 ```
 
 
