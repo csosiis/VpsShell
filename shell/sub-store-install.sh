@@ -55,11 +55,13 @@ generate_random_password() {
     # 生成一个26位的随机密码
     echo $(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 26)
 }
-local RANDOM_PASSWORD=$(generate_random_password)
+
 # 创建 Sub-Store 系统服务
 create_system_service() {
     # 生成随机密码
+    RANDOM_PASSWORD=$(generate_random_password)
     print_green "生成的随机密码：$RANDOM_PASSWORD"
+
     print_green "创建 Sub-Store 系统服务..."
 
     cat > /etc/systemd/system/sub-store.service <<EOF
