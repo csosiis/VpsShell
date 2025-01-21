@@ -109,7 +109,7 @@ request_certificate() {
 
     if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
         print_green "证书不存在，正在申请证书..."
-
+        systemctl stop nginx
         # 检查 80 端口是否被占用
         if lsof -i:80 &>/dev/null; then
             print_green "80 端口已被占用，正在停止占用该端口的服务..."
@@ -127,8 +127,10 @@ request_certificate() {
         # 检查证书申请是否成功
         if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
             print_green "证书申请成功！"
+            systemctl start nginx
         else
             print_green "证书申请失败，请检查 Certbot 配置和 DNS 设置。"
+            EXTERNAL_IP=$(get_ip_with_brackets)
             print_green "访问链接：http://$EXTERNAL_IP:3000/?api=http://$EXTERNAL_IP:3000/$RANDOM_PASSWORD"
             exit 1
         fi
