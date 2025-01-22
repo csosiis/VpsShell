@@ -8,132 +8,171 @@ RED='\033[1;31m'
 CYAN='\033[1;36m'
 RESET='\033[0m'
 
-# 显示系统信息
-function show_system_info()  {
-    clear
-   #!/bin/bash
+# 定义所需的依赖项
+required_dependencies=("lsb-release" "curl" "hostname" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig")
 
-    # 检查 bc 是否安装
-    if ! command -v bc &> /dev/null; then
-        echo "bc 命令未找到，正在尝试安装..."
-        # 根据发行版自动安装 bc
-        if [ -f /etc/debian_version ]; then
-            sudo apt-get install -y bc
-        elif [ -f /etc/redhat-release ]; then
-            sudo yum install -y bc
-        else
-            echo "无法自动安装 bc，请手动安装后重试"
-            exit 1
-        fi
-    fi
-
-    echo -e "${CYAN}系统信息详情${RESET}"
-    echo "------------------------"
-
-    # 主机名
-    hostname=$(hostname)
-    echo -e "${YELLOW}主机名:${RESET} $hostname"
-
-    # 运营商 (避免使用jq，改用curl)
-    operator=$(curl -s https://ipinfo.io/org | cut -d' ' -f2-)
-    if [ $? -ne 0 ] || [ -z "$operator" ]; then
-        operator="无法获取运营商信息"
-    fi
-    echo -e "${YELLOW}运营商:${RESET} $operator"
-    echo "------------------------"
-
-    # 系统版本和Linux版本
-    sys_version=$(lsb_release -d | cut -f2-)
-    linux_version=$(uname -r)
-    echo -e "${YELLOW}系统版本:${RESET} $sys_version"
-    echo -e "${YELLOW}Linux版本:${RESET} $linux_version"
-    echo "------------------------"
-
-    # CPU信息
-    cpu_arch=$(uname -m)
-    cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | sed 's/^ *//')
-    cpu_cores=$(lscpu | grep "^CPU(s)" | cut -d: -f2 | sed 's/^ *//')
-    echo -e "${YELLOW}CPU架构:${RESET} $cpu_arch"
-    echo -e "${YELLOW}CPU型号:${RESET} $cpu_model"
-    echo -e "${YELLOW}CPU核心数:${RESET} $cpu_cores"
-    echo "------------------------"
-
-    # CPU占用
-    cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
-    echo -e "${YELLOW}CPU占用:${RESET} ${cpu_usage}%"
-
-    # 物理内存使用情况
-    mem_total=$(free -m | grep Mem | awk '{print $2}')
-    mem_used=$(free -m | grep Mem | awk '{print $3}')
-    mem_percentage=0
-    if [ "$mem_total" -gt 0 ]; then
-        mem_percentage=$(echo "scale=2; $mem_used/$mem_total * 100" | bc)
-    fi
-    echo -e "${YELLOW}物理内存:${RESET} $mem_used/$mem_total MB (${mem_percentage}%)"
-
-    # 虚拟内存使用情况
-    swap_total=$(free -m | grep Swap | awk '{print $2}')
-    swap_used=$(free -m | grep Swap | awk '{print $3}')
-    swap_percentage=0
-    if [ "$swap_total" -gt 0 ]; then
-        swap_percentage=$(echo "scale=2; $swap_used/$swap_total * 100" | bc)
-    fi
-    echo -e "${YELLOW}虚拟内存:${RESET} $swap_used/$swap_total MB (${swap_percentage}%)"
-
-    # 硬盘占用
-    disk_total=$(df -h | grep '/$' | awk '{print $2}')
-    disk_used=$(df -h | grep '/$' | awk '{print $3}')
-    disk_percentage=$(df -h | grep '/$' | awk '{print $5}')
-    echo -e "${YELLOW}硬盘占用:${RESET} $disk_used/$disk_total ($disk_percentage)"
-    echo "------------------------"
-
-    # 自动识别网络接口
-    network_interface=$(ip link show | awk '/state UP/ {print $2}' | sed 's/:$//')
-
-    # 检查网络接口是否存在
-    if [ ! -f "/sys/class/net/$network_interface/statistics/rx_bytes" ]; then
-        echo "网络接口 $network_interface 不存在，无法获取流量数据"
-        exit 1
-    fi
-
-    # 网络流量
-    total_rx=$(cat /sys/class/net/$network_interface/statistics/rx_bytes)
-    total_tx=$(cat /sys/class/net/$network_interface/statistics/tx_bytes)
-    total_rx_gb=$(echo "scale=2; $total_rx/1024/1024/1024" | bc)
-    total_tx_gb=$(echo "scale=2; $total_tx/1024/1024/1024" | bc)
-    echo -e "${YELLOW}总接收:${RESET} $total_rx_gb GB"
-    echo -e "${YELLOW}总发送:${RESET} $total_tx_gb GB"
-    echo "------------------------"
-
-    # 网络拥堵算法
-    congestion_algo=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
-    echo -e "${YELLOW}网络拥堵算法:${RESET} $congestion_algo"
-    echo "------------------------"
-
-    # 公网IPv4和IPv6地址
-    ipv4=$(curl -s https://ipinfo.io/ip)
-    ipv6=$(curl -s https://ipv6.icanhazip.com)
-    echo -e "${YELLOW}公网IPv4地址:${RESET} $ipv4"
-    echo -e "${YELLOW}公网IPv6地址:${RESET} $ipv6"
-    echo "------------------------"
-
-    # 地理位置
-    geo_info=$(curl -s https://ipinfo.io)
-    city=$(echo $geo_info | jq -r '.city')
-    country=$(echo $geo_info | jq -r '.country')
-    echo -e "${YELLOW}地理位置:${RESET} $city, $country"
-
-    # 系统时间
-    sys_time=$(date "+%Y-%m-%d %H:%M:%S")
-    echo -e "${YELLOW}系统时间:${RESET} $sys_time"
-    echo "------------------------"
-
-    # 系统运行时长
-    uptime=$(uptime -p)
-    echo -e "${YELLOW}系统运行时长:${RESET} $uptime"
-    echo "------------------------"
-
+function show_main_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}========================================${RESET}"
+        echo -e "${CYAN}         Jcole 的 VPS 管理工具       ${RESET}"
+        echo -e "${CYAN}========================================${RESET}"
+        echo -e "${GREEN} 1. 系统信息查询${RESET}"
+        echo -e "${GREEN} 2. 系统清理${RESET}"
+        echo -e "${GREEN} 3. 修改主机名${RESET}"
+        echo -e "${GREEN} 4. 优化 DNS${RESET}"
+        echo -e "${GREEN} 5. 设置网络优先级${RESET}"
+        echo -e "${GREEN} 6. 设置 SSH 密钥登录${RESET}"
+        echo -e "${GREEN}----------------------------------------${RESET}"
+        echo -e "${GREEN} 7. 搭建 Sing-Box 节点${RESET}"
+        echo -e "${GREEN} 8. 安装 S-ui${RESET}"
+        echo -e "${GREEN} 9. 安装 3X-ui${RESET}"
+        echo -e "${GREEN}----------------------------------------${RESET}"
+        echo -e "${GREEN} 88. 退出${RESET}"
+        echo -e "${GREEN} 00. 更新脚本${RESET}"
+        echo -e "${CYAN}========================================${RESET}"
+        read -p "请输入选项: " option
+        case $option in
+            1)
+                show_system_info
+                ;;
+            2)
+                clean_system
+                ;;
+            3)
+                change_hostname
+                ;;
+            4)
+                optimize_dns
+                ;;
+            5)
+                set_network_priority
+                ;;
+            6)
+                setup_ssh_key
+                ;;
+            7)
+                setup_singbox
+                ;;
+            8)
+                install_sui
+                ;;
+            9)
+                install_3xui
+                ;;
+            00)
+                update_script
+                ;;
+            88)
+                exit
+                ;;
+            *)
+                echo "无效选项，请重新输入。"
+                ;;
+        esac
+        read -n 1 -s -r -p "按任意键继续..."
+    done
 }
+# 检查并安装缺失的依赖
+function install_dependencies() {
+    for dep in "${required_dependencies[@]}"; do
+        if ! dpkg -l | grep -q "^ii  $dep"; then
+            echo "$dep 未安装，正在安装..."
+            sudo apt update && sudo apt install -y "$dep"
+        else
+            echo "$dep 已经安装"
+        fi
+    done
+}
+function wait_for_key_to_main_menu() {
+    echo -n "按任意键返回主菜单..."
+    read -n 1 -s
+    clear
+    show_main_menu
+}
+# 查询系统信息
+function show_system_info() {
+    # 主机名
+    hostname_info=$(hostname)
+
+    # 操作系统和版本
+    os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
+
+    # Linux内核版本
+    kernel_info=$(uname -r)
+
+    # CPU架构和型号
+    cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_model=$(lscpu | grep "Model name" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_cores=$(lscpu | grep "CPU(s)" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_freq=$(lscpu | grep "CPU MHz" | awk -F: '{print $2}' | sed 's/^ *//')
+
+    # 系统负载
+    load_info=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^ *//')
+
+    # 内存使用情况
+    memory_info=$(free -h | grep Mem | awk '{print $3 "/" $2 " (" $3/$2*100 "%)"}')
+
+    # 硬盘使用情况
+    disk_info=$(df -h | grep '/$' | awk '{print $3 "/" $2 " (" $5 ")"}')
+
+    # 网络接收和发送量
+    net_info=$(vnstat --oneline | awk -F\; '{print "接收: " $2 " 发送: " $3}')
+
+    # 网络算法
+    net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+
+    # 运营商信息
+    ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
+
+    # IP 地址
+    ip_addr=$(hostname -I)
+
+    # DNS 地址
+    dns_info=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}')
+
+    # 地理位置和时区
+    geo_info=$(curl -s http://ip-api.com/json | jq -r '.city', '.country')
+    timezone=$(timedatectl show --property=Timezone --value)
+
+    # 系统运行时间
+    uptime_info=$(uptime -p)
+
+    # 当前时间
+    current_time=$(date "+%Y-%m-%d %H:%M:%S")
+
+    # 输出所有信息
+    echo "------------- 系统信息查询 -------------"
+    echo "主机名:       $hostname_info"
+    echo "系统版本:     $os_info"
+    echo "Linux版本:    $kernel_info"
+    echo "------------------------------------"
+    echo "CPU架构:      $cpu_arch"
+    echo "CPU型号:      $cpu_model"
+    echo "CPU核心数:    $cpu_cores"
+    echo "CPU频率:      $cpu_freq GHz"
+    echo "------------------------------------"
+    echo "CPU占用:      $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')"
+    echo "系统负载:     $load_info"
+    echo "物理内存:     $memory_info"
+    echo "硬盘占用:     $disk_info"
+    echo "------------------------------------"
+    echo "总接收:       $(echo $net_info | awk '{print $2}')"
+    echo "总发送:       $(echo $net_info | awk '{print $4}')"
+    echo "------------------------------------"
+    echo "网络算法:     $net_algo"
+    echo "------------------------------------"
+    echo "运营商:       $ip_info"
+    echo "IPv4地址:     $ip_addr"
+    echo "DNS地址:      $dns_info"
+    echo "地理位置:     $geo_info"
+    echo "系统时间:     $timezone $current_time"
+    echo "------------------------------------"
+    echo "运行时长:     $uptime_info"
+    echo "------------------------------------"
+    wait_for_key_to_main_menu
+}
+
 
 # 清理系统
 function clean_system() {
@@ -282,64 +321,4 @@ function install_3xui() {
     rm install.sh
 }
 
-# 主菜单
-while true; do
-    clear
-    echo -e "${CYAN}========================================${RESET}"
-    echo -e "${CYAN}         Jcole 的 VPS 管理工具       ${RESET}"
-    echo -e "${CYAN}========================================${RESET}"
-    echo -e "${GREEN} 1. 显示本机信息${RESET}"
-    echo -e "${GREEN} 2. 系统清理${RESET}"
-    echo -e "${GREEN} 3. 修改主机名${RESET}"
-    echo -e "${GREEN} 4. 优化 DNS${RESET}"
-    echo -e "${GREEN} 5. 设置网络优先级${RESET}"
-    echo -e "${GREEN} 6. 设置 SSH 密钥登录${RESET}"
-    echo -e "${GREEN}----------------------------------------${RESET}"
-    echo -e "${GREEN} 7. 搭建 Sing-Box 节点${RESET}"
-    echo -e "${GREEN} 8. 安装 S-ui${RESET}"
-    echo -e "${GREEN} 9. 安装 3X-ui${RESET}"
-    echo -e "${GREEN}----------------------------------------${RESET}"
-    echo -e "${GREEN} 88. 退出${RESET}"
-    echo -e "${GREEN} 00. 更新脚本${RESET}"
-    echo -e "${CYAN}========================================${RESET}"
-    read -p "请输入选项: " option
-    case $option in
-        1)
-            show_system_info
-            ;;
-        2)
-            clean_system
-            ;;
-        3)
-            change_hostname
-            ;;
-        4)
-            optimize_dns
-            ;;
-        5)
-            set_network_priority
-            ;;
-        6)
-            setup_ssh_key
-            ;;
-        7)
-            setup_singbox
-            ;;
-        8)
-            install_sui
-            ;;
-        9)
-            install_3xui
-            ;;
-        00)
-            update_script
-            ;;
-        88)
-            exit
-            ;;
-        *)
-            echo "无效选项，请重新输入。"
-            ;;
-    esac
-    read -n 1 -s -r -p "按任意键继续..."
-done
+show_main_menu
