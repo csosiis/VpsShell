@@ -30,10 +30,11 @@ function show_main_menu() {
         echo -e "${GREEN} 5. 设置网络优先级${RESET}"
         echo -e "${GREEN} 6. 设置 SSH 密钥登录${RESET}"
         echo -e "${GREEN} 7. 设置系统时区${RESET}"
+        echo -e "${GREEN} 8. 设置快捷键${RESET}"
         echo -e "${GREEN}----------------------------------------${RESET}"
-        echo -e "${GREEN} 8. 搭建 Sing-Box 节点${RESET}"
-        echo -e "${GREEN} 9. 安装 S-ui${RESET}"
-        echo -e "${GREEN} 10. 安装 3X-ui${RESET}"
+        echo -e "${GREEN} 9. 搭建 Sing-Box 节点${RESET}"
+        echo -e "${GREEN} 10. 安装 S-ui${RESET}"
+        echo -e "${GREEN} 11. 安装 3X-ui${RESET}"
         echo -e "${GREEN}----------------------------------------${RESET}"
         echo -e "${GREEN} 88. 退出${RESET}"
         echo -e "${GREEN} 00. 更新脚本${RESET}"
@@ -62,12 +63,15 @@ function show_main_menu() {
                 set_timezone
                 ;;
             8)
-                setup_singbox
+                set_shortcut
                 ;;
             9)
-                install_sui
+                setup_singbox
                 ;;
             10)
+                install_sui
+                ;;
+            11)
                 install_3xui
                 ;;
             00)
@@ -101,7 +105,7 @@ function wait_for_key_to_main_menu() {
     show_main_menu
 }
 # 查询系统信息
-show_system_info() {
+function show_system_info() {
     # 主机名
     hostname_info=$(hostname)
 
@@ -429,8 +433,40 @@ function set_timezone() {
     new_timezone=$(timedatectl show --property=Timezone --value)
     echo -e "${CYAN}当前系统时区已更新为: ${RESET}$new_timezone"
 }
+#!/bin/bash
 
+# 设置快捷键执行脚本的方法
+function set_shortcut() {
+    # 获取用户输入的快捷键和脚本路径
+    local shortcut_key=$1
+    local script_path=$2
 
+    # 检查脚本是否存在
+    if [[ ! -f "$script_path" ]]; then
+        echo "脚本文件不存在: $script_path"
+        return 1
+    fi
+
+    # 获取用户的bashrc文件路径
+    local bashrc_file="$HOME/.bashrc"
+
+    # 检查 .bashrc 文件是否存在
+    if [[ ! -f "$bashrc_file" ]]; then
+        echo "未找到 .bashrc 文件"
+        return 1
+    fi
+
+    # 创建 bind 命令
+    local bind_command="bind '\"\\C-$shortcut_key\":\"$script_path\\n\"'"
+
+    # 将 bind 命令添加到 .bashrc 文件
+    echo "$bind_command" >> "$bashrc_file"
+
+    # 使修改生效
+    source "$bashrc_file"
+
+    echo "快捷键 Ctrl + $shortcut_key 已设置为执行脚本: $script_path"
+}
 # 搭建 Sing-Box 节点
 function setup_singbox() {
     echo "开始搭建 sing-sox 节点... "
