@@ -241,18 +241,45 @@ function update_script() {
 
 # 优化 DNS
 function optimize_dns() {
-   echo -e "${CYAN}优化DNS地址...${RESET}"
-    # 设置优化后的 DNS 地址
-    sudo bash -c 'echo "nameserver 1.1.1.1" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2a00:1098:2b::1" > /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2a00:1098:2c::1" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2a01:4f8:c2c:123f::1" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2606:4700:4700::1111" >> /etc/resolv.conf'
-    sudo bash -c 'echo "nameserver 2001:4860:4860::8888" >> /etc/resolv.conf'
-    echo -e "${GREEN}DNS优化完成！${RESET}
-    "
+    echo -e "${CYAN}优化DNS地址...${RESET}"
+
+    # 检查IPv6支持
+    ipv6_support=$(ping6 -c 1 google.com > /dev/null 2>&1; echo $?)
+
+    # 清空当前的 DNS 配置文件
+    sudo bash -c 'echo "" > /etc/resolv.conf'
+
+    # 如果支持IPv6，配置IPv6 DNS 地址（优先）
+    if [ $ipv6_support -eq 0 ]; then
+        echo -e "${CYAN}检测到IPv6支持，配置IPv6优先的DNS...${RESET}"
+        # 配置IPv6 DNS 地址
+        sudo bash -c 'echo "nameserver 2a00:1098:2b::1" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 2a00:1098:2c::1" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 2a01:4f8:c2c:123f::1" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 2606:4700:4700::1111" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 2001:4860:4860::8888" >> /etc/resolv.conf'
+
+        # 配置IPv4 DNS 地址（备用）
+        sudo bash -c 'echo "nameserver 1.1.1.1" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
+
+    else
+        # 如果不支持IPv6，则只配置IPv4 DNS 地址
+        echo -e "${CYAN}未检测到IPv6支持，配置IPv4 DNS...${RESET}"
+        # 配置IPv4 DNS 地址
+        sudo bash -c 'echo "nameserver 1.1.1.1" >> /etc/resolv.conf'
+        sudo bash -c 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
+    fi
+
+    # 输出当前的DNS配置
+    echo -e "${CYAN}当前的DNS配置如下：${RESET}"
+    cat /etc/resolv.conf
+
+    # 提示DNS优化完成
+    echo -e "${GREEN}DNS优化完成！${RESET}"
 }
+
+
 
 # 设置网络优先级
 function set_network_priority() {
