@@ -92,7 +92,6 @@ function wait_for_key_to_main_menu() {
 }
 # 查询系统信息
 function show_system_info() {
-    clear
     # 主机名
     hostname_info=$(hostname)
 
@@ -141,7 +140,7 @@ function show_system_info() {
 
     # 当前时间
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
-
+    clear
     # 输出所有信息
     echo "------------- 系统信息查询 -------------"
     echo "主机名:       $hostname_info"
