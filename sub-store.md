@@ -214,7 +214,7 @@ nginx -s reload
 ##### 8.sub-store访问地址
 
 ```
-https://yumin.com/?api=https://yumin.com/9vUgbmi2oP5v0FevHvuW
+https://haxus3.wiitwo.eu.org/?api=https://haxus3.wiitwo.eu.org/468XWoVoM0JEEZtJcC4Lvgsumo
 ```
 
 
