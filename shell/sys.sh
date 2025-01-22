@@ -183,7 +183,6 @@ show_system_info() {
     wait_for_key_to_main_menu
 }
 
-
 # 清理系统
 function clean_system() {
     echo "正在清理无用文件..."
@@ -359,33 +358,78 @@ function set_timezone() {
     echo -e "${CYAN}当前系统时区是: ${RESET}$current_timezone"
 
     # 提供时区选择列表
-    echo -e "${CYAN}请选择新的时区（例如：Asia/Shanghai）:${RESET}"
-    echo -e "以下是一些常见时区的示例："
-    echo -e "  1. Asia/Shanghai"
-    echo -e "  2. Europe/London"
-    echo -e "  3. America/New_York"
-    echo -e "  4. Australia/Sydney"
-    echo -e "  5. Asia/Tokyo"
-    echo -e "  6. UTC"
+    echo -e "${CYAN}请选择新的时区：${RESET}"
+    echo -e "1. Asia/Shanghai (上海)"
+    echo -e "2. Europe/London (伦敦)"
+    echo -e "3. America/New_York (纽约)"
+    echo -e "4. Australia/Sydney (悉尼)"
+    echo -e "5. Asia/Tokyo (东京)"
+    echo -e "6. UTC (协调世界时)"
+    echo -e "7. Europe/Berlin (柏林)"
+    echo -e "8. Africa/Nairobi (内罗毕)"
+    echo -e "9. America/Los_Angeles (洛杉矶)"
+    echo -e "10. Asia/Kolkata (加尔各答)"
+    echo -e "11. Europe/Paris (巴黎)"
+    echo -e "12. America/Chicago (芝加哥)"
 
-    # 让用户选择时区
-    read -p "请输入时区（例如：Asia/Shanghai）： " timezone_choice
+    # 获取用户输入的选项
+    read -p "请输入对应的数字选择时区: " timezone_choice
 
-    # 检查输入的时区是否有效
-    if timedatectl list-timezones | grep -q "$timezone_choice"; then
-        # 设置新的时区
-        sudo timedatectl set-timezone "$timezone_choice"
+    # 设置对应的时区
+    case $timezone_choice in
+        1)
+            timezone="Asia/Shanghai"
+            ;;
+        2)
+            timezone="Europe/London"
+            ;;
+        3)
+            timezone="America/New_York"
+            ;;
+        4)
+            timezone="Australia/Sydney"
+            ;;
+        5)
+            timezone="Asia/Tokyo"
+            ;;
+        6)
+            timezone="UTC"
+            ;;
+        7)
+            timezone="Europe/Berlin"
+            ;;
+        8)
+            timezone="Africa/Nairobi"
+            ;;
+        9)
+            timezone="America/Los_Angeles"
+            ;;
+        10)
+            timezone="Asia/Kolkata"
+            ;;
+        11)
+            timezone="Europe/Paris"
+            ;;
+        12)
+            timezone="America/Chicago"
+            ;;
+        *)
+            echo -e "${RED}无效的选项，请重新选择。${RESET}"
+            return
+            ;;
+    esac
 
-        # 确认设置成功
-        echo -e "${GREEN}时区已成功设置为：${RESET}$timezone_choice"
-    else
-        echo -e "${RED}无效的时区输入，请检查并重试。${RESET}"
-    fi
+    # 设置新的时区
+    sudo timedatectl set-timezone "$timezone"
+
+    # 确认设置成功
+    echo -e "${GREEN}时区已成功设置为：${RESET}$timezone"
 
     # 输出新的时区
     new_timezone=$(timedatectl show --property=Timezone --value)
     echo -e "${CYAN}当前系统时区已更新为: ${RESET}$new_timezone"
 }
+
 
 # 搭建 Sing-Box 节点
 function setup_singbox() {
