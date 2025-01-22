@@ -91,7 +91,7 @@ function wait_for_key_to_main_menu() {
     show_main_menu
 }
 # 查询系统信息
-function show_system_info() {
+show_system_info() {
     # 主机名
     hostname_info=$(hostname)
 
@@ -142,34 +142,34 @@ function show_system_info() {
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     clear
     # 输出所有信息
-    echo "------------- 系统信息查询 -------------"
-    echo "主机名:       $hostname_info"
-    echo "系统版本:     $os_info"
-    echo "Linux版本:    $kernel_info"
-    echo "------------------------------------"
-    echo "CPU架构:      $cpu_arch"
-    echo "CPU型号:      $cpu_model"
-    echo "CPU核心数:    $cpu_cores"
-    echo "CPU频率:      $cpu_freq GHz"
-    echo "------------------------------------"
-    echo "CPU占用:      $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')"
-    echo "系统负载:     $load_info"
-    echo "物理内存:     $memory_info"
-    echo "硬盘占用:     $disk_info"
-    echo "------------------------------------"
-    echo "总接收:       $(echo $net_info | awk '{print $2}')"
-    echo "总发送:       $(echo $net_info | awk '{print $4}')"
-    echo "------------------------------------"
-    echo "网络算法:     $net_algo"
-    echo "------------------------------------"
-    echo "运营商:       $ip_info"
-    echo "IPv4地址:     $ip_addr"
-    echo "DNS地址:      $dns_info"
-    echo "地理位置:     $geo_info"
-    echo "系统时间:     $timezone $current_time"
-    echo "------------------------------------"
-    echo "运行时长:     $uptime_info"
-    echo "------------------------------------"
+    echo -e "${CYAN}------------- 系统信息查询 -------------${RESET}"
+    echo -e "${GREEN}主机名:       ${YELLOW}$hostname_info${RESET}"
+    echo -e "${GREEN}系统版本:     ${YELLOW}$os_info${RESET}"
+    echo -e "${GREEN}Linux版本:    ${YELLOW}$kernel_info${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}CPU架构:      ${YELLOW}$cpu_arch${RESET}"
+    echo -e "${GREEN}CPU型号:      ${YELLOW}$cpu_model${RESET}"
+    echo -e "${GREEN}CPU核心数:    ${YELLOW}$cpu_cores${RESET}"
+    echo -e "${GREEN}CPU频率:      ${YELLOW}$cpu_freq GHz${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}CPU占用:      ${YELLOW}$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')${RESET}"
+    echo -e "${GREEN}系统负载:     ${YELLOW}$load_info${RESET}"
+    echo -e "${GREEN}物理内存:     ${YELLOW}$memory_info${RESET}"
+    echo -e "${GREEN}硬盘占用:     ${YELLOW}$disk_info${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}总接收:       ${YELLOW}$(echo $net_info | awk '{print $2}')${RESET}"
+    echo -e "${GREEN}总发送:       ${YELLOW}$(echo $net_info | awk '{print $4}')${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}网络算法:     ${YELLOW}$net_algo${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}运营商:       ${YELLOW}$ip_info${RESET}"
+    echo -e "${GREEN}IPv4地址:     ${YELLOW}$ip_addr${RESET}"
+    echo -e "${GREEN}DNS地址:      ${YELLOW}$dns_info${RESET}"
+    echo -e "${GREEN}地理位置:     ${YELLOW}$geo_info${RESET}"
+    echo -e "${GREEN}系统时间:     ${YELLOW}$timezone $current_time${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
+    echo -e "${GREEN}运行时长:     ${YELLOW}$uptime_info${RESET}"
+    echo -e "${CYAN}------------------------------------${RESET}"
     wait_for_key_to_main_menu
 }
 
