@@ -29,10 +29,11 @@ function show_main_menu() {
         echo -e "${GREEN} 4. 优化 DNS${RESET}"
         echo -e "${GREEN} 5. 设置网络优先级${RESET}"
         echo -e "${GREEN} 6. 设置 SSH 密钥登录${RESET}"
+        echo -e "${GREEN} 7. 设置系统时区${RESET}"
         echo -e "${GREEN}----------------------------------------${RESET}"
-        echo -e "${GREEN} 7. 搭建 Sing-Box 节点${RESET}"
-        echo -e "${GREEN} 8. 安装 S-ui${RESET}"
-        echo -e "${GREEN} 9. 安装 3X-ui${RESET}"
+        echo -e "${GREEN} 8. 搭建 Sing-Box 节点${RESET}"
+        echo -e "${GREEN} 9. 安装 S-ui${RESET}"
+        echo -e "${GREEN} 10. 安装 3X-ui${RESET}"
         echo -e "${GREEN}----------------------------------------${RESET}"
         echo -e "${GREEN} 88. 退出${RESET}"
         echo -e "${GREEN} 00. 更新脚本${RESET}"
@@ -58,12 +59,15 @@ function show_main_menu() {
                 setup_ssh_key
                 ;;
             7)
-                setup_singbox
+                set_timezone
                 ;;
             8)
-                install_sui
+                setup_singbox
                 ;;
             9)
+                install_sui
+                ;;
+            10)
                 install_3xui
                 ;;
             00)
@@ -296,8 +300,6 @@ function optimize_dns() {
     echo -e "${GREEN}DNS优化完成！${RESET}"
 }
 
-
-
 # 设置网络优先级
 function set_network_priority() {
     echo "请选择网络优先级设置:"
@@ -346,6 +348,43 @@ function setup_ssh_key() {
     sudo systemctl restart sshd  # 重启 SSH 服务
 
     echo "SSH 密钥登录设置完成。"
+}
+
+# 设置系统时区
+function set_timezone() {
+    echo -e "${CYAN}设置系统时区...${RESET}"
+
+    # 显示当前时区
+    current_timezone=$(timedatectl show --property=Timezone --value)
+    echo -e "${CYAN}当前系统时区是: ${RESET}$current_timezone"
+
+    # 提供时区选择列表
+    echo -e "${CYAN}请选择新的时区（例如：Asia/Shanghai）:${RESET}"
+    echo -e "以下是一些常见时区的示例："
+    echo -e "  1. Asia/Shanghai"
+    echo -e "  2. Europe/London"
+    echo -e "  3. America/New_York"
+    echo -e "  4. Australia/Sydney"
+    echo -e "  5. Asia/Tokyo"
+    echo -e "  6. UTC"
+
+    # 让用户选择时区
+    read -p "请输入时区（例如：Asia/Shanghai）： " timezone_choice
+
+    # 检查输入的时区是否有效
+    if timedatectl list-timezones | grep -q "$timezone_choice"; then
+        # 设置新的时区
+        sudo timedatectl set-timezone "$timezone_choice"
+
+        # 确认设置成功
+        echo -e "${GREEN}时区已成功设置为：${RESET}$timezone_choice"
+    else
+        echo -e "${RED}无效的时区输入，请检查并重试。${RESET}"
+    fi
+
+    # 输出新的时区
+    new_timezone=$(timedatectl show --property=Timezone --value)
+    echo -e "${CYAN}当前系统时区已更新为: ${RESET}$new_timezone"
 }
 
 # 搭建 Sing-Box 节点
