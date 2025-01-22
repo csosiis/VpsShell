@@ -23,8 +23,8 @@ else
 fi
 
 # 获取用户输入的域名
-read -p "请输入 VLess 域名 (已解析在CF并且开启小黄云): " VLESS_DOMAIN
-read -p "请输入 Hysteria2 域名 (已解析在CF并且没有开启小黄云): " HYSTERIA2_DOMAIN
+read -p "请输入 VLess 域名 (已解析在Cloudflare，注意：如果开启了DNS代理（小黄云）需端口回源): " VLESS_DOMAIN
+read -p "请输入 Hysteria2 域名 (已解析在CF并且没有开启DNS代理（小黄云): " HYSTERIA2_DOMAIN
 
 # 获取端口，如果没有输入则使用默认值
 read -p "请输入 VLess 端口 (默认 2053): " PORT2
@@ -34,7 +34,7 @@ read -p "请输入 Hysteria 端口 (默认 23460): " PORT3
 PORT3=${PORT3:-23460}  # 默认值为 23460
 
 # 获取自定义节点名称
-read -p "请输入自定义节点名称: " NODE_NAME
+read -p "请输入自定义节点名称(例如：US1，后面会自动加上协议名：US1-Vless): " NODE_NAME
 
 # 生成 UUID 和 Hysteria2 随机密码
 UUID=$(cat /proc/sys/kernel/random/uuid)
@@ -184,8 +184,8 @@ PUSH_TO_SERVER=${PUSH_TO_SERVER:-n}  # 如果没有输入，默认选择 n
 
 if [[ "$PUSH_TO_SERVER" == "y" || "$PUSH_TO_SERVER" == "Y" ]]; then
     # 获取 Token 和修改名称
-    read -p "请输入验证 Token: " TOKEN
-    read -p "请输入修改的名称 (例如用于修改节点名称): " NAME
+    read -p "请输入Sub-Store验证 Token: " TOKEN
+    read -p "请输入Sub-Store订阅名称: " NAME
 
     # 节点信息
     NODE_INFO="{
