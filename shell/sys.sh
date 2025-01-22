@@ -92,6 +92,7 @@ function wait_for_key_to_main_menu() {
 }
 # 查询系统信息
 function show_system_info() {
+    clear
     # 主机名
     hostname_info=$(hostname)
 
