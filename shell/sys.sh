@@ -9,7 +9,7 @@ CYAN='\033[1;36m'
 RESET='\033[0m'
 
 # 定义所需的依赖项
-required_dependencies=("lsb-release" "curl" "hostname" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig")
+required_dependencies=("lsb-release" "curl" "hostname" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig" "jq")
 
 function show_main_menu() {
     while true; do
