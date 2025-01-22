@@ -190,9 +190,26 @@ function clean_system() {
 
 # 修改服务器名字
 function change_hostname() {
+    echo -e "${CYAN}修改主机名...${RESET}"
+    # 输入新主机名
     read -p "请输入新的主机名: " new_hostname
-    sudo hostnamectl set-hostname $new_hostname
-    echo "主机名已修改为 $new_hostname。"
+    # 获取当前的主机名
+    current_hostname=$(hostname)
+    # 检查新的主机名是否与当前主机名相同
+    if [ "$new_hostname" == "$current_hostname" ]; then
+        echo -e "${YELLOW}新主机名与当前主机名相同，无需修改。${RESET}"
+        return
+    fi
+    # 修改当前的主机名
+    sudo hostnamectl set-hostname "$new_hostname"
+    # 更新 /etc/hostname 文件
+    echo "$new_hostname" | sudo tee /etc/hostname > /dev/null
+    # 更新 /etc/hosts 文件
+    sudo sed -i "s/^127.0.1.1[[:space:]]\+${current_hostname}/127.0.1.1\t$new_hostname/" /etc/hosts
+    # 输出修改后的主机名
+    echo -e "${CYAN}主机名修改完成！新的主机名是：${RESET} $new_hostname"
+    # 显示当前的主机名
+    echo -e "${CYAN}当前的主机名是：${RESET} $(hostname)"
 }
 
 # 更新脚本
