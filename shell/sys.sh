@@ -646,12 +646,12 @@ function apply_ssl_certificate() {
     local stopped_services=()  # 用来记录停止的服务
 
     # 使用 DNS 查询验证域名是否能解析到本机
-    if ! nslookup "$domain_name" > /dev/null 2>&1; then
-        echo "无法解析该域名，请检查域名是否正确配置并解析到本机。"
-        read -n 1 -s -r -p "按任意键返回新增节点菜单..."
-        add_node  # 返回新增节点菜单
-        return 1
-    fi
+    # if ! nslookup "$domain_name" > /dev/null 2>&1; then
+    #     echo "无法解析该域名，请检查域名是否正确配置并解析到本机。"
+    #     read -n 1 -s -r -p "按任意键返回新增节点菜单..."
+    #     add_node  # 返回新增节点菜单
+    #     return 1
+    # fi
 
     # 检查是否安装 lsof，如果没有安装，提示并安装
     if ! command -v lsof &> /dev/null; then
