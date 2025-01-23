@@ -181,7 +181,6 @@ server {
     listen [::]:80 ;
     server_name $DOMAIN_NAME;
     return 404; # managed by Certbot
-
 }
 EOF
 
