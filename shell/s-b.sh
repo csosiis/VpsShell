@@ -428,7 +428,6 @@ function add_node() {
     esac
 }
 
-
 # 处理节点配置生成链接
 function add_protocol_node() {
     # 获取协议名称作为参数
@@ -676,11 +675,70 @@ function add_socks5_node() {
     # 返回主菜单
     read -p "按 Enter 键返回主菜单..." && show_menu
 }
+######### 节点推送部分开始 ###########
+# 子菜单选择函数
+function show_action_menu() {
+    echo -e "\n请选择操作："
+    echo -e "\n\e[32m1.查看节点     2.新增节点     3. 推送节点     4. 删除节点     00. 返回主菜单   88. 退出脚本\e[0m\n"
+    read -p "请输入操作编号: " action
 
-function uninstall_telegram_config() {
-    # 删除 Telegram 配置信息
-    rm -f /etc/sing-box/telegram-bot-config.txt
-    echo -e "\nTelegram 配置信息已删除。"
+    case $action in
+        1)
+            view_node_info
+            ;;
+        2)
+            add_node
+            ;;
+        3)
+            push_nodes
+            ;;
+        4)
+            delete_nodes
+            ;;
+        00)
+            show_menu
+            ;;
+        88)
+            exit
+            ;;
+        *)
+            echo -e "\n\e[31m无效选择，请重新选择！\e[0m"
+            show_action_menu  # 重新显示菜单
+            ;;
+    esac
+}
+# 统一的解析节点函数
+function parse_node() {
+    local line=$1
+    local node_protocol=$(echo "$line" | awk -F' ' '{print $1}')
+    local node_name=""
+    local tag=""
+
+    if [[ "$node_protocol" =~ ^vmess:// ]]; then
+        # 对 Vmess 链接进行解码
+        clean_line=$(echo "$line" | tr -d '\r\n')
+        decoded_vmess=$(echo "$clean_line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null)
+
+        if [[ $? -ne 0 ]]; then
+            echo -e "\e[31mVmess 链接解码失败：$line\e[0m"
+            return 1
+        fi
+
+        # 提取节点名称和 tag
+        node_name=$(echo "$decoded_vmess" | jq -r '.ps // "默认名称"')
+        tag=$(echo "$decoded_vmess" | jq -r '.tag // ""')
+
+        # 如果没有 tag，则使用节点名称作为默认 tag
+        if [[ -z "$tag" ]]; then
+            tag="$node_name"
+        fi
+    else
+        # 非 Vmess 协议，直接使用行内容
+        node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+        tag=$node_name
+    fi
+
+    echo "$node_name"
 }
 # 选择节点的函数
 function select_nodes() {
@@ -702,37 +760,7 @@ function select_nodes() {
             # 提示选择要推送的单个节点
             echo -e "\n请选择要推送的节点（用空格分隔多个节点）："
             for i in "${!node_lines[@]}"; do
-                line="${node_lines[$i]}"
-                node_protocol=$(echo "$line" | awk -F' ' '{print $1}')  # 假设协议在节点信息的第一部分
-                node_name=""
-                tag=""
-
-                if [[ "$node_protocol" =~ ^vmess:// ]]; then
-                    # 清理回车和换行符
-                    clean_line=$(echo "$line" | tr -d '\r\n')
-
-                    # 对 Vmess 链接进行解码
-                    decoded_vmess=$(echo "$clean_line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null)
-
-                    if [[ $? -ne 0 ]]; then
-                        echo -e "\e[31mVmess 链接解码失败：$line\e[0m"
-                        return 1
-                    fi
-
-                    # 提取节点名称和 tag
-                    node_name=$(echo "$decoded_vmess" | jq -r '.ps // "默认名称"')
-                    tag=$(echo "$decoded_vmess" | jq -r '.tag // ""')  # 如果没有 tag，使用默认值
-
-                    # 如果没有 tag，则使用节点名称作为默认 tag
-                    if [[ -z "$tag" ]]; then
-                        tag="$node_name"
-                    fi
-                else
-                    # 非 Vmess 协议，直接使用行内容
-                    # 其他类型的节点直接使用 # 后面的内容
-                    node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-                    tag=$node_name
-                fi
+                node_name=$(parse_node "${node_lines[$i]}")
                 echo -e "\n\e[32m$((i + 1)). $node_name\e[0m"
             done
             echo
@@ -742,21 +770,17 @@ function select_nodes() {
 
         2)
             # 推送所有节点
-            selected_nodes=()  # 初始化空数组
-            for i in "${!node_lines[@]}"; do
-                selected_nodes+=($((i + 1)))  # 添加所有节点的索引
-            done
-
-            # 打印 selected_nodes 的内容
-            #echo "选中的节点编号：${selected_nodes[@]}"
-
+            selected_nodes=($(seq 1 ${#node_lines[@]}))  # 添加所有节点的索引
             ;;
+
         00)
             push_nodes
             ;;
+
         88)
             exit
             ;;
+
         *)
             echo -e "\e[31m无效的选择，返回主菜单\e[0m"
             show_menu  # 返回主菜单
@@ -767,88 +791,61 @@ function select_nodes() {
 function push_to_telegram() {
     select_nodes  # 调用选择节点的函数
 
-    # 打印选中的节点编号，确保选中的节点编号正确
-    #echo "选中的节点编号：${selected_nodes[@]}"
-
-    # 检查是否是第一次推送到 Telegram Bot
+    # 读取 Telegram Bot 配置信息
     if [[ ! -f "/etc/sing-box/telegram-bot-config.txt" ]]; then
         echo -e "\n第一次推送到 Telegram Bot，请输入 Telegram Bot 信息："
         echo -n "请输入 Telegram Bot API Token: "
         read tg_api_token
         echo -n "请输入 Telegram Chat ID: "
         read tg_chat_id
-        # 保存 Telegram Bot 配置信息
+        # 保存配置
         echo "tg_api_token=$tg_api_token" > /etc/sing-box/telegram-bot-config.txt
         echo "tg_chat_id=$tg_chat_id" >> /etc/sing-box/telegram-bot-config.txt
         echo -e "\nTelegram Bot 配置信息已保存。"
     else
-        # 读取已保存的 Telegram Bot 配置信息
         source /etc/sing-box/telegram-bot-config.txt
     fi
-
-    # 调试输出，确保读取的 chat_id 正确
-    echo -e "\n将使用以下 chat_id 进行推送：$tg_chat_id"
 
     # 如果选中推送所有节点，则确保选中的节点包含全部节点
     if [[ "$push_choice" == "2" ]]; then
         selected_nodes=($(seq 1 ${#node_lines[@]}))  # 推送所有节点
     fi
 
-    # 打印选中的节点编号（调试用）
-    #echo "选中的所有节点编号：${selected_nodes[@]}"
-
     # 推送选中的节点到 Telegram Bot
     for node_index in "${selected_nodes[@]}"; do
         node_index=$((node_index - 1))  # 调整为从0开始的索引
-        if [[ $node_index -ge 0 && $node_index -lt ${#node_lines[@]} ]]; then
-            node_info="${node_lines[$node_index]}"
+        node_info="${node_lines[$node_index]}"
 
-            # 判断是否是 Vmess 节点
-            if [[ "$node_info" =~ ^vmess:// ]]; then
-                clean_node=$(echo "$node_info" | sed 's/^vmess:\/\///')  # 移除前缀
-                decoded_node=$(echo "$clean_node" | base64 --decode)  # 解码 Base64
-
-                # 提取节点名称（ps字段）
-                node_name=$(echo "$decoded_node" | jq -r '.ps // "默认名称"')
-            else
-                # 处理其他类型节点
-                node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')  # 假设节点名称在#后面
-            fi
-
-            echo -e "\n推送节点：$node_name 到 Telegram Bot"
-            # 使用 curl 命令将节点推送到 Telegram Bot
-            response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
-                 -d chat_id="$tg_chat_id" \
-                 -d text="节点推送：$node_name - ${node_lines[$node_index]}")
-
-            # 判断推送是否成功
-            if [[ $(echo "$response" | jq -r '.ok') == "false" ]]; then
-                echo -e "\e[31m推送失败：${response}\e[0m"
-                echo -e "推送失败，是否需要重新配置 Telegram Bot 信息？（y/n）"
-                read user_response
-                if [[ "$user_response" == "y" || "$user_response" == "Y" ]]; then
-                    uninstall_telegram_config  # 删除旧的 Telegram 配置
-                    echo -e "已删除旧的配置，请重新输入 Telegram Bot 信息。"
-                    push_to_telegram  # 重新配置并执行推送
-                else
-                    echo "返回主菜单。"
-                    show_menu  # 返回主菜单
-                fi
-            else
-                echo -e "\n\e[32m节点推送成功！\e[0m"
-            fi
+        # 获取节点的完整链接
+        if [[ "$node_info" =~ ^vmess:// ]]; then
+            clean_node=$(echo "$node_info" | sed 's/^vmess:\/\///')  # 移除前缀
+            decoded_node=$(echo "$clean_node" | base64 --decode)  # 解码 Base64
+            node_name=$(echo "$decoded_node" | jq -r '.ps // "默认名称"')  # 提取名称
         else
-            echo -e "\e[31m无效的节点编号：$node_index\e[0m"
+            node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')  # 提取名称
+        fi
+
+        # 推送完整链接到 Telegram
+        #echo -e "\n推送节点链接：$node_info 到 Telegram Bot"
+        response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
+             -d chat_id="$tg_chat_id" \
+             -d text="$node_info")
+
+        # 判断推送是否成功
+        if [[ $(echo "$response" | jq -r '.ok') == "false" ]]; then
+            echo -e "\e[31m推送失败：${response}\e[0m"
+        else
+            echo -e "\n\e[32m节点链接推送成功！\e[0m"
         fi
     done
 
     show_action_menu
 }
-# 推送到Sub-Store
+# 推送到 Sub-Store 的函数
 function push_to_sub_store() {
     select_nodes  # 调用选择节点的函数
 
-    # 读取已保存的 Sub-Store 配置信息（如果存在）
+    # 读取 Sub-Store 配置信息
     if [[ -f "/etc/sing-box/sub-store-config.txt" ]]; then
         source /etc/sing-box/sub-store-config.txt
     else
@@ -858,26 +855,19 @@ function push_to_sub_store() {
         read -p "Sub-Store Subs: " sub_store_subs
     fi
 
-    # 遍历选中的节点
-    links=()  # 初始化一个空数组，用于存储所有节点的链接
+    # 遍历选中的节点，收集完整的节点链接
+    links=()
     for node_index in "${selected_nodes[@]}"; do
         node_index=$((node_index - 1))
-        if [[ $node_index -ge 0 && $node_index -lt ${#node_lines[@]} ]]; then
-            node_info="${node_lines[$node_index]}"
-            node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')
-            # 将节点的链接部分提取出来，并按换行符分割成数组
-            mapfile -t node_links <<< "$(echo "$node_info" | sed 's/^.*# //')"
-            # 将当前节点的链接添加到总的链接数组中
-            links+=("${node_links[@]}")
-        fi
+        node_info="${node_lines[$node_index]}"
+
+        # 获取节点的完整链接（不再只是名称）
+        node_links=$(echo "$node_info" | sed 's/^.*# //')
+        links+=("$node_links")
     done
 
-    # 将 links 数组中的元素用逗号分隔，并用双引号包裹
-    links_str=""
-    for link in "${links[@]}"; do
-      links_str="$links_str$link\n"
-    done
-
+    # 构建 Sub-Store JSON 数据
+    links_str=$(printf "%s\n" "${links[@]}")
     node_json="{
         \"token\": \"$sub_store_api_key\",
         \"name\": \"$sub_store_subs\",
@@ -891,37 +881,17 @@ function push_to_sub_store() {
 
     # 检查推送结果
     if [[ "$response" == "节点更新成功!" ]]; then
-        # 推送成功后才保存配置
+        # 保存配置信息
         echo "sub_store_url=$sub_store_url" > /etc/sing-box/sub-store-config.txt
         echo "sub_store_api_key=$sub_store_api_key" >> /etc/sing-box/sub-store-config.txt
         echo "sub_store_subs=$sub_store_subs" >> /etc/sing-box/sub-store-config.txt
         echo -e "\e[32m\n节点信息推送成功！\e[0m\n"
     else
         echo -e "\e[31m推送失败，服务器响应: $response\e[0m"
-        read -p "推送失败，是否重新配置 Sub-Store 信息? (y/n): " retry_choice
-        case $retry_choice in
-            y|Y)
-                # 重新配置 Sub-Store 信息
-                echo "请输入新的 Sub-Store 信息："
-                read -p "Sub-Store 地址: " sub_store_url
-                read -p "Sub-Store API 密钥: " sub_store_api_key
-                read -p "Sub-Store Subs: " sub_store_subs
-                push_to_sub_store  # 重新调用推送方法
-                ;;
-            n|N)
-                # 返回主菜单
-                show_menu
-                ;;
-            *)
-                echo "无效选择，返回主菜单..."
-                show_menu
-                ;;
-        esac
     fi
 
     show_action_menu
 }
-
 # 推送节点方法
 function push_nodes() {
     # 获取节点名称数组和节点链接数组
@@ -956,37 +926,7 @@ function push_nodes() {
             ;;
     esac
 }
-# 菜单选择方法
-function show_action_menu() {
-    echo -e "\n请选择操作："
-    echo -e "\n\e[32m1.查看节点     2.新增节点     3. 推送节点     4. 删除节点     00. 返回主菜单   88. 退出脚本\e[0m\n"
-    read -p "请输入操作编号: " action
-
-    case $action in
-        1)
-            view_node_info
-            ;;
-        2)
-            add_node
-            ;;
-        3)
-            push_nodes
-            ;;
-        4)
-            delete_nodes
-            ;;
-        00)
-            show_menu
-            ;;
-        88)
-            exit
-            ;;
-        *)
-            echo -e "\n\e[31m无效选择，请重新选择！\e[0m"
-            show_action_menu  # 重新显示菜单
-            ;;
-    esac
-}
+######### 节点推送部分结束 ###########
 
 # 显示节点信息
 function view_node_info() {
