@@ -222,19 +222,6 @@ function change_hostname() {
 # 更新脚本
 function update_script() {
     echo "正在更新脚本..."
-
-    # 检查 wget 是否存在
-    if ! command -v wget &> /dev/null; then
-        echo "wget 未安装，尝试使用 curl 下载文件..."
-        if ! command -v curl &> /dev/null; then
-            echo "curl 也未安装，请手动安装 wget 或 curl。"
-            return 1
-        fi
-        DOWNLOAD_CMD="curl -L -o sys.sh"
-    else
-        DOWNLOAD_CMD="wget -O sys.sh"
-    fi
-
     # 确认删除文件
     if [ -f sys.sh ]; then
         echo "正在删除旧的 sys.sh 文件..."
@@ -1339,23 +1326,17 @@ function push_to_telegram() {
 function push_to_sub_store() {
     select_nodes  # 调用选择节点的函数
 
-    if [[ ! -f "/etc/sing-box/sub-store-config.txt" ]]; then
+    # 读取已保存的 Sub-Store 配置信息（如果存在）
+    if [[ -f "/etc/sing-box/sub-store-config.txt" ]]; then
+        source /etc/sing-box/sub-store-config.txt
+    else
         echo "第一次推送到 Sub-Store，请输入 Sub-Store 信息："
         read -p "Sub-Store 地址: " sub_store_url
         read -p "Sub-Store API 密钥: " sub_store_api_key
         read -p "Sub-Store Subs: " sub_store_subs
-
-        # 保存 Sub-Store 配置信息
-        echo "sub_store_url=$sub_store_url" > /etc/sing-box/sub-store-config.txt
-        echo "sub_store_api_key=$sub_store_api_key" >> /etc/sing-box/sub-store-config.txt
-        echo "sub_store_subs=$sub_store_subs" >> /etc/sing-box/sub-store-config.txt
-    else
-        # 读取已保存的 Sub-Store 配置信息
-        source /etc/sing-box/sub-store-config.txt
     fi
 
     # 遍历选中的节点
-    #echo "选中的节点编号：${selected_nodes[@]}"
     links=()  # 初始化一个空数组，用于存储所有节点的链接
     for node_index in "${selected_nodes[@]}"; do
         node_index=$((node_index - 1))
@@ -1380,10 +1361,6 @@ function push_to_sub_store() {
         \"name\": \"$sub_store_subs\",
         \"link\": \"$links_str\"
     }"
-    #echo "$links_str"
-
-    # 打印调试信息
-    #echo -e "${GREEN}将节点信息推送到 Sub-Store: $sub_store_url${RESET}"
 
     # 推送到 Sub-Store
     response=$(curl -s -X POST "$sub_store_url" \
@@ -1391,10 +1368,33 @@ function push_to_sub_store() {
         -d "$node_json")
 
     # 检查推送结果
-    if [[ $(echo "$response") == "节点更新成功!" ]]; then
+    if [[ "$response" == "节点更新成功!" ]]; then
+        # 推送成功后才保存配置
+        echo "sub_store_url=$sub_store_url" > /etc/sing-box/sub-store-config.txt
+        echo "sub_store_api_key=$sub_store_api_key" >> /etc/sing-box/sub-store-config.txt
+        echo "sub_store_subs=$sub_store_subs" >> /etc/sing-box/sub-store-config.txt
         echo -e "\e[32m\n节点信息推送成功！\e[0m\n"
     else
         echo -e "\e[31m推送失败，服务器响应: $response\e[0m"
+        read -p "推送失败，是否重新配置 Sub-Store 信息? (y/n): " retry_choice
+        case $retry_choice in
+            y|Y)
+                # 重新配置 Sub-Store 信息
+                echo "请输入新的 Sub-Store 信息："
+                read -p "Sub-Store 地址: " sub_store_url
+                read -p "Sub-Store API 密钥: " sub_store_api_key
+                read -p "Sub-Store Subs: " sub_store_subs
+                push_to_sub_store  # 重新调用推送方法
+                ;;
+            n|N)
+                # 返回主菜单
+                show_menu
+                ;;
+            *)
+                echo "无效选择，返回主菜单..."
+                show_menu
+                ;;
+        esac
     fi
 
     show_action_menu
@@ -1437,7 +1437,7 @@ function push_nodes() {
 # 菜单选择方法
 function show_action_menu() {
     echo -e "\n请选择操作："
-    echo -e "\n\e[32m1.查看节点     2.新增节点     3. 推送节点     5. 删除节点     00. 返回主菜单   88. 退出脚本\e[0m\n"
+    echo -e "\n\e[32m1.查看节点     2.新增节点     3. 推送节点     4. 删除节点     00. 返回主菜单   88. 退出脚本\e[0m\n"
     read -p "请输入操作编号: " action
 
     case $action in
