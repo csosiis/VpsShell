@@ -2,34 +2,6 @@ import json
 import base64
 # 全局变量定义配置文件路径
 config_file="/etc/sing-box/config.json"
-
-# 输出函数
-function echo_color() {
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    WHITE='\033[1;37m'
-    NC='\033[0m' # 无色
-    local color=$1
-    local message=$2
-    case $color in
-        red)
-            echo -e "\n${RED}* $message ${NC}"
-            ;;
-        green)
-            echo -e "\n${GREEN}$message${NC}"
-            ;;
-        yellow)
-            echo -e "\n${YELLOW}* $message ${NC}"
-            ;;
-        white)
-            echo -e "\n${WHITE}$message${NC}"
-            ;;
-        *)
-            echo -e "\n${WHITE}$message${NC}"  # 默认白色
-            ;;
-    esac
-}
 # 主菜单
 function show_menu() {
     clear
@@ -63,16 +35,32 @@ function show_menu() {
         *) echo "无效的选择，请重新选择！" && read -p "按 Enter 键返回..." && show_menu ;;
     esac
 }
+
+# 安装缺失的依赖
+function install_dependencies() {
+    # 检查并安装 uuidgen
+    if ! command -v uuidgen &>/dev/null; then
+        echo "uuidgen 未找到，正在安装..."
+        apt-get update
+        apt-get install -y uuid-runtime
+    fi
+
+    # 检查并安装 jq
+    if ! command -v jq &>/dev/null; then
+        echo "jq 未找到，正在安装..."
+        apt-get update
+        apt-get install -y jq
+    fi
+}
 # 检查 Sing-Box 是否已安装
 function check_and_install_sing_box() {
     if ! command -v sing-box &> /dev/null; then
-        echo_color yellow "Sing-Box 尚未安装。"
-        echo
+        echo "Sing-Box 尚未安装。"
         read -p "您是否希望先安装 Sing-Box？(y/n): " install_choice
         if [[ "$install_choice" =~ ^[Yy]$ ]]; then
             install_sing_box
         else
-            echo_color white "按任意键返回主菜单..."
+            echo "按任意键返回主菜单..."
             read -n 1 -s -r
             show_menu
         fi
@@ -80,40 +68,28 @@ function check_and_install_sing_box() {
 }
 # 安装 Sing-Box
 function install_sing_box() {
-
     # 检查 Sing-Box 是否已安装
     if command -v sing-box &> /dev/null; then
-        echo_color green "Sing-Box 已经安装，跳过安装过程。"
-        echo
+        echo "Sing-Box 已经安装，跳过安装过程。"
         read -n 1 -s -r -p "按任意键返回主菜单..."
         show_menu  # 返回主菜单
     fi
 
-    echo_color green "Sing-Box 未安装，正在安装..."
-
-    # 检查 curl 是否已安装，如果没有则安装
-    if ! command -v curl &> /dev/null; then
-        echo_color green "curl 未安装，正在安装..."
-        apt update && apt install -y curl
-        if ! command -v curl &> /dev/null; then
-            echo_red "curl 安装失败，请检查网络或包管理器设置。"
-            exit 1
-        fi
-    fi
+    echo "Sing-Box 未安装，正在安装..."
 
     # 安装 Sing-Box
     if ! bash <(curl -fsSL https://sing-box.app/deb-install.sh) > install_log.txt 2>&1; then
-        echo_red "Sing-Box 安装失败，请检查 install_log.txt 文件。"
+        echo "Sing-Box 安装失败，请检查 install_log.txt 文件。"
         exit 1
     fi
 
     # 检查安装是否成功
     if ! command -v sing-box &> /dev/null; then
-        echo_red "Sing-Box 安装失败，无法找到 sing-box 命令。"
+        echo "Sing-Box 安装失败，无法找到 sing-box 命令。"
         exit 1
     fi
 
-    echo_color green "Sing-Box 安装成功！"
+    echo "Sing-Box 安装成功！"
 
     # 配置文件目录和文件路径
     config_dir="/etc/sing-box"
@@ -121,18 +97,18 @@ function install_sing_box() {
 
     # 创建配置目录
     if [ ! -d "$config_dir" ]; then
-        echo_color green "Sing-Box 配置目录不存在，正在创建..."
-        mkdir -p "$config_dir" || { echo_red "创建目录失败！"; exit 1; }
+        echo "Sing-Box 配置目录不存在，正在创建..."
+        mkdir -p "$config_dir" || { echo "创建目录失败！"; exit 1; }
     fi
 
     # 创建 config.json 文件
     if [ ! -f "$config_file" ]; then
-        #echo_color green "config.json 文件不存在，正在创建..."
-        touch "$config_file" || { echo_red "创建文件失败！"; exit 1; }
+        echo "config.json 文件不存在，正在创建..."
+        touch "$config_file" || { echo "创建文件失败！"; exit 1; }
     fi
 
     # 写入配置内容到 config.json
-    #echo_color green "正在创建 Sing-Box 配置文件..."
+    echo "正在创建 Sing-Box 配置文件..."
     cat > "$config_file" <<EOL
 {
   "log": {
@@ -163,32 +139,134 @@ function install_sing_box() {
 EOL
 
     if [ $? -ne 0 ]; then
-        echo_red "写入配置文件失败！"
+        echo "写入配置文件失败！"
         exit 1
     fi
 
-    #echo_color green "config.json 文件已创建并写入内容：$config_file"
+    echo "config.json 文件已创建并写入内容：$config_file"
 
     # 安装完成后返回主菜单
-    echo_color green "Sing-Box配置文件初始化完成！"
-    echo
+    echo "安装过程完成，返回主菜单"
     read -p "按 Enter 键返回主菜单..." && show_menu
 }
-# 安装缺失的依赖
-function install_dependencies() {
-    # 检查并安装 uuidgen
-    if ! command -v uuidgen &>/dev/null; then
-        echo "uuidgen 未找到，正在安装..."
-        apt-get update
-        apt-get install -y uuid-runtime
+# 申请域名证书并处理 80 端口被占用的情况
+function apply_ssl_certificate() {
+    local domain_name="$1"
+    local stopped_services=()  # 用来记录停止的服务
+
+    # 使用 DNS 查询验证域名是否能解析到本机
+    if ! nslookup "$domain_name" > /dev/null 2>&1; then
+        echo "无法解析该域名，请检查域名是否正确配置并解析到本机。"
+        read -n 1 -s -r -p "按任意键返回新增节点菜单..."
+        add_node  # 返回新增节点菜单
+        return 1
     fi
 
-    # 检查并安装 jq
-    if ! command -v jq &>/dev/null; then
-        echo "jq 未找到，正在安装..."
-        apt-get update
-        apt-get install -y jq
+    # 检查是否安装 lsof，如果没有安装，提示并安装
+    if ! command -v lsof &> /dev/null; then
+        echo "警告：lsof 工具未安装，无法检测端口占用。"
+        read -p "您是否希望安装 lsof 工具？ (y/n): " install_lsof
+        if [[ "$install_lsof" =~ ^[Yy]$ ]]; then
+            sudo apt update && sudo apt install -y lsof
+            echo "lsof 安装完成。"
+        else
+            echo "未安装 lsof，无法继续检测端口占用，跳过检测过程。"
+        fi
     fi
+
+    # 检查 80 端口是否被占用（包括 nginx 和 apache2）
+    if lsof -i:80 > /dev/null; then
+        echo "警告：80端口已被占用！"
+        echo "您可以选择以下解决方案："
+        echo "1. 停止占用 80 端口的服务（nginx 或 apache2）"
+        echo "2. 使用 DNS 验证"
+        echo "3. 使用 Webroot 插件"
+        read -p "请选择解决方案 (1/2/3): " choice
+        case $choice in
+            1)
+                # 停止占用 80 端口的服务
+                if systemctl is-active --quiet apache2; then
+                    echo "正在停止 apache2 服务..."
+                    systemctl stop apache2
+                    stopped_services+=("apache2")
+                fi
+                if systemctl is-active --quiet nginx; then
+                    echo "正在停止 nginx 服务..."
+                    systemctl stop nginx
+                    stopped_services+=("nginx")
+                fi
+                ;;
+            2)
+                # 使用 DNS 验证
+                certbot -d "$domain_name" --manual --preferred-challenges=dns certonly
+                return
+                ;;
+            3)
+                # 使用 Webroot 插件
+                read -p "请输入 Webroot 目录 (如：/var/www/html): " webroot_dir
+                certbot certonly --webroot -w "$webroot_dir" -d "$domain_name"
+                return
+                ;;
+            *)
+                echo "无效选择，退出。"
+                read -n 1 -s -r -p "按任意键返回新增节点菜单..."
+                add_node  # 返回新增节点菜单
+                return
+                ;;
+        esac
+    fi
+
+    # 确保 80 端口开放，释放 80 端口
+    if command -v ufw &> /dev/null; then
+        echo "正在释放 80 端口，确保域名验证通过..."
+        ufw allow 80/tcp
+    fi
+
+    # 使用 Certbot 申请证书
+    echo "正在申请证书..."
+    certbot certonly --standalone --preferred-challenges http -d "$domain_name"
+
+    # 检查证书是否成功申请
+    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
+    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
+
+    if [[ -f "$cert_path" && -f "$key_path" ]]; then
+        echo "证书申请成功！"
+        echo "证书路径：$cert_path"
+        echo "密钥路径：$key_path"
+    else
+        echo "证书申请失败，请检查日志。"
+        # 证书申请失败，重启停止的服务
+        if [[ ${#stopped_services[@]} -gt 0 ]]; then
+            for service in "${stopped_services[@]}"; do
+                echo "正在重启 $service 服务..."
+                systemctl start "$service"
+            done
+        fi
+        read -n 1 -s -r -p "按任意键返回新增节点菜单..."
+        add_node  # 返回新增节点菜单
+        return 1
+    fi
+
+    # 配置证书的自动续期
+    echo "配置证书自动续期..."
+    # 通过 cron 配置自动续期，每 12 小时检查证书是否需要续期
+    (crontab -l ; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+
+    # 完成证书申请并配置自动续期，返回
+    echo "证书配置和自动续期设置完成！"
+
+    # 重启之前停止的服务
+    if [[ ${#stopped_services[@]} -gt 0 ]]; then
+        for service in "${stopped_services[@]}"; do
+            echo "正在重启 $service 服务..."
+            systemctl start "$service"
+        done
+    fi
+
+    read -n 1 -s -r -p "按任意键返回新增节点菜单..."
+    add_node  # 返回新增节点菜单
+    return 0
 }
 # 生成随机端口号
 function generate_random_port() {
@@ -199,73 +277,36 @@ function generate_random_port() {
 function generate_random_password() {
     < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
 }
-
-# 申请域名证书并处理 80 端口被占用的情况
-function apply_ssl_certificate() {
-    local domain_name="$1"
-    local stopped_services=()  # 用来记录停止的服务
-
-    # 检测 Nginx 和 Apache 服务是否正在运行，如果在运行则停止
-    if systemctl is-active --quiet nginx; then
-        echo -e "\nNginx 正在运行，停止 Nginx 服务...\n"
-        systemctl stop nginx
-        stopped_services+=("nginx")
-    fi
-
-    if systemctl is-active --quiet apache2; then
-        echo "\nApache2 正在运行，停止 Apache2 服务...\n"
-        systemctl stop apache2
-        stopped_services+=("apache2")
-    fi
-
-    # 确保 80 端口开放，释放 80 端口
-    if command -v ufw &> /dev/null; then
-        echo_color green "正在释放 80 端口，确保域名验证通过..."
-        ufw allow 80/tcp
-    fi
-
-    # 使用 Certbot 申请证书
-    echo_color green "正在申请证书...\n"
-    certbot certonly --standalone --preferred-challenges http -d "$domain_name"
-
-    # 检查证书是否成功申请
-    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
-    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
-
-    if [[ -f "$cert_path" && -f "$key_path" ]]; then
-        echo_color green "证书申请成功！"
-        echo_color green "证书路径：$cert_path"
-        echo_color green "密钥路径：$key_path"
-        # 配置证书的自动续期
-        echo_color white "配置证书自动续期..."
-        # 通过 cron 配置自动续期，每 12 小时检查证书是否需要续期
-        (crontab -l ; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
-        # 完成证书申请并配置自动续期，返回
-        echo_color green "证书配置和自动续期设置完成！"
-        # 重启之前停止的服务
-        if [[ ${#stopped_services[@]} -gt 0 ]]; then
-            for service in "${stopped_services[@]}"; do
-                echo "正在重启 $service 服务..."
-                systemctl start "$service"
-            done
-        fi
-    else
-        echo_color red "证书申请失败，请检查日志。"
-        # 证书申请失败，重启停止的服务
-        if [[ ${#stopped_services[@]} -gt 0 ]]; then
-            for service in "${stopped_services[@]}"; do
-                #echo "正在重启 $service 服务..."
-                systemctl start "$service"
-            done
-        fi
-        echo
-        read -n 1 -s -r -p "按任意键返回新增节点菜单..."
-        add_node  # 返回新增节点菜单
-        return 1
-    fi
+# 新增节点
+function add_node() {
+    clear
+    echo "==============================="
+    echo -e "\n       请选择协议类型"
+    echo -e "\n==============================="
+    echo -e "\n1. Vless"
+    echo -e "\n2. Hysteria2"
+    echo -e "\n3. Vmess"
+    echo -e "\n4. Trojan"
+    #echo -e "\n5. SOCKS5"
+    echo -e "\n==============================="
+    echo -e "\n00. 返回主菜单"
+    echo -e "\n88. 退出脚本"
+    echo -e "\n==============================="
+    echo
+    read -p "请选择协议类型 (1-6): " choice
+    case $choice in
+        1) add_vless_node ;;
+        2) add_hysteria2_node ;;
+        3) add_vmess_node ;;
+        4) add_trojan_node ;;
+        #5) add_socks5_node ;;
+        00) show_menu ;;
+        88) exit ;;
+        *) echo "无效的选择，请重新选择！" && read -p "按 Enter 键返回..." && add_node ;;
+    esac
 }
 
-# Cloudflare 域名和配置的方法
+# 封装获取 Cloudflare 域名和配置的方法
 function get_cloudflare_domain_and_config() {
     echo
     # 获取输入的域名并验证格式
@@ -286,14 +327,13 @@ function get_cloudflare_domain_and_config() {
         break
     done
 
+    echo
+
     # 根据传入的 type_flag 值判断是否需要显示 Cloudflare 提示
     if [[ $1 -eq 2 ]]; then
-        echo_color yellow "注意：如果你的域名开启DNS代理（小黄云）请关闭，否则节点不通。"
-         echo_color yellow "开启了防火墙需要手动放行端口！"
+        echo -e "\e[33m注意：如果你的域名开启DNS代理（小黄云）请关闭，否则节点不通。\e[0m"
     else
-        echo_color yellow "注意：如果你的域名开启DNS代理（小黄云），那么你需要在Cloudflare回源端口。"
-        echo_color yellow "443  2053    2083    2087    2096    8443 不需要回源"
-        echo_color yellow "开启了防火墙需要手动放行端口！"
+        echo -e "\e[33m注意：如果你的域名开启DNS代理（小黄云），那么你需要在Cloudflare回源端口。\e[0m"
     fi
 
     echo
@@ -336,10 +376,10 @@ function get_cloudflare_domain_and_config() {
     # 检查证书是否存在，如果不存在则申请
     cert_dir="/etc/letsencrypt/live/$domain_name"
     if [[ ! -d "$cert_dir" ]]; then
-        echo_color green "证书不存在，正在申请证书..."
+        echo "证书不存在，正在申请证书..."
         apply_ssl_certificate "$domain_name"
     else
-        echo_color green "证书已存在，跳过证书申请。"
+        echo "证书已存在，跳过证书申请。"
     fi
 
     echo
@@ -390,45 +430,18 @@ function get_cloudflare_domain_and_config() {
             tag="${domain_name}-$default_protocol"
             ;;
     esac
-}
-# 新增节点
-function add_node() {
-    install_dependencies
-    clear
-    echo "==============================="
-    echo -e "\n       请选择协议类型"
-    echo -e "\n==============================="
-    echo -e "\n1. Vless"
-    echo -e "\n2. Hysteria2"
-    echo -e "\n3. Vmess"
-    echo -e "\n4. Trojan"
-    #echo -e "\n5. SOCKS5"
-    echo -e "\n==============================="
-    echo -e "\n11. 查看节点"
-    echo -e "\n12. 推送节点"
-    echo -e "\n13. 删除节点"
-    echo -e "\n==============================="
-    echo -e "\n00. 返回主菜单"
-    echo -e "\n88. 退出脚本"
-    echo -e "\n==============================="
+
+    # 最终配置输出
+    echo "节点名称：$tag"
+    echo "域名：$domain_name"
+    echo "端口：$port"
+    echo "UUID：$uuid"
+    echo "证书路径：$cert_path"
+    echo "证书密钥路径：$key_path"
     echo
-    read -p "请选择操作编号： " choice
-    case $choice in
-        1) add_vless_node ;;
-        2) add_hysteria2_node ;;
-        3) add_vmess_node ;;
-        4) add_trojan_node ;;
-        11) view_node_info ;;
-        12) push_nodes ;;
-        13) delete_nodes ;;
-        #5) add_socks5_node ;;
-        00) show_menu ;;
-        88) exit ;;
-        *) echo "无效的选择，请重新选择！" && read -p "按 Enter 键返回..." && add_node ;;
-    esac
 }
 
-# 处理节点配置生成链接
+# 处理节点配置
 function add_protocol_node() {
     # 获取协议名称作为参数
     protocol=$1
@@ -675,70 +688,11 @@ function add_socks5_node() {
     # 返回主菜单
     read -p "按 Enter 键返回主菜单..." && show_menu
 }
-######### 节点推送部分开始 ###########
-# 子菜单选择函数
-function show_action_menu() {
-    echo -e "\n请选择操作："
-    echo -e "\n\e[32m1.查看节点     2.新增节点     3. 推送节点     4. 删除节点     00. 返回主菜单   88. 退出脚本\e[0m\n"
-    read -p "请输入操作编号: " action
 
-    case $action in
-        1)
-            view_node_info
-            ;;
-        2)
-            add_node
-            ;;
-        3)
-            push_nodes
-            ;;
-        4)
-            delete_nodes
-            ;;
-        00)
-            show_menu
-            ;;
-        88)
-            exit
-            ;;
-        *)
-            echo -e "\n\e[31m无效选择，请重新选择！\e[0m"
-            show_action_menu  # 重新显示菜单
-            ;;
-    esac
-}
-# 统一的解析节点函数
-function parse_node() {
-    local line=$1
-    local node_protocol=$(echo "$line" | awk -F' ' '{print $1}')
-    local node_name=""
-    local tag=""
-
-    if [[ "$node_protocol" =~ ^vmess:// ]]; then
-        # 对 Vmess 链接进行解码
-        clean_line=$(echo "$line" | tr -d '\r\n')
-        decoded_vmess=$(echo "$clean_line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null)
-
-        if [[ $? -ne 0 ]]; then
-            echo -e "\e[31mVmess 链接解码失败：$line\e[0m"
-            return 1
-        fi
-
-        # 提取节点名称和 tag
-        node_name=$(echo "$decoded_vmess" | jq -r '.ps // "默认名称"')
-        tag=$(echo "$decoded_vmess" | jq -r '.tag // ""')
-
-        # 如果没有 tag，则使用节点名称作为默认 tag
-        if [[ -z "$tag" ]]; then
-            tag="$node_name"
-        fi
-    else
-        # 非 Vmess 协议，直接使用行内容
-        node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-        tag=$node_name
-    fi
-
-    echo "$node_name"
+function uninstall_telegram_config() {
+    # 删除 Telegram 配置信息
+    rm -f /etc/sing-box/telegram-bot-config.txt
+    echo -e "\nTelegram 配置信息已删除。"
 }
 # 选择节点的函数
 function select_nodes() {
@@ -760,7 +714,37 @@ function select_nodes() {
             # 提示选择要推送的单个节点
             echo -e "\n请选择要推送的节点（用空格分隔多个节点）："
             for i in "${!node_lines[@]}"; do
-                node_name=$(parse_node "${node_lines[$i]}")
+                line="${node_lines[$i]}"
+                node_protocol=$(echo "$line" | awk -F' ' '{print $1}')  # 假设协议在节点信息的第一部分
+                node_name=""
+                tag=""
+
+                if [[ "$node_protocol" =~ ^vmess:// ]]; then
+                    # 清理回车和换行符
+                    clean_line=$(echo "$line" | tr -d '\r\n')
+
+                    # 对 Vmess 链接进行解码
+                    decoded_vmess=$(echo "$clean_line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null)
+
+                    if [[ $? -ne 0 ]]; then
+                        echo -e "\e[31mVmess 链接解码失败：$line\e[0m"
+                        return 1
+                    fi
+
+                    # 提取节点名称和 tag
+                    node_name=$(echo "$decoded_vmess" | jq -r '.ps // "默认名称"')
+                    tag=$(echo "$decoded_vmess" | jq -r '.tag // ""')  # 如果没有 tag，使用默认值
+
+                    # 如果没有 tag，则使用节点名称作为默认 tag
+                    if [[ -z "$tag" ]]; then
+                        tag="$node_name"
+                    fi
+                else
+                    # 非 Vmess 协议，直接使用行内容
+                    # 其他类型的节点直接使用 # 后面的内容
+                    node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+                    tag=$node_name
+                fi
                 echo -e "\n\e[32m$((i + 1)). $node_name\e[0m"
             done
             echo
@@ -770,17 +754,21 @@ function select_nodes() {
 
         2)
             # 推送所有节点
-            selected_nodes=($(seq 1 ${#node_lines[@]}))  # 添加所有节点的索引
-            ;;
+            selected_nodes=()  # 初始化空数组
+            for i in "${!node_lines[@]}"; do
+                selected_nodes+=($((i + 1)))  # 添加所有节点的索引
+            done
 
+            # 打印 selected_nodes 的内容
+            #echo "选中的节点编号：${selected_nodes[@]}"
+
+            ;;
         00)
             push_nodes
             ;;
-
         88)
             exit
             ;;
-
         *)
             echo -e "\e[31m无效的选择，返回主菜单\e[0m"
             show_menu  # 返回主菜单
@@ -791,88 +779,151 @@ function select_nodes() {
 function push_to_telegram() {
     select_nodes  # 调用选择节点的函数
 
-    # 读取 Telegram Bot 配置信息
+    # 打印选中的节点编号，确保选中的节点编号正确
+    #echo "选中的节点编号：${selected_nodes[@]}"
+
+    # 检查是否是第一次推送到 Telegram Bot
     if [[ ! -f "/etc/sing-box/telegram-bot-config.txt" ]]; then
         echo -e "\n第一次推送到 Telegram Bot，请输入 Telegram Bot 信息："
         echo -n "请输入 Telegram Bot API Token: "
         read tg_api_token
         echo -n "请输入 Telegram Chat ID: "
         read tg_chat_id
-        # 保存配置
+        # 保存 Telegram Bot 配置信息
         echo "tg_api_token=$tg_api_token" > /etc/sing-box/telegram-bot-config.txt
         echo "tg_chat_id=$tg_chat_id" >> /etc/sing-box/telegram-bot-config.txt
         echo -e "\nTelegram Bot 配置信息已保存。"
     else
+        # 读取已保存的 Telegram Bot 配置信息
         source /etc/sing-box/telegram-bot-config.txt
     fi
+
+    # 调试输出，确保读取的 chat_id 正确
+    echo -e "\n将使用以下 chat_id 进行推送：$tg_chat_id"
 
     # 如果选中推送所有节点，则确保选中的节点包含全部节点
     if [[ "$push_choice" == "2" ]]; then
         selected_nodes=($(seq 1 ${#node_lines[@]}))  # 推送所有节点
     fi
 
+    # 打印选中的节点编号（调试用）
+    #echo "选中的所有节点编号：${selected_nodes[@]}"
+
     # 推送选中的节点到 Telegram Bot
     for node_index in "${selected_nodes[@]}"; do
         node_index=$((node_index - 1))  # 调整为从0开始的索引
-        node_info="${node_lines[$node_index]}"
+        if [[ $node_index -ge 0 && $node_index -lt ${#node_lines[@]} ]]; then
+            node_info="${node_lines[$node_index]}"
 
-        # 获取节点的完整链接
-        if [[ "$node_info" =~ ^vmess:// ]]; then
-            clean_node=$(echo "$node_info" | sed 's/^vmess:\/\///')  # 移除前缀
-            decoded_node=$(echo "$clean_node" | base64 --decode)  # 解码 Base64
-            node_name=$(echo "$decoded_node" | jq -r '.ps // "默认名称"')  # 提取名称
+            # 判断是否是 Vmess 节点
+            if [[ "$node_info" =~ ^vmess:// ]]; then
+                clean_node=$(echo "$node_info" | sed 's/^vmess:\/\///')  # 移除前缀
+                decoded_node=$(echo "$clean_node" | base64 --decode)  # 解码 Base64
+
+                # 提取节点名称（ps字段）
+                node_name=$(echo "$decoded_node" | jq -r '.ps // "默认名称"')
+            else
+                # 处理其他类型节点
+                node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')  # 假设节点名称在#后面
+            fi
+
+            echo -e "\n推送节点：$node_name 到 Telegram Bot"
+            # 使用 curl 命令将节点推送到 Telegram Bot
+            response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
+                 -d chat_id="$tg_chat_id" \
+                 -d text="节点推送：$node_name - ${node_lines[$node_index]}")
+
+            # 判断推送是否成功
+            if [[ $(echo "$response" | jq -r '.ok') == "false" ]]; then
+                echo -e "\e[31m推送失败：${response}\e[0m"
+                echo -e "推送失败，是否需要重新配置 Telegram Bot 信息？（y/n）"
+                read user_response
+                if [[ "$user_response" == "y" || "$user_response" == "Y" ]]; then
+                    uninstall_telegram_config  # 删除旧的 Telegram 配置
+                    echo -e "已删除旧的配置，请重新输入 Telegram Bot 信息。"
+                    push_to_telegram  # 重新配置并执行推送
+                else
+                    echo "返回主菜单。"
+                    show_menu  # 返回主菜单
+                fi
+            else
+                echo -e "\n\e[32m节点推送成功！\e[0m"
+            fi
         else
-            node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')  # 提取名称
-        fi
-
-        # 推送完整链接到 Telegram
-        #echo -e "\n推送节点链接：$node_info 到 Telegram Bot"
-        response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
-             -d chat_id="$tg_chat_id" \
-             -d text="$node_info")
-
-        # 判断推送是否成功
-        if [[ $(echo "$response" | jq -r '.ok') == "false" ]]; then
-            echo -e "\e[31m推送失败：${response}\e[0m"
-        else
-            echo -e "\n\e[32m节点链接推送成功！\e[0m"
+            echo -e "\e[31m无效的节点编号：$node_index\e[0m"
         fi
     done
 
-    show_action_menu
+    echo -e "\n继续操作"
+    echo -e "\n\e[32m1. 继续推送   00. 返回主菜单   88. 退出脚本\e[0m\n"
+    echo -n "请输入选择："
+    read user_choice
+
+    case $user_choice in
+        1)
+            push_to_telegram  # 继续推送
+            ;;
+        00)
+            show_menu  # 返回主菜单
+            ;;
+        88)
+            echo "退出脚本"
+            exit 0  # 退出脚本
+            ;;
+        *)
+            echo -e "\e[31m无效的选择，请重新选择！\e[0m"
+            ;;
+    esac
 }
-# 推送到 Sub-Store 的函数
+# 推送到Sub-Store
 function push_to_sub_store() {
     select_nodes  # 调用选择节点的函数
 
-    # 读取 Sub-Store 配置信息
-    if [[ -f "/etc/sing-box/sub-store-config.txt" ]]; then
-        source /etc/sing-box/sub-store-config.txt
-    else
+    if [[ ! -f "/etc/sing-box/sub-store-config.txt" ]]; then
         echo "第一次推送到 Sub-Store，请输入 Sub-Store 信息："
         read -p "Sub-Store 地址: " sub_store_url
         read -p "Sub-Store API 密钥: " sub_store_api_key
         read -p "Sub-Store Subs: " sub_store_subs
+
+        # 保存 Sub-Store 配置信息
+        echo "sub_store_url=$sub_store_url" > /etc/sing-box/sub-store-config.txt
+        echo "sub_store_api_key=$sub_store_api_key" >> /etc/sing-box/sub-store-config.txt
+        echo "sub_store_subs=$sub_store_subs" >> /etc/sing-box/sub-store-config.txt
+    else
+        # 读取已保存的 Sub-Store 配置信息
+        source /etc/sing-box/sub-store-config.txt
     fi
 
-    # 遍历选中的节点，收集完整的节点链接
-    links=()
+    # 遍历选中的节点
+    #echo "选中的节点编号：${selected_nodes[@]}"
+    links=()  # 初始化一个空数组，用于存储所有节点的链接
     for node_index in "${selected_nodes[@]}"; do
         node_index=$((node_index - 1))
-        node_info="${node_lines[$node_index]}"
-
-        # 获取节点的完整链接（不再只是名称）
-        node_links=$(echo "$node_info" | sed 's/^.*# //')
-        links+=("$node_links")
+        if [[ $node_index -ge 0 && $node_index -lt ${#node_lines[@]} ]]; then
+            node_info="${node_lines[$node_index]}"
+            node_name=$(echo "$node_info" | sed 's/.*#\(.*\)/\1/')
+            # 将节点的链接部分提取出来，并按换行符分割成数组
+            mapfile -t node_links <<< "$(echo "$node_info" | sed 's/^.*# //')"
+            # 将当前节点的链接添加到总的链接数组中
+            links+=("${node_links[@]}")
+        fi
     done
 
-    # 构建 Sub-Store JSON 数据
-    links_str=$(printf "%s\n" "${links[@]}")
+    # 将 links 数组中的元素用逗号分隔，并用双引号包裹
+    links_str=""
+    for link in "${links[@]}"; do
+      links_str="$links_str$link\n"
+    done
+
     node_json="{
         \"token\": \"$sub_store_api_key\",
         \"name\": \"$sub_store_subs\",
         \"link\": \"$links_str\"
     }"
+    #echo "$links_str"
+
+    # 打印调试信息
+    #echo -e "${GREEN}将节点信息推送到 Sub-Store: $sub_store_url${RESET}"
 
     # 推送到 Sub-Store
     response=$(curl -s -X POST "$sub_store_url" \
@@ -880,18 +931,34 @@ function push_to_sub_store() {
         -d "$node_json")
 
     # 检查推送结果
-    if [[ "$response" == "节点更新成功!" ]]; then
-        # 保存配置信息
-        echo "sub_store_url=$sub_store_url" > /etc/sing-box/sub-store-config.txt
-        echo "sub_store_api_key=$sub_store_api_key" >> /etc/sing-box/sub-store-config.txt
-        echo "sub_store_subs=$sub_store_subs" >> /etc/sing-box/sub-store-config.txt
+    if [[ $(echo "$response") == "节点更新成功!" ]]; then
         echo -e "\e[32m\n节点信息推送成功！\e[0m\n"
     else
         echo -e "\e[31m推送失败，服务器响应: $response\e[0m"
     fi
 
-    show_action_menu
+    echo -e "\n继续操作"
+    echo -e "\n\e[32m1. 继续推送   00. 返回主菜单   88. 退出脚本\e[0m\n"
+        echo -n "请输入选择："
+        read user_choice
+
+        case $user_choice in
+            1)
+                push_to_sub_store  # 继续推送
+                ;;
+            00)
+                show_menu  # 返回主菜单
+                ;;
+            88)
+                echo "退出脚本"
+                exit 0  # 退出脚本
+                ;;
+            *)
+                echo -e "\e[31m无效的选择，请重新选择！\e[0m"
+                ;;
+        esac
 }
+
 # 推送节点方法
 function push_nodes() {
     # 获取节点名称数组和节点链接数组
@@ -926,7 +993,7 @@ function push_nodes() {
             ;;
     esac
 }
-######### 节点推送部分结束 ###########
+
 
 # 显示节点信息
 function view_node_info() {
@@ -935,8 +1002,7 @@ function view_node_info() {
 
     # 检查文件是否存在
     if [[ ! -f "$node_file" ]]; then
-        echo_color yellow "暂无配置的节点！"
-        echo
+        echo "暂无配置的节点！"
         read -n 1 -s -r -p "按任意键返回主菜单..."
         show_menu  # 返回主菜单
         return 1
@@ -945,6 +1011,7 @@ function view_node_info() {
     # 打印文件内容，显示所有的节点链接，每个节点之间加分隔符
     clear
     echo -e "\n节点链接信息：\n"
+    echo
     echo "------------------------------------------------------------------------------------------------------"
     echo
 
@@ -983,13 +1050,38 @@ function view_node_info() {
         # 聚合所有链接
         all_links+="$line"$'\n'
     done < "$node_file"
+
+    # 生成聚合链接的 base64 编码
     aggregated_link=$(echo -n "$all_links" | base64)
+
     # 输出聚合链接
-    echo -e "\e[32m聚合链接（Base64 编码)\e[0m\n"
+    echo -e "\e[32m聚合链接（Base64 编码\e[0m\n"
     echo -e "$aggregated_link\n"
     echo "------------------------------------------------------------------------------------------------------"
 
-    show_action_menu
+    # 选择操作
+    echo -e "\n请选择操作："
+    echo -e "\n\e[32m1. 推送节点    2. 删除节点     00. 返回主菜单   88. 退出\e[0m\n"
+    read -p "请输入操作编号: " action
+
+    case $action in
+        1)
+            push_nodes "${node_list[@]}"
+            ;;
+        2)
+            delete_nodes "${node_list[@]}"
+            ;;
+        00)
+            show_menu
+            ;;
+        88)
+            exit
+            ;;
+        *)
+            echo "无效选择，请重新选择！"
+            view_node_info
+            ;;
+    esac
 }
 
 # 删除节点
@@ -1121,7 +1213,7 @@ function delete_nodes() {
     if [[ ${#node_lines[@]} -eq 1 ]]; then
         # 如果文件中只有一个节点，直接删除文件
         rm -f "$node_file"
-        #success_msg "已从 $node_file 中删除所有节点，文件已被删除。"
+        success_msg "已从 $node_file 中删除所有节点，文件已被删除。"
     else
         # 多个节点时，排除掉要删除的节点
         for node_index in "${nodes_to_delete[@]}"; do
