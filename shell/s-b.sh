@@ -238,6 +238,7 @@ function apply_ssl_certificate() {
     if ! command -v acme.sh &> /dev/null; then
         echo "acme.sh 未安装，正在安装..."
         curl https://get.acme.sh | sh
+        export PATH=$PATH:/root/.acme.sh
     else
         echo "acme.sh 已经安装，跳过安装步骤。"
     fi
