@@ -198,13 +198,13 @@ function apply_ssl_certificate() {
                 ;;
             2)
                 # 使用 DNS 验证
-                certbot -d "$domain_name" --manual --preferred-challenges=dns certonly
+                acme.sh --issue --dns -d "$domain_name"
                 return
                 ;;
             3)
                 # 使用 Webroot 插件
                 read -p "请输入 Webroot 目录 (如：/var/www/html): " webroot_dir
-                certbot certonly --webroot -w "$webroot_dir" -d "$domain_name"
+                acme.sh --issue --webroot "$webroot_dir" -d "$domain_name"
                 return
                 ;;
             *)
@@ -221,19 +221,20 @@ function apply_ssl_certificate() {
         echo "正在释放 80 端口，确保域名验证通过..."
         ufw allow 80/tcp
     fi
-    if ! command -v certbot &> /dev/null; then
-        echo "Certbot 未安装，正在安装..."
-        # 对于 Debian/Ubuntu 系统，使用 apt 安装 Certbot
-        sudo apt update
-        sudo apt install -y certbot
+
+    # 确保 acme.sh 已安装
+    if ! command -v acme.sh &> /dev/null; then
+        echo "acme.sh 未安装，正在安装..."
+        curl https://get.acme.sh | sh
     fi
-    # 使用 Certbot 申请证书
+
+    # 使用 acme.sh 申请证书
     echo "正在申请证书..."
-    certbot certonly --standalone --preferred-challenges http -d "$domain_name"
+    acme.sh --issue --standalone -d "$domain_name"
 
     # 检查证书是否成功申请
-    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
-    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
+    cert_path="/root/.acme.sh/$domain_name/fullchain.cer"
+    key_path="/root/.acme.sh/$domain_name/$domain_name.key"
 
     if [[ -f "$cert_path" && -f "$key_path" ]]; then
         echo "证书申请成功！"
@@ -256,7 +257,7 @@ function apply_ssl_certificate() {
     # 配置证书的自动续期
     echo "配置证书自动续期..."
     # 通过 cron 配置自动续期，每 12 小时检查证书是否需要续期
-    (crontab -l ; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+    (crontab -l ; echo "0 */12 * * * /root/.acme.sh/acme.sh --renew -d $domain_name --quiet") | crontab -
 
     # 完成证书申请并配置自动续期，返回
     echo "证书配置和自动续期设置完成！"
