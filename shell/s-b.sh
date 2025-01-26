@@ -221,7 +221,12 @@ function apply_ssl_certificate() {
         echo "正在释放 80 端口，确保域名验证通过..."
         ufw allow 80/tcp
     fi
-
+    if ! command -v certbot &> /dev/null; then
+        echo "Certbot 未安装，正在安装..."
+        # 对于 Debian/Ubuntu 系统，使用 apt 安装 Certbot
+        sudo apt update
+        sudo apt install -y certbot
+    fi
     # 使用 Certbot 申请证书
     echo "正在申请证书..."
     certbot certonly --standalone --preferred-challenges http -d "$domain_name"
