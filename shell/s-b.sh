@@ -153,7 +153,6 @@ EOL
 function apply_ssl_certificate() {
     local domain_name="$1"
     local stopped_services=()  # 用来记录停止的服务
-    local email
 
     # 使用 DNS 查询验证域名是否能解析到本机
     if ! nslookup "$domain_name" > /dev/null 2>&1; then
@@ -163,25 +162,23 @@ function apply_ssl_certificate() {
         return 1
     fi
 
-    # 检查 80 端口是否被 nginx 或 apache2 占用
-    echo "检查 nginx 和 apache2 服务是否在运行..."
-    if systemctl is-active --quiet apache2; then
-        echo "apache2 服务正在运行。"
-        stopped_services+=("apache2")
-    fi
-    if systemctl is-active --quiet nginx; then
-        echo "nginx 服务正在运行。"
-        stopped_services+=("nginx")
+    # 检查是否安装 lsof，如果没有安装，提示并安装
+    if ! command -v lsof &> /dev/null; then
+        echo "警告：lsof 工具未安装，无法检测端口占用。"
+        read -p "您是否希望安装 lsof 工具？ (y/n): " install_lsof
+        if [[ "$install_lsof" =~ ^[Yy]$ ]]; then
+            sudo apt update && sudo apt install -y lsof
+            echo "lsof 安装完成。"
+        else
+            echo "未安装 lsof，无法继续检测端口占用，跳过检测过程。"
+        fi
     fi
 
-    # 让用户选择是否停止服务
-    if [[ ${#stopped_services[@]} -gt 0 ]]; then
-        echo "警告：以下服务正在占用 80 端口："
-        for service in "${stopped_services[@]}"; do
-            echo "  $service"
-        done
+    # 检查 80 端口是否被占用（包括 nginx 和 apache2）
+    if lsof -i:80 > /dev/null; then
+        echo "警告：80端口已被占用！"
         echo "您可以选择以下解决方案："
-        echo "1. 停止占用 80 端口的服务"
+        echo "1. 停止占用 80 端口的服务（nginx 或 apache2）"
         echo "2. 使用 DNS 验证"
         echo "3. 使用 Webroot 插件"
         read -p "请选择解决方案 (1/2/3): " choice
@@ -201,13 +198,13 @@ function apply_ssl_certificate() {
                 ;;
             2)
                 # 使用 DNS 验证
-                acme.sh --issue --dns -d "$domain_name"
+                certbot -d "$domain_name" --manual --preferred-challenges=dns certonly
                 return
                 ;;
             3)
                 # 使用 Webroot 插件
                 read -p "请输入 Webroot 目录 (如：/var/www/html): " webroot_dir
-                acme.sh --issue --webroot "$webroot_dir" -d "$domain_name"
+                certbot certonly --webroot -w "$webroot_dir" -d "$domain_name"
                 return
                 ;;
             *)
@@ -225,77 +222,13 @@ function apply_ssl_certificate() {
         ufw allow 80/tcp
     fi
 
-   # 判断是否已经安装 socat
-    if ! command -v socat &> /dev/null; then
-        echo "socat 未安装，正在安装..."
-        sudo apt update
-        sudo apt install -y socat
-    else
-        echo "socat 已经安装，跳过安装步骤。"
-    fi
-
-    # 判断是否已经安装 acme.sh
-    if ! command -v acme.sh &> /dev/null; then
-        echo "acme.sh 未安装，正在安装..."
-        curl https://get.acme.sh | sh
-        export PATH=$PATH:/root/.acme.sh
-    else
-        echo "acme.sh 已经安装，跳过安装步骤。"
-    fi
-
-    # 检查 acme.sh 是否已经配置了邮箱
-    existing_email=$(acme.sh --list-account | grep -oP 'email: \K.*')
-
-    if [[ -n "$existing_email" ]]; then
-        echo "已经配置的邮箱是：$existing_email"
-        read -p "是否使用这个邮箱继续？(y/n): " use_existing_email
-        if [[ "$use_existing_email" =~ ^[Yy]$ ]]; then
-            echo "继续使用现有邮箱。"
-        else
-            echo "请重新输入您的邮箱。"
-            # 重新输入邮箱并验证格式
-            while true; do
-                read -p "请输入您的电子邮件地址（用于注册 acme.sh 账户）： " email
-                if [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-                    echo "邮箱格式正确。"
-                    break
-                else
-                    echo "邮箱格式无效，请重新输入。"
-                fi
-            done
-        fi
-    else
-        # 如果没有配置邮箱，提示用户输入
-        while true; do
-            read -p "请输入您的电子邮件地址（用于注册 acme.sh 账户）： " email
-            # 验证邮箱格式
-            if [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-                echo "邮箱格式正确。"
-                break
-            else
-                echo "邮箱格式无效，请重新输入。"
-            fi
-        done
-    fi
-
-
-    # 如果没有输入邮箱，生成一个随机邮箱
-    if [ -z "$email" ]; then
-        email="random_$(date +%s)@example.com"
-        echo "未输入邮箱，已生成随机邮箱：$email"
-    fi
-
-    # 注册 acme.sh 账户并提供电子邮件地址
-    echo "正在注册 acme.sh 账户..."
-    acme.sh --register-account -m "$email"
-
-    # 使用 acme.sh 申请证书
+    # 使用 Certbot 申请证书
     echo "正在申请证书..."
-    acme.sh --issue --standalone -d "$domain_name"
+    certbot certonly --standalone --preferred-challenges http -d "$domain_name"
 
     # 检查证书是否成功申请
-    cert_path="/root/.acme.sh/$domain_name/fullchain.cer"
-    key_path="/root/.acme.sh/$domain_name/$domain_name.key"
+    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
+    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
 
     if [[ -f "$cert_path" && -f "$key_path" ]]; then
         echo "证书申请成功！"
@@ -318,7 +251,7 @@ function apply_ssl_certificate() {
     # 配置证书的自动续期
     echo "配置证书自动续期..."
     # 通过 cron 配置自动续期，每 12 小时检查证书是否需要续期
-    (crontab -l ; echo "0 */12 * * * /root/.acme.sh/acme.sh --renew -d $domain_name --quiet") | crontab -
+    (crontab -l ; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
 
     # 完成证书申请并配置自动续期，返回
     echo "证书配置和自动续期设置完成！"
@@ -335,7 +268,6 @@ function apply_ssl_certificate() {
     add_node  # 返回新增节点菜单
     return 0
 }
-
 # 生成随机端口号
 function generate_random_port() {
     # 生成一个 1024 到 65535 之间的随机端口
