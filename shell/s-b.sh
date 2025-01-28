@@ -102,8 +102,8 @@ function install_sing_box() {
     fi
 
     # # 安装 Sing-Box
-    if ! bash <(curl -fsSL https://sing-box.app/deb-install.sh) > install_log.txt 2>&1; then
-        echo_color red "Sing-Box 安装失败，请检查 install_log.txt 文件。"
+    if ! bash <(curl -fsSL https://sing-box.app/deb-install.sh); then
+        echo_color red "Sing-Box 安装失败，请查看安装日志获取更多信息。"
         exit 1
     fi
 
@@ -205,6 +205,26 @@ function apply_ssl_certificate() {
     local domain_name="$1"
     local stopped_services=()  # 用来记录停止的服务
 
+    # 检查 Certbot 是否安装，如果未安装，则先安装
+    if ! command -v certbot &> /dev/null; then
+        echo_color red "Certbot 未安装，正在安装 Certbot..."
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            if [[ "$ID" == "ubuntu" || "$ID" == "debian" ]]; then
+                sudo apt update
+                sudo apt install -y certbot
+            elif [[ "$ID" == "centos" || "$ID" == "rhel" ]]; then
+                sudo yum install -y certbot
+            else
+                echo_color red "不支持的操作系统，请手动安装 Certbot。"
+                return 1
+            fi
+        else
+            echo_color red "无法识别操作系统，请手动安装 Certbot。"
+            return 1
+        fi
+    fi
+
     # 检测 Nginx 和 Apache 服务是否正在运行，如果在运行则停止
     if systemctl is-active --quiet nginx; then
         echo -e "\nNginx 正在运行，停止 Nginx 服务...\n"
@@ -264,6 +284,7 @@ function apply_ssl_certificate() {
         return 1
     fi
 }
+
 
 # Cloudflare 域名和配置的方法
 function get_cloudflare_domain_and_config() {
