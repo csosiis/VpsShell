@@ -207,7 +207,7 @@ function apply_ssl_certificate() {
 
     # 检查 Certbot 是否安装，如果未安装，则先安装
     if ! command -v certbot &> /dev/null; then
-        echo_color red "Certbot 未安装，正在安装 Certbot..."
+        echo_color yellow "Certbot 未安装，正在安装 Certbot..."
         if [[ -f /etc/os-release ]]; then
             . /etc/os-release
             if [[ "$ID" == "ubuntu" || "$ID" == "debian" ]]; then
