@@ -96,7 +96,7 @@ function install_sing_box() {
         echo_color green "curl 未安装，正在安装..."
         apt update && apt install -y curl
         if ! command -v curl &> /dev/null; then
-            echo_red "curl 安装失败，请检查网络或包管理器设置。"
+            echo_color red "curl 安装失败，请检查网络或包管理器设置。"
             exit 1
         fi
     fi

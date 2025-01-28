@@ -1,3 +1,5 @@
+# Sub-Store搭建
+
 #### 第一步：安装所需组件
 
 ```
@@ -87,7 +89,7 @@ Wants=network-online.target systemd-networkd-wait-online.service
 [Service]
 LimitNOFILE=32767
 Type=simple
-Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/9vUgbmi2oP5v0FevHvuW"
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/FgTV4tyoiL1gY5uEH7ZH"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
 Environment="SUB_STORE_FRONTEND_PATH=/root/sub-store/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=0.0.0.0"
@@ -106,6 +108,10 @@ StandardError=journal
  
 [Install]
 WantedBy=multi-user.target
+```
+
+```
+http://159.54.188.147:3000/?api=http://159.54.188.147:3000/FgTV4tyoiL1gY5uEH7ZH
 ```
 
 然后启动服务：
@@ -214,7 +220,7 @@ nginx -s reload
 ##### 8.sub-store访问地址
 
 ```
-https://haxus3.wiitwo.eu.org/?api=https://haxus3.wiitwo.eu.org/468XWoVoM0JEEZtJcC4Lvgsumo
+https://yumin.com/?api=https://yumin.com/9vUgbmi2oP5v0FevHvuW
 ```
 
 
