@@ -102,10 +102,10 @@ function install_sing_box() {
     fi
 
     # # 安装 Sing-Box
-    # if ! bash <(curl -fsSL https://sing-box.app/deb-install.sh) > install_log.txt 2>&1; then
-    #     echo_red "Sing-Box 安装失败，请检查 install_log.txt 文件。"
-    #     exit 1
-    # fi
+    if ! bash <(curl -fsSL https://sing-box.app/deb-install.sh) > install_log.txt 2>&1; then
+        echo_color red "Sing-Box 安装失败，请检查 install_log.txt 文件。"
+        exit 1
+    fi
 
     # 检查安装是否成功
     if ! command -v sing-box &> /dev/null; then
