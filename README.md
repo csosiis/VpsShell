@@ -28,3 +28,5 @@ wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/su
 wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/s-b.sh && chmod +x s-b.sh && ./s-b.sh
 ```
 
+
+
