@@ -171,6 +171,7 @@ EOL
 
     # 安装完成后返回主菜单
     echo_color green "Sing-Box配置文件初始化完成！"
+    systemctl enable sing-box.service
     echo
     read -p "按 Enter 键返回主菜单..." && show_menu
 }

@@ -85,7 +85,6 @@ touch /etc/systemd/system/sub-store.service
 Description=Sub-Store
 After=network-online.target
 Wants=network-online.target systemd-networkd-wait-online.service
- 
 [Service]
 LimitNOFILE=32767
 Type=simple
@@ -105,7 +104,6 @@ RestartSec=5s
 ExecStartPre=/bin/sh -c ulimit -n 51200
 StandardOutput=journal
 StandardError=journal
- 
 [Install]
 WantedBy=multi-user.target
 ```
@@ -189,10 +187,8 @@ server {
   listen 443 ssl http2;
   listen [::]:443 ssl http2;
   server_name yumin.com;
- 
   ssl_certificate /etc/letsencrypt/live/yumin.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/yumin.com/privkey.pem;
- 
   location / {
     proxy_pass http://lcoalhost:3001;
     proxy_set_header Host $host;
@@ -220,7 +216,7 @@ nginx -s reload
 ##### 8.sub-store访问地址
 
 ```
-https://haxus3.wiitwo.eu.org/?api=https://haxus3.wiitwo.eu.org/468XWoVoM0JEEZtJcC4Lvgsumo
+http://140.245.45.49:3000/?api=http://140.245.45.49:3000/Vj3pZUBcaSVWaXFBItuLFmAf3N
 ```
 
 

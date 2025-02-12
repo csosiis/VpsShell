@@ -453,17 +453,6 @@ function set_shortcut() {
 
     echo "快捷键 Ctrl + $shortcut_key 已设置为执行脚本: $script_path"
 }
-# 搭建 Sing-Box 节点
-function setup_singbox() {
-    echo "开始搭建 sing-sox 节点... "
-    wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sing-box-install.sh
-    chmod +x sing-box-install.sh
-    ./sing-box-install.sh
-    rm sing-box-install.sh
-    echo "sing-box 节点搭完成。
-    "
-}
-
 # 安装S-ui
 function install_sui() {
     bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
@@ -475,7 +464,6 @@ function install_3xui() {
     bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
     rm install.sh
 }
-# Sing-Box
 import json
 import base64
 # 全局变量定义配置文件路径
@@ -649,6 +637,7 @@ EOL
 
     # 安装完成后返回主菜单
     echo_color green "Sing-Box配置文件初始化完成！"
+    systemctl enable sing-box.service
     echo
     read -p "按 Enter 键返回主菜单..." && show_menu
 }
