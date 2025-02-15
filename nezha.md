@@ -13,7 +13,7 @@ curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/instal
 #### 2.安装Agent
 
 ```
-curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o agent.sh && chmod +x agent.sh && env NZ_SERVER=nz.scsc.us.kg:8023 NZ_TLS=false NZ_CLIENT_SECRET=P4gohlCwVbRuxXCMfPdcauhiKG9vpRsk ./agent.sh
+curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o agent.sh && chmod +x agent.sh && env NZ_SERVER=nz.luckywu.eu.org:8023 NZ_TLS=false NZ_CLIENT_SECRET=9gdCOuLVICw80NNjrm2yW0oe5aqX8pDj ./agent.sh
 ```
 
 ##### 卸载Agent
@@ -31,7 +31,7 @@ bash <(curl -s https://raw.githubusercontent.com/k0baya/nezha4serv00/main/instal
 ```
 
 ```
-nz.scsc.us.kg
+nz.luckywu.eu.org
 ```
 
 ```
@@ -39,7 +39,7 @@ nz.scsc.us.kg
 ```
 
 ```
-P4gohlCwVbRuxXCMfPdcauhiKG9vpRsk
+9gdCOuLVICw80NNjrm2yW0oe5aqX8pDj
 ```
 
 ```
