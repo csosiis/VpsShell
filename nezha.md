@@ -31,11 +31,11 @@ bash <(curl -s https://raw.githubusercontent.com/k0baya/nezha4serv00/main/instal
 ```
 
 ```
-nz.luckywu.eu.org
+nz.wiitwo.eu.org
 ```
 
 ```
-8023
+443
 ```
 
 ```
