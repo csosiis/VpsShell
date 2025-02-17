@@ -87,7 +87,7 @@ nz.wiitwo.eu.org
 ##### Personal Access Token
 
 ```
-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
+
 ```
 
 ##### Github Name Email
@@ -115,7 +115,7 @@ docker run -dit \
            --restart always \
            -e GH_USER=csosiis \
            -e GH_EMAIL=csos@vip.qq.com \
-           -e GH_PAT=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 \
+           -e GH_PAT= \
            -e GH_REPO=nezha-backup \
            -e GH_CLIENTID=Ov23liTkxkbI44Qx7hYy  \
            -e GH_CLIENTSECRET=127469c003450fcd5c61937677d1afbd8eeafc97 \
