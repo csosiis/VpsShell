@@ -173,6 +173,13 @@ EOL
     echo_color green "Sing-Box配置文件初始化完成！"
     systemctl enable sing-box.service
     echo
+    # 添加以下代码：设置快捷启动方式 sb
+    echo_color green "正在设置快捷启动方式..."
+    script_path=$(realpath "$0")  # 获取当前脚本的绝对路径
+    chmod +x "$script_path"       # 确保脚本有执行权限
+    ln -sf "$script_path" /usr/local/bin/sb  # 创建符号链接
+    echo_color green "快捷命令 'sb' 已设置！输入 sb 即可启动脚本。"
+    echo
     read -p "按 Enter 键返回主菜单..." && show_menu
 }
 # 安装缺失的依赖
