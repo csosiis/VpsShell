@@ -56,14 +56,17 @@ mkdir -p /root/sub-store  && cd sub-store
 
 ```
 curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+
 ```
 
 ```
 curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+
 ```
 
 ```
 unzip dist.zip && mv dist frontend && rm dist.zip
+
 ```
 
 
@@ -73,7 +76,8 @@ unzip dist.zip && mv dist frontend && rm dist.zip
 ##### 6-1.在/etc/systemd/system/文件下下面创建一个sub-store.service文件
 
 ```
-touch /etc/systemd/system/sub-store.service
+vim /etc/systemd/system/sub-store.service
+
 ```
 
 ##### 6-2.写入以下信息，SUB_STORE_FRONTEND_BACKEND_PATH设置一个随机密码:9vUgbmi2oP5v0FevHvuW
@@ -106,46 +110,53 @@ StandardOutput=journal
 StandardError=journal
 [Install]
 WantedBy=multi-user.target
+
 ```
 
 ```
-http://159.54.188.147:3000/?api=http://159.54.188.147:3000/FgTV4tyoiL1gY5uEH7ZH
+http://ip:3000/?api=http://ip:3000/FgTV4tyoiL1gY5uEH7ZH
 ```
 
 然后启动服务：
 
 ```
 systemctl start sub-store.service
+
 ```
 
 查看服务状态
 
 ```
 systemctl status sub-store.service
+
 ```
 
 设置开机启动
 
 ```
 systemctl enable sub-store.service
+
 ```
 
 停止服务
 
 ```
 systemctl stop sub-store.service
+
 ```
 
 重启服务
 
 ```
 systemctl restart sub-store.service
+
 ```
 
 重载服务
 
 ```
 systemctl daemon-reload
+
 ```
 
 
@@ -179,23 +190,22 @@ touch /etc/nginx/sites-enabled/sub-store.conf
 ##### 7-5:编辑Nginx配置文件sub-store.conf，并往里面写入反代内容
 
 ```
-vim/etc/nginx/sites-enabled/sub-store.conf
+vim /etc/nginx/sites-enabled/sub-store.conf
 ```
 
 ```
 server {
   listen 443 ssl http2;
   listen [::]:443 ssl http2;
-  server_name yumin.com;
-  ssl_certificate /etc/letsencrypt/live/yumin.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/yumin.com/privkey.pem;
+  server_name substore.wiitwo.eu.org;
+  ssl_certificate /root/certs/substore.wiitwo.eu.org/fullchain.pem;
+  ssl_certificate_key /root/certs/substore.wiitwo.eu.org/privkey.pem;
   location / {
-    proxy_pass http://lcoalhost:3001;
+    proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
- 
 }
 ```
 
@@ -216,7 +226,7 @@ nginx -s reload
 ##### 8.sub-store访问地址
 
 ```
-http://140.245.45.49:3000/?api=http://140.245.45.49:3000/Vj3pZUBcaSVWaXFBItuLFmAf3N
+https://store.ecec.us.kg/?api=https://store.ecec.us.kg/uHiWfnZru2eXYmoD1Xh3
 ```
 
 
