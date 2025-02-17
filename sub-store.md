@@ -56,17 +56,14 @@ mkdir -p /root/sub-store  && cd sub-store
 
 ```
 curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-
 ```
 
 ```
 curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-
 ```
 
 ```
 unzip dist.zip && mv dist frontend && rm dist.zip
-
 ```
 
 
@@ -77,7 +74,6 @@ unzip dist.zip && mv dist frontend && rm dist.zip
 
 ```
 vim /etc/systemd/system/sub-store.service
-
 ```
 
 ##### 6-2.写入以下信息，SUB_STORE_FRONTEND_BACKEND_PATH设置一个随机密码:9vUgbmi2oP5v0FevHvuW
@@ -110,7 +106,6 @@ StandardOutput=journal
 StandardError=journal
 [Install]
 WantedBy=multi-user.target
-
 ```
 
 ```
@@ -121,42 +116,36 @@ http://ip:3000/?api=http://ip:3000/FgTV4tyoiL1gY5uEH7ZH
 
 ```
 systemctl start sub-store.service
-
 ```
 
 查看服务状态
 
 ```
 systemctl status sub-store.service
-
 ```
 
 设置开机启动
 
 ```
 systemctl enable sub-store.service
-
 ```
 
 停止服务
 
 ```
 systemctl stop sub-store.service
-
 ```
 
 重启服务
 
 ```
 systemctl restart sub-store.service
-
 ```
 
 重载服务
 
 ```
 systemctl daemon-reload
-
 ```
 
 
@@ -223,7 +212,7 @@ nginx -s reload
 
 
 
-##### 8.sub-store访问地址
+##### 8.Sub-Store访问地址
 
 ```
 https://store.ecec.us.kg/?api=https://store.ecec.us.kg/uHiWfnZru2eXYmoD1Xh3
