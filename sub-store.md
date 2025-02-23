@@ -215,7 +215,7 @@ nginx -s reload
 ##### 8.Sub-Store访问地址
 
 ```
-https://store.ecec.us.kg/?api=https://store.ecec.us.kg/uHiWfnZru2eXYmoD1Xh3
+http://127.0.0.1:2324/?api=http://127.0.0.1:2324/TTZmaK4FEAqs5a4Yia4tnPirt7pCjk
 ```
 
 

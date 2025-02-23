@@ -104,6 +104,12 @@ csos@vip.qq.com
 nezha-backup
 ```
 
+#### 手动备份
+
+```
+/opt/nezha/dashboard/backup.sh
+```
+
 
 
 ### Docker部署

@@ -879,9 +879,10 @@ function push_to_sub_store() {
     if [[ -f "/etc/sing-box/sub-store-config.txt" ]]; then
         source /etc/sing-box/sub-store-config.txt
     else
-        echo "第一次推送到 Sub-Store，请输入 Sub-Store 信息："
-        read -p "Sub-Store 地址: " sub_store_url
-        read -p "Sub-Store API 密钥: " sub_store_api_key
+        # 默认地址和API密钥，只有需要输入Sub-Store Subs
+        sub_store_url="https://oregen.wiitwo.eu.org/data"
+        sub_store_api_key="csosiis5"
+        echo "第一次推送到 Sub-Store，请输入 Sub-Store Subs 信息："
         read -p "Sub-Store Subs: " sub_store_subs
     fi
 
@@ -928,10 +929,8 @@ function push_to_sub_store() {
         read -p "推送失败，是否重新配置 Sub-Store 信息? (y/n): " retry_choice
         case $retry_choice in
             y|Y)
-                # 重新配置 Sub-Store 信息
-                echo "请输入新的 Sub-Store 信息："
-                read -p "Sub-Store 地址: " sub_store_url
-                read -p "Sub-Store API 密钥: " sub_store_api_key
+                # 重新配置 Sub-Store Subs 信息
+                echo "请输入新的 Sub-Store Subs 信息："
                 read -p "Sub-Store Subs: " sub_store_subs
                 push_to_sub_store  # 重新调用推送方法
                 ;;
@@ -948,7 +947,6 @@ function push_to_sub_store() {
 
     show_action_menu
 }
-
 
 # 推送节点方法
 function push_nodes() {
