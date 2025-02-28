@@ -28,5 +28,9 @@ wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/su
 wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/s-b.sh && chmod +x s-b.sh && ./s-b.sh
 ```
 
+#### Mtproxy
 
+```
+wget -N --no-check-certificate https://github.com/whunt1/onekeymakemtg/raw/master/mtproxy_go.sh && chmod +x mtproxy_go.sh && bash mtproxy_go.sh
+```
 
