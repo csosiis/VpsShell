@@ -514,8 +514,6 @@ function add_protocol_node() {
     systemctl restart sing-box
     echo
     echo "配置成功并重启 sing-box。"
-    echo "sing-box 运行状态"
-    systemctl status sing-box
     echo
     read -p "按 Enter 键返回菜单..." && add_node
 }
