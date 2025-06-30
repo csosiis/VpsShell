@@ -1,5 +1,4 @@
-import json
-import base64
+#!/bin/bash
 # 全局变量定义配置文件路径
 config_file="/etc/sing-box/config.json"
 
@@ -44,7 +43,7 @@ function show_menu() {
     echo -e "\n00. 退出脚本"
     echo -e "\n==============================="
     echo
-    read -p "请选择操作 (1-5): " choice
+    read -p "请选择操作 (1-3, 88, 00): " choice
     case $choice in
         1) install_sing_box ;;
         2)
@@ -127,12 +126,10 @@ function install_sing_box() {
 
     # 创建 config.json 文件
     if [ ! -f "$config_file" ]; then
-        #echo_color green "config.json 文件不存在，正在创建..."
         touch "$config_file" || { echo_red "创建文件失败！"; exit 1; }
     fi
 
     # 写入配置内容到 config.json
-    #echo_color green "正在创建 Sing-Box 配置文件..."
     cat > "$config_file" <<EOL
 {
   "log": {
@@ -166,8 +163,6 @@ EOL
         echo_red "写入配置文件失败！"
         exit 1
     fi
-
-    #echo_color green "config.json 文件已创建并写入内容：$config_file"
 
     # 安装完成后返回主菜单
     echo_color green "Sing-Box配置文件初始化完成！"
@@ -267,7 +262,7 @@ function apply_ssl_certificate() {
         # 配置证书的自动续期
         echo_color white "配置证书自动续期..."
         # 通过 cron 配置自动续期，每 12 小时检查证书是否需要续期
-        (crontab -l ; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+        (crontab -l 2>/dev/null; echo "0 */12 * * * certbot renew --quiet --deploy-hook 'systemctl restart sing-box'") | crontab -
         # 完成证书申请并配置自动续期，返回
         echo_color green "证书配置和自动续期设置完成！"
         # 重启之前停止的服务
@@ -307,7 +302,7 @@ function get_cloudflare_domain_and_config() {
         fi
 
         # 验证域名格式是否正确
-        if ! echo "$domain_name" | grep -P "^[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$" > /dev/null; then
+        if ! echo "$domain_name" | grep -Pq "^[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"; then
             echo "无效的域名格式，请重新输入。"
             continue
         fi
@@ -357,8 +352,19 @@ function get_cloudflare_domain_and_config() {
 
     echo
 
+    # --- 新增：自动获取位置 ---
+    echo_color green "正在自动获取当前服务器位置..."
+    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g') # 使用jq解析并用sed移除空格
+    if [ -z "$location" ] || [ "$location" == "null" ]; then
+        echo_color yellow "自动获取位置失败，请手动输入。"
+        read -p "请输入当前服务器位置 (例如: HongKong): " location
+    else
+        echo_color green "成功获取到位置: $location"
+    fi
+    # --- 修改结束 ---
+
     # 询问自定义节点名称
-    read -p "请输入自定义节点名称（例如：香港-Huawei）： " custom_tag
+    read -p "请输入自定义节点名称（例如：GCP）： " custom_tag
 
     echo
 
@@ -382,43 +388,18 @@ function get_cloudflare_domain_and_config() {
 
     echo
 
-    # 根据传入的 type_flag 值设置 tag 和协议
+    # --- 修改：根据新规则组合 TAG ---
+    local protocol_name=""
     case $1 in
-        1)
-            tag="${custom_tag}-Vless"
-            ;;
-        2)
-            tag="${custom_tag}-Hysteria2"
-            ;;
-        3)
-            tag="${custom_tag}-Vmess"
-            ;;
-        4)
-            tag="${custom_tag}-Trojan"
-            ;;
-        *)
-            # 根据参数的值选择默认协议
-            case $1 in
-                1)
-                    default_protocol="Vless"
-                    ;;
-                2)
-                    default_protocol="Hysteria2"
-                    ;;
-                3)
-                    default_protocol="Vmess"
-                    ;;
-                4)
-                    default_protocol="Trojan"
-                    ;;
-                *)
-                    default_protocol="Vless"  # 默认值是Vless
-                    ;;
-            esac
-            echo "无效的类型，使用默认的标签：$domain_name-$default_protocol"
-            tag="${domain_name}-$default_protocol"
-            ;;
+        1) protocol_name="Vless" ;;
+        2) protocol_name="Hysteria2" ;;
+        3) protocol_name="Vmess" ;;
+        4) protocol_name="Trojan" ;;
+        *) protocol_name="Vless" ;; # 默认
     esac
+
+    tag="${location}-${custom_tag}-${protocol_name}"
+    # --- 修改结束 ---
 }
 # 新增节点
 function add_node() {
@@ -504,7 +485,7 @@ function add_protocol_node() {
 
     # 输出节点链接，并且前后添加空行
     echo "------------------------------------------------------------------------------------------------------"
-    echo -e "\n\n\e[32m$node_link\e[0m\n\n"·
+    echo -e "\n\n\e[32m$node_link\e[0m\n\n"
     echo "------------------------------------------------------------------------------------------------------"
 
     # 保存节点链接到文件
@@ -603,7 +584,7 @@ function add_vmess_node() {
       \"type\": \"vmess\",
       \"users\": [
         {
-          \"name\": \"$custom_name\",
+          \"name\": \"$custom_tag\",
           \"uuid\": \"$uuid\",
           \"alterId\": 0
         }
@@ -645,7 +626,7 @@ function add_trojan_node() {
       \"type\": \"trojan\",
       \"users\": [
         {
-          \"name\": \"$custom_name\",
+          \"name\": \"$custom_tag\",
           \"password\": \"$password\"
         }
       ],
@@ -732,7 +713,7 @@ function select_nodes() {
                 node_name=""
                 tag=""
 
-                if [[ "$node_protocol" =~ ^vmess:// ]]; then
+                if [[ "$line" =~ ^vmess:// ]]; then
                     # 清理回车和换行符
                     clean_line=$(echo "$line" | tr -d '\r\n')
 
@@ -1018,7 +999,7 @@ function view_node_info() {
     node_file="/etc/sing-box/nodes_links.txt"
 
     # 检查文件是否存在
-    if [[ ! -f "$node_file" ]]; then
+    if [[ ! -f "$node_file" || ! -s "$node_file" ]]; then
         echo_color yellow "暂无配置的节点！"
         echo
         read -n 1 -s -r -p "按任意键返回主菜单..."
@@ -1067,7 +1048,7 @@ function view_node_info() {
         # 聚合所有链接
         all_links+="$line"$'\n'
     done < "$node_file"
-    aggregated_link=$(echo -n "$all_links" | base64)
+    aggregated_link=$(echo -n "$all_links" | base64 -w0)
     # 输出聚合链接
     echo -e "\e[32m聚合链接（Base64 编码)\e[0m\n"
     echo -e "$aggregated_link\n"
@@ -1085,8 +1066,8 @@ function delete_nodes() {
     # 统一的错误提示函数
     function error_exit {
         echo -e "\e[31m$1\e[0m"
-        read -n 1 -s -r -p "按任意键返回查看节点信息..."
-        view_node_info  # 返回查看节点信息
+        read -n 1 -s -r -p "按任意键返回..."
+        show_action_menu
         return 1
     }
 
@@ -1096,8 +1077,8 @@ function delete_nodes() {
     }
 
     # 检查节点文件和配置文件是否存在
-    if [[ ! -f "$node_file" ]]; then
-        error_exit "节点文件不存在！"
+    if [[ ! -f "$node_file" || ! -s "$node_file" ]]; then
+        error_exit "当前没有任何节点可以删除！"
     fi
 
     if [[ ! -f "$config_file" ]]; then
@@ -1107,27 +1088,18 @@ function delete_nodes() {
     # 读取文件中的节点链接
     mapfile -t node_lines < "$node_file"
 
-    # 提取节点名称和唯一标识符（假设每个节点都有一个 tag 或 uuid）
+    # 提取节点名称和唯一标识符（tag）
     node_names=()
     node_tags=()
     for line in "${node_lines[@]}"; do
-        # 如果节点是 Vmess 类型，尝试提取名称和 tag
         if [[ "$line" =~ ^vmess:// ]]; then
             decoded_vmess=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null)
-
             if [[ $? -ne 0 ]]; then
                 error_exit "Vmess 链接解码失败！"
             fi
-
-            # 提取 node_name 和 tag
             node_name=$(echo "$decoded_vmess" | jq -r '.ps // "默认名称"')
-            tag=$(echo "$decoded_vmess" | jq -r '.tag // ""')  # 返回空字符串作为默认
-
-            if [[ -z "$tag" ]]; then
-                tag="$node_name"  # 使用 node_name 作为默认的 tag
-            fi
+            tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/') # Vmess 的 tag 也在 # 后面
         else
-            # 如果是其他类型的链接，直接使用 # 后的节点名称，并假设 tag 在 # 后面
             node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
             tag=$node_name
         fi
@@ -1141,58 +1113,53 @@ function delete_nodes() {
     echo -n "请输入操作编号："
     read choice
 
+    nodes_to_delete_indices=()
+
     case $choice in
         1)
             # 删除单个或多个节点
             echo -e "\n请选择要删除的节点（用空格分隔多个节点）：\n"
             for i in "${!node_names[@]}"; do
-                echo -e "\e[32m$((i + 1)). ${node_names[$i]}\e[0m\n"
+                echo -e "\e[32m$((i + 1)). ${node_names[$i]}\e[0m"
             done
-            echo -n "请输入节点编号："
-            read -a nodes_to_delete
             echo
-            # 删除选中的节点
-            for node_index in "${nodes_to_delete[@]}"; do
-                node_index=$((node_index - 1))  # 调整为从0开始的索引
+            read -p "请输入节点编号：" -a nodes_to_delete
+
+            for node_num in "${nodes_to_delete[@]}"; do
+                 # 检查输入是否为数字
+                if ! [[ "$node_num" =~ ^[0-9]+$ ]]; then
+                    error_exit "无效的输入：'$node_num' 不是一个有效的编号。"
+                fi
+                node_index=$((node_num - 1))
                 if [[ $node_index -ge 0 && $node_index -lt ${#node_names[@]} ]]; then
-                    #success_msg "删除节点：${node_names[$node_index]}"
-
-                    # 从 config.json 中删除对应的节点配置，假设通过 tag 删除
-                    ##echo "正在删除 config.json 中的节点：${node_tags[$node_index]}"
-
-                    # 检查 config.json 是否有效
-                    jq empty "$config_file" 2>/dev/null
-                    if [[ $? -ne 0 ]]; then
-                        error_exit "config.json 格式无效，无法继续删除操作。"
-                    fi
-
-                    # 删除 config.json 中的节点
-                    jq --arg tag "${node_tags[$node_index]}" 'del(.inbounds[] | select(.tag == $tag))' "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
-
-                    # 检查是否成功删除
-                    grep -q "${node_tags[$node_index]}" "$config_file"
-                    if [[ $? -eq 0 ]]; then
-                        error_exit "删除失败，未能删除 config.json 中的节点。"
-                    else
-                        success_msg "${node_tags[$node_index]}节点成功删除！"
-                    fi
+                    nodes_to_delete_indices+=($node_index)
                 else
-                    error_exit "无效的节点编号：$node_index"
+                    error_exit "无效的节点编号：$node_num"
                 fi
             done
             ;;
         2)
             # 删除所有节点
-            echo "正在删除所有节点..."
-            rm -f "$node_file"
-            success_msg "已成功删除所有节点！"
+            read -p "你确定要删除所有节点配置吗？这将清空所有节点信息！(y/n): " confirm_delete
+            if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
+                echo "正在删除所有节点..."
+                # 清空 config.json 中的 inbounds
+                jq '.inbounds = []' "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+                # 删除节点链接记录文件
+                rm -f "$node_file"
+                success_msg "已成功删除所有节点！"
+                systemctl restart sing-box
+            else
+                echo "操作已取消。"
+            fi
+            show_action_menu
+            return
             ;;
         00)
-            # 返回主菜单
             show_menu
+            return
             ;;
         88)
-            # 返回主菜单
             exit
             ;;
         *)
@@ -1200,45 +1167,42 @@ function delete_nodes() {
             ;;
     esac
 
-    # 删除节点文件中的节点
-    #echo "正在删除节点文件中的节点..."
-    if [[ ${#node_lines[@]} -eq 1 ]]; then
-        # 如果文件中只有一个节点，直接删除文件
-        rm -f "$node_file"
-        #success_msg "已从 $node_file 中删除所有节点，文件已被删除。"
-    else
-        # 多个节点时，排除掉要删除的节点
-        for node_index in "${nodes_to_delete[@]}"; do
-            node_index=$((node_index - 1))  # 调整为从0开始的索引
-            # 从 nodes_links.txt 中删除节点
-            grep -vF "${node_lines[$node_index]}" "$node_file" > "$node_file.tmp" && mv "$node_file.tmp" "$node_file"
-            #success_msg "从 $node_file 中删除了节点：${node_names[$node_index]}"
+    # 从 config.json 和 nodes_links.txt 删除选中的节点
+    if [[ ${#nodes_to_delete_indices[@]} -gt 0 ]]; then
+        # 降序排列索引，以防删除时索引错乱
+        sorted_indices=($(for i in "${nodes_to_delete_indices[@]}"; do echo $i; done | sort -rn))
+
+        new_node_lines=()
+        for i in "${!node_lines[@]}"; do
+            should_keep=true
+            for del_idx in "${sorted_indices[@]}"; do
+                if [[ $i -eq $del_idx ]]; then
+                    should_keep=false
+                    tag_to_delete="${node_tags[$del_idx]}"
+                    success_msg "正在删除节点: ${node_names[$del_idx]}"
+                    # 从 config.json 删除
+                    jq --arg tag "$tag_to_delete" 'del(.inbounds[] | select(.tag == $tag))' "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+                    break
+                fi
+            done
+            if $should_keep; then
+                new_node_lines+=("${node_lines[$i]}")
+            fi
         done
+
+        # 将保留的节点写回文件
+        printf "%s\n" "${new_node_lines[@]}" > "$node_file"
+
+        # 检查是否还有节点，如果没有则删除文件
+        if [[ ! -s $node_file ]]; then
+            rm -f "$node_file"
+        fi
+
+        success_msg "所选节点已全部删除！"
+        systemctl restart sing-box
     fi
 
-    # 删除成功后，显示节点信息并询问是否查看信息或返回主菜单
-    ##echo -e "\n\e[32m节点删除完成！\e[0m\n"
-    echo -e "\n请继续选择操作："
-    echo -e "\n\e[32m1. 查看节点信息    00. 返回主菜单  88.退出脚本   \e[0m\n"
-
-    # 获取用户输入
-    read -p "请输入选项（1 或 2）: " choice
-
-    case $choice in
-        1)
-            view_node_info  # 调用查看节点信息的函数
-            ;;
-        00)
-            show_menu  # 返回主菜单
-            ;;
-        88)
-            exit
-            ;;
-        *)
-            echo "无效的选项，返回主菜单"
-            show_menu
-            ;;
-    esac
+    show_action_menu
 }
 
 
@@ -1263,6 +1227,12 @@ function check_sing_box() {
 }
 
 function uninstall_sing_box() {
+    read -p "你确定要完全卸载 Sing-Box 吗？所有配置文件都将被删除！(y/n): " confirm_uninstall
+    if [[ ! "$confirm_uninstall" =~ ^[Yy]$ ]]; then
+        echo "卸载操作已取消。"
+        show_menu
+        return
+    fi
     # 停止 Sing-Box 服务
     echo "停止 Sing-Box 服务..."
     systemctl stop sing-box
@@ -1293,6 +1263,10 @@ function uninstall_sing_box() {
     rm -rf /usr/local/lib/sing-box
     rm -rf /var/cache/sing-box
 
+    # 删除快捷方式
+    echo "删除快捷命令 'sb'..."
+    rm -f /usr/local/bin/sb
+
     # 重新加载 systemd 配置
     echo "重新加载 systemd 配置..."
     systemctl daemon-reload
@@ -1304,10 +1278,9 @@ function uninstall_sing_box() {
     # 检查是否卸载成功
     check_sing_box
 
-    # 提示卸载完成并返回主菜单
-    #echo "Sing-Box 卸载成功！"
+    echo_color green "Sing-Box 卸载完成！"
     read -n 1 -s -r -p "按任意键返回主菜单..."
-    show_menu  # 返回主菜单
+    show_menu
 }
 
 
