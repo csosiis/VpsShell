@@ -979,20 +979,36 @@ update_sub_store_app() {
 
 # 查看访问链接
 substore_view_access_link() {
-    log_info "正在读取配置并生成访问链接..."; if ! is_substore_installed; then log_error "Sub-Store尚未安装。"; return; fi
-    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
-    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"/')
+    log_info "正在读取配置并生成访问链接...";
+    if ! is_substore_installed; then
+        log_error "Sub-Store尚未安装。"
+        press_any_key
+        return
+    fi
+
+    # ==================== 关键修正点：将 awk 的 {print $2} 全部改为 {print $3} ====================
+    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    # =========================================================================================
+
     echo -e "\n===================================================================="
     if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
         ACCESS_URL="https://${REVERSE_PROXY_DOMAIN}/subs?api=https://${REVERSE_PROXY_DOMAIN}${API_KEY}"
         echo -e "\n您的 Sub-Store 反代访问链接如下：\n\n${YELLOW}${ACCESS_URL}${NC}\n"
     else
-        FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
         SERVER_IP_V4=$(curl -s http://ipv4.icanhazip.com)
         if [ -n "$SERVER_IP_V4" ]; then
             ACCESS_URL_V4="http://${SERVER_IP_V4}:${FRONTEND_PORT}/subs?api=http://${SERVER_IP_V4}:${FRONTEND_PORT}${API_KEY}"
             echo -e "\n您的 Sub-Store IPv4 访问链接如下：\n\n${YELLOW}${ACCESS_URL_V4}${NC}\n"
         fi
+        # 可选的IPv6链接
+        # SERVER_IP_V6=$(curl -s --max-time 2 http://ipv6.icanhazip.com);
+        # if [[ "$SERVER_IP_V6" =~ .*:.* && -n "$SERVER_IP_V6" ]]; then
+        #     ACCESS_URL_IPV6="http://[${SERVER_IP_V6}]:${FRONTEND_PORT}/subs?api=http://[${SERVER_IP_V6}]:${FRONTEND_PORT}${API_KEY}"
+        #     echo -e "--------------------------------------------------------------------"
+        #     echo -e "\n您的 Sub-Store IPv6 访问链接如下：\n\n${YELLOW}${ACCESS_URL_IPV6}${NC}\n"
+        # fi
     fi
     echo -e "===================================================================="
 }
@@ -1122,7 +1138,7 @@ do_update_script() {
     chmod +x "$temp_script"
     mv "$temp_script" "$SCRIPT_PATH"
     log_info "✅ 脚本已成功更新！"
-    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vps-tool')..."
+    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vs')..."
     exit 0
 }
 
@@ -1282,7 +1298,7 @@ substore_manage_menu() {
         echo "6. 查看访问链接"
         echo "7. 重置端口"
         echo "8. 重置 API 密钥"
-        echo "9. ${YELLOW}${rp_menu_text}${NC}"
+        echo -e "9. ${YELLOW}${rp_menu_text}${NC}"
         echo ""
         echo "0. 返回主菜单"
         echo ""
@@ -1308,9 +1324,10 @@ substore_main_menu() {
         clear
         echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
         if is_substore_installed; then
-            echo "1. 管理 Sub-Store (启停/日志/配置)"
-            echo "2. ${GREEN}更新 Sub-Store 应用${NC}"
-            echo "3. ${RED}卸载 Sub-Store${NC}"
+            echo "1. 管理 Sub-Store"
+            echo ""
+            echo -e "2. ${GREEN}更新 Sub-Store 应用${NC}\n"
+            echo -e "3. ${RED}卸载 Sub-Store${NC}"
             echo ""
             echo "0. 返回主菜单"
             echo ""
