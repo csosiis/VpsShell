@@ -30,7 +30,7 @@ SINGBOX_CONFIG_FILE="/etc/sing-box/config.json"
 SINGBOX_NODE_LINKS_FILE="/etc/sing-box/nodes_links.txt"
 SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/vps-tool"
-SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/main/vps-tool.sh" # 假设这是未来新脚本的下载地址
+SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 
 # 日志与交互函数
 log_info() { echo -e "${GREEN}[信息] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
@@ -1144,16 +1144,26 @@ singbox_main_menu() {
         echo -e "${WHITE}--- Sing-Box 管理菜单 ---${NC}\n"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
+            echo ""
             echo -e "当前状态: ${STATUS_COLOR}\n"
+            echo ""
             echo "1. 查看 / 管理节点"
+            echo ""
             echo "2. 新增节点"
+            echo ""
             echo "---"
+            echo ""
             echo "3. 启动 Sing-Box"
+            echo ""
             echo "4. 停止 Sing-Box"
+            echo ""
             echo "5. 重启 Sing-Box"
+            echo ""
             echo "6. 查看日志"
+            echo ""
             echo "---"
             echo "7. ${RED}卸载 Sing-Box${NC}"
+            echo ""
             echo "0. 返回主菜单"
             echo ""
             read -p "请输入选项: " choice
@@ -1170,7 +1180,9 @@ singbox_main_menu() {
             esac
         else
             echo "1. 安装 Sing-Box"
+            echo ""
             echo "0. 返回主菜单"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
                 1) singbox_do_install ;;
@@ -1260,14 +1272,18 @@ main_menu() {
         echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}"
         echo -e "${WHITE}=====================================${NC}\n"
         echo "1. 系统综合管理"
+        echo ""
         echo "2. Sing-Box 管理"
+        echo ""
         echo "3. Sub-Store 管理"
         echo ""
         echo "-------------------------------------"
         echo ""
-        echo "8. ${GREEN}更新此脚本${NC}"
-        echo "9. ${YELLOW}设置快捷命令 (vps-tool)${NC}"
-        echo "0. ${RED}退出脚本${NC}"
+        echo -e "8. ${GREEN}更新此脚本${NC}"
+        echo ""
+        echo -e "9. ${YELLOW}设置快捷命令 (vps-tool)${NC}"
+        echo ""
+        echo -e "0. ${RED}退出脚本${NC}"
         echo ""
         read -p "请输入选项: " choice
 
