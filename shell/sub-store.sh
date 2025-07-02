@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # ==============================================================================
-# Sub-Store 管理脚本 (v6.3)
+# Sub-Store 管理脚本 (v6.4)
 #
-# 基于 v6.2 版本修改：
-# 1. [修正] 更新了“更新脚本”功能所使用的 GitHub 仓库地址。
+# 基于 v6.3 版本修改：
+# 1. [BUG修复] 修正了子菜单中选项 0 的颜色代码显示问题。
+# 2. [优化] 将子菜单中选项 0 的功能描述修正为“返回主菜单”。
 # ==============================================================================
 
 # --- 全局变量和辅助函数 ---
@@ -21,7 +22,6 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
 INSTALL_DIR="/root/sub-store"
 SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/sub"
-# v6.3 修正: 更新脚本源地址
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store.sh"
 
 
@@ -236,12 +236,8 @@ handle_nginx_proxy() {
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/sub_manager_new.sh"
-    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
-        log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"; press_any_key; return
-    fi
-    if cmp -s "$SCRIPT_PATH" "$temp_script"; then
-        log_info "脚本已经是最新版本，无需更新。"; rm "$temp_script"; press_any_key; return
-    fi
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"; press_any_key; return; fi
+    if cmp -s "$SCRIPT_PATH" "$temp_script"; then log_info "脚本已经是最新版本，无需更新。"; rm "$temp_script"; press_any_key; return; fi
     log_info "下载成功，正在应用更新..."; chmod +x "$temp_script"; mv "$temp_script" "$SCRIPT_PATH"
     log_info "✅ 脚本已成功更新！"; log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'sub')..."; exit 0
 }
@@ -264,7 +260,6 @@ setup_reverse_proxy() {
         log_info "检测到您已设置了反向代理域名: ${old_domain}"; echo ""
         log_warn "接下来的操作将使用新域名替换旧的配置。"
     fi
-
     if command -v caddy &> /dev/null; then log_info "检测到 Caddy，将为您进行全自动配置。"; handle_caddy_proxy
     elif command -v nginx &> /dev/null; then log_info "检测到 Nginx，将为您生成配置代码和操作指南。"; handle_nginx_proxy
     elif command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then log_warn "检测到 Apache，但本脚本暂未支持自动生成其配置。";
@@ -279,11 +274,11 @@ manage_menu() {
     while true; do
         clear; local rp_domain_check=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
         if [ -n "$rp_domain_check" ]; then local rp_menu_text="更换反代域名"; else local rp_menu_text="设置反向代理 (推荐)"; fi
-        echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.3) ---${NC}\n"
+        echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.4) ---${NC}\n"
         if systemctl is-active --quiet "$SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo ""; echo "2. 停止服务"; echo ""; echo "3. 重启服务"; echo ""; echo "4. 查看状态"; echo ""; echo "5. 查看日志"
         echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo ""; echo "7. 重置端口"; echo ""; echo "8. 重置 API 密钥"
-        echo -e "\n9. ${YELLOW}${rp_menu_text}${NC}"; echo ""; echo "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
+        echo -e "\n9. ${YELLOW}${rp_menu_text}${NC}"; echo ""; echo "0. 返回主菜单"; echo ""; read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 2) systemctl stop "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
             3) systemctl restart "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 4) clear; systemctl status "$SERVICE_NAME"; press_any_key;;
@@ -296,7 +291,7 @@ manage_menu() {
 
 main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.3)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
+        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.4)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
         if is_installed; then
             echo "1. 管理 Sub-Store"; echo ""; echo -e "2. ${GREEN}更新 Sub-Store${NC}"; echo ""; echo -e "3. ${GREEN}更新脚本${NC}"
             echo ""; echo -e "4. ${RED}卸载 Sub-Store${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
