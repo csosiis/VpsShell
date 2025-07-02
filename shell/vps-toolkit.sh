@@ -1084,16 +1084,27 @@ sys_manage_menu() {
         clear
         echo -e "${WHITE}--- 系统综合管理 ---${NC}\n"
         echo "1. 系统信息查询"
+        echo ""
         echo "2. 清理系统垃圾"
+        echo ""
         echo "3. 修改主机名"
+        echo ""
         echo "4. 优化 DNS"
+        echo ""
         echo "5. 设置网络优先级 (IPv4/v6)"
+        echo ""
         echo "6. 设置 SSH 密钥登录"
+        echo ""
         echo "7. 设置系统时区"
-        echo "---"
+        echo ""
+        echo "--------------------------------"
+        echo ""
         echo "8. 安装 S-ui (面板)"
+        echo ""
         echo "9. 安装 3X-ui (面板)"
-        echo "---"
+        echo ""
+        echo "--------------------------------"
+        echo ""
         echo "0. 返回主菜单"
         echo ""
         read -p "请输入选项: " choice
@@ -1151,7 +1162,7 @@ singbox_main_menu() {
             echo ""
             echo "2. 新增节点"
             echo ""
-            echo "------------------------"
+            echo "-------------------------"
             echo ""
             echo "3. 启动 Sing-Box"
             echo ""
@@ -1161,10 +1172,13 @@ singbox_main_menu() {
             echo ""
             echo "6. 查看日志"
             echo ""
-            echo "------------------------"
+            echo "-------------------------"
+            echo ""
             echo -e "7. ${RED}卸载 Sing-Box${NC}"
             echo ""
             echo "0. 返回主菜单"
+            echo ""
+            echo "-------------------------"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
@@ -1255,6 +1269,8 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
+            echo "-------------------------"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_do_install ;;
@@ -1284,6 +1300,8 @@ main_menu() {
         echo -e "9. ${YELLOW}设置快捷命令 (vs)${NC}"
         echo ""
         echo -e "0. ${RED}退出脚本${NC}"
+        echo ""
+        echo -e "${WHITE}=====================================${NC}"
         echo ""
         read -p "请输入选项: " choice
 
