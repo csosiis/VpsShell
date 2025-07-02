@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ==============================================================================
-# Sub-Store 管理脚本 (v6.1)
+# Sub-Store 管理脚本 (v6.2)
 #
-# 基于 v6.0 版本修改：
-# 1. [优化] 将“更新脚本”和“更新Sub-Store”功能提升至主菜单，方便访问。
-# 2. [BUG修复] 修正菜单项颜色代码无法正确显示的问题。
+# 基于 v6.1 版本修改：
+# 1. [特性] 反代菜单项智能化：若已设置反代，则选项变为“更换反代域名”。
+# 2. [优化] 更换域名时，自动清理旧的 Nginx/Caddy 配置。
 # ==============================================================================
 
 # --- 全局变量和辅助函数 ---
@@ -205,18 +205,24 @@ handle_caddy_proxy() {
 }
 
 handle_nginx_proxy() {
-    echo ""; read -p "请输入您要使用的域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
+    local OLD_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    echo ""; read -p "请输入您要使用的新域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
     local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
     local NGINX_CONFIG_BLOCK="server {\n    listen 80;\n    listen [::]:80;\n    server_name ${DOMAIN};\n\n    location / {\n        proxy_pass http://localhost:${FRONTEND_PORT};\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade \$http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n    }\n}";
     clear; echo -e "${YELLOW}--- Nginx 配置指南 ---${NC}"; echo "请手动完成以下步骤，或选择让脚本自动执行。"; echo "1. 创建或编辑 Nginx 配置文件:"; echo -e "   ${GREEN}sudo vim /etc/nginx/sites-available/${DOMAIN}.conf${NC}"
     echo "2. 将以下代码块完整复制并粘贴到文件中："; echo -e "${WHITE}--------------------------------------------------${NC}"
     echo -e "${NGINX_CONFIG_BLOCK}"; echo -e "${WHITE}--------------------------------------------------${NC}"
-    echo "3. 启用该站点:"; echo -e "   ${GREEN}sudo ln -s /etc/nginx/sites-available/${DOMAIN}.conf /etc/nginx/sites-enabled/${NC}"; echo "4. 测试 Nginx 配置是否有语法错误:"; echo -e "   ${GREEN}sudo nginx -t${NC}"; echo "5. 重载 Nginx 服务以应用配置:"; echo -e "   ${GREEN}sudo systemctl reload nginx${NC}"; echo "6. (推荐) 申请 HTTPS 证书 (需提前安装 certbot):"; echo -e "   ${GREEN}sudo certbot --nginx -d ${DOMAIN}${NC}"
+    echo "3. 启用该站点:"; echo -e "   ${GREEN}sudo ln -s /etc/nginx/sites-available/${DOMAIN}.conf /etc/nginx/sites-enabled/${NC}"; echo "4. 测试 Nginx 配置是否有语法错误:"; echo -e "   ${GREEN}sudo nginx -t${NC}"
+    echo "5. 重载 Nginx 服务以应用配置:"; echo -e "   ${GREEN}sudo systemctl reload nginx${NC}"; echo "6. (推荐) 申请 HTTPS 证书 (需提前安装 certbot):"; echo -e "   ${GREEN}sudo certbot --nginx -d ${DOMAIN}${NC}"
     echo ""; read -p "是否要让脚本尝试自动执行以上所有步骤? (Y/n): " auto_choice
     if [[ "$auto_choice" == "y" || "$auto_choice" == "Y" ]]; then
         log_info "开始为 Nginx 自动配置..."; log_info "正在检查并安装 Certbot 及其 Nginx 插件..."
         set -e; apt-get update -y >/dev/null; apt-get install -y certbot python3-certbot-nginx >/dev/null; set +e
         log_info "Certbot 依赖检查/安装完毕。"
+        if [ -n "$OLD_DOMAIN" ]; then # v6.2 新增: 清理旧配置
+            local OLD_NGINX_CONF="/etc/nginx/sites-available/${OLD_DOMAIN}.conf"; local OLD_NGINX_LINK="/etc/nginx/sites-enabled/${OLD_DOMAIN}.conf"
+            log_warn "正在清理旧域名 ${OLD_DOMAIN} 的配置..."; [ -f "$OLD_NGINX_LINK" ] && rm -f "$OLD_NGINX_LINK"; [ -f "$OLD_NGINX_CONF" ] && rm -f "$OLD_NGINX_CONF"
+        fi
         NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"; log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"; echo -e "${NGINX_CONFIG_BLOCK}" > "$NGINX_CONF_PATH"
         if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"; else log_warn "站点似乎已被启用，跳过创建软链接。"; fi
         log_info "正在测试 Nginx 配置..."; if ! nginx -t; then log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"; return; fi
@@ -230,12 +236,8 @@ handle_nginx_proxy() {
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/sub_manager_new.sh"
-    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
-        log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"; press_any_key; return
-    fi
-    if cmp -s "$SCRIPT_PATH" "$temp_script"; then
-        log_info "脚本已经是最新版本，无需更新。"; rm "$temp_script"; press_any_key; return
-    fi
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"; press_any_key; return; fi
+    if cmp -s "$SCRIPT_PATH" "$temp_script"; then log_info "脚本已经是最新版本，无需更新。"; rm "$temp_script"; press_any_key; return; fi
     log_info "下载成功，正在应用更新..."; chmod +x "$temp_script"; mv "$temp_script" "$SCRIPT_PATH"
     log_info "✅ 脚本已成功更新！"; log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'sub')..."; exit 0
 }
@@ -243,12 +245,9 @@ do_update_script() {
 update_sub_store() {
     log_info "开始更新 Sub-Store 应用..."; if ! is_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
     set -e; cd "$INSTALL_DIR"
-    log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."
-    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    log_info "正在下载最新的前端文件 (dist.zip)..."
-    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    log_info "正在部署新版前端..."; rm -rf frontend
-    unzip -q dist.zip && mv dist frontend && rm dist.zip
+    log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    log_info "正在下载最新的前端文件 (dist.zip)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    log_info "正在部署新版前端..."; rm -rf frontend; unzip -q dist.zip && mv dist frontend && rm dist.zip
     log_info "正在重启 Sub-Store 服务以应用更新..."; systemctl restart "$SERVICE_NAME"; sleep 2; set +e
     if systemctl is-active --quiet "$SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
@@ -256,6 +255,12 @@ update_sub_store() {
 
 setup_reverse_proxy() {
     clear
+    local old_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    if [ -n "$old_domain" ]; then
+        log_info "检测到您已设置了反向代理域名: ${old_domain}"
+        log_warn "接下来的操作将使用新域名替换旧的配置。"
+    fi
+
     if command -v caddy &> /dev/null; then log_info "检测到 Caddy，将为您进行全自动配置。"; handle_caddy_proxy
     elif command -v nginx &> /dev/null; then log_info "检测到 Nginx，将为您生成配置代码和操作指南。"; handle_nginx_proxy
     elif command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then log_warn "检测到 Apache，但本脚本暂未支持自动生成其配置。";
@@ -268,11 +273,13 @@ setup_reverse_proxy() {
 
 manage_menu() {
     while true; do
-        clear; echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.1) ---${NC}\n"
+        clear; local rp_domain_check=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
+        if [ -n "$rp_domain_check" ]; then local rp_menu_text="更换反代域名"; else local rp_menu_text="设置反向代理 (推荐)"; fi
+        echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.2) ---${NC}\n"
         if systemctl is-active --quiet "$SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo ""; echo "2. 停止服务"; echo ""; echo "3. 重启服务"; echo ""; echo "4. 查看状态"; echo ""; echo "5. 查看日志"
         echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo ""; echo "7. 重置端口"; echo ""; echo "8. 重置 API 密钥"
-        echo -e "\n9. ${YELLOW}设置/更新反向代理${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
+        echo -e "\n9. ${YELLOW}${rp_menu_text}${NC}"; echo ""; echo "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 2) systemctl stop "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
             3) systemctl restart "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 4) clear; systemctl status "$SERVICE_NAME"; press_any_key;;
@@ -285,9 +292,9 @@ manage_menu() {
 
 main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.1)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
+        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.2)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
         if is_installed; then
-            echo "1. 管理 Sub-Store"; echo ""; echo -e "2. ${GREEN}更新 Sub-Store${NC}"; echo""; echo -e "3. ${GREEN}更新脚本${NC}"
+            echo "1. 管理 Sub-Store"; echo ""; echo -e "2. ${GREEN}更新 Sub-Store${NC}"; echo ""; echo -e "3. ${GREEN}更新脚本${NC}"
             echo ""; echo -e "4. ${RED}卸载 Sub-Store${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
             case $choice in 1) manage_menu ;; 2) update_sub_store ;; 3) do_update_script ;; 4) do_uninstall ;; 0) exit 0 ;; *) log_warn "无效选项！"; sleep 1 ;; esac
         else
