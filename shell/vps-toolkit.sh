@@ -64,23 +64,46 @@ generate_random_password() {
 
 check_and_install_dependencies() {
     log_info "开始检查并安装必需的依赖项..."
-    local dependencies=("lsb-release" "curl" "wget" "unzip" "git" "sudo" "iproute2" "dnsutils" "apt-transport-https" "debian-keyring" "debian-archive-keyring" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig" "jq" "uuid-runtime" "certbot" "python3-certbot-nginx")
+    # 修正后的列表，只包含真实的、可安装的软件包名称
+    local dependencies=(
+        "lsb-release"
+        "curl"
+        "wget"
+        "unzip"
+        "git"
+        "sudo"
+        "iproute2"
+        "dnsutils"
+        "apt-transport-https"
+        "debian-keyring"
+        "debian-archive-keyring"
+        "util-linux" # 包含 lscpu, df 等
+        "procps"     # 包含 free, uptime 等
+        "net-tools"  # 包含 ifconfig
+        "vnstat"
+        "jq"
+        "uuid-runtime"
+        "certbot"
+        "python3-certbot-nginx"
+    )
     local missing_dependencies=()
 
-    for dep in "${dependencies[@]}"; do
-        if ! dpkg -l | grep -q "^ii  $dep" &> /dev/null; then
-            missing_dependencies+=("$dep")
+    # 使用 dpkg-query 检查软件包状态，这比 grep 更准确
+    log_info "正在检查已安装的软件包..."
+    for pkg in "${dependencies[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+            missing_dependencies+=("$pkg")
         fi
     done
 
     if [ ${#missing_dependencies[@]} -gt 0 ]; then
-        log_warn "检测到以下缺失的依赖: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并安装依赖..."
+        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
+        log_info "正在更新软件包列表并开始安装..."
         set -e
         apt-get update -y
-        for dep in "${missing_dependencies[@]}"; do
-            log_info "正在安装 ${dep}..."
-            apt-get install -y "$dep"
+        for pkg in "${missing_dependencies[@]}"; do
+            log_info "正在安装 ${pkg}..."
+            apt-get install -y "$pkg"
         done
         set +e
         log_info "所有必需的依赖项已安装完毕。"
