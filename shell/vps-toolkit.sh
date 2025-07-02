@@ -405,9 +405,10 @@ singbox_do_install() {
     log_info "✅ Sing-Box 安装成功！"
     config_dir="/etc/sing-box"
     mkdir -p "$config_dir"
-    if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
-        log_info "正在创建默认的 Sing-Box 配置文件..."
-        cat > "$SINGBOX_CONFIG_FILE" <<EOL
+
+    # ==================== 关键修正点：修正 DNS 配置 ====================
+    log_info "正在创建修正后的 Sing-Box 默认配置文件..."
+    cat > "$SINGBOX_CONFIG_FILE" <<EOL
 {
   "log": {
     "level": "info",
@@ -415,8 +416,18 @@ singbox_do_install() {
   },
   "dns": {
     "servers": [
-      {"address": "https://dns.google/dns-query", "detour": "direct"},
-      {"address": "https://1.1.1.1/dns-query", "detour": "direct"}
+      {
+        "tag": "google",
+        "address": "https://dns.google/dns-query",
+        "address_resolver": "8.8.8.8",
+        "detour": "direct"
+      },
+      {
+        "tag": "cloudflare",
+        "address": "https://1.1.1.1/dns-query",
+        "address_resolver": "1.1.1.1",
+        "detour": "direct"
+      }
     ]
   },
   "inbounds": [],
@@ -432,7 +443,8 @@ singbox_do_install() {
   }
 }
 EOL
-    fi
+    # =================================================================
+
     log_info "正在启用并启动 Sing-Box 服务..."
     systemctl enable sing-box.service
     systemctl start sing-box
@@ -1453,14 +1465,23 @@ singbox_main_menu() {
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
             echo "1. 查看 / 管理节点"
+            echo ""
             echo "2. 新增节点"
-            echo "---"
+            echo ""
+            echo "-----------------------------"
+            echo ""
             echo "3. 启动 Sing-Box"
+            echo ""
             echo "4. 停止 Sing-Box"
+            echo ""
             echo "5. 重启 Sing-Box"
+            echo ""
             echo "6. 查看日志"
-            echo "---"
+            echo ""
+            echo "-----------------------------"
+            echo ""
             echo -e "7. ${RED}卸载 Sing-Box${NC}"
+            echo ""
             echo "0. 返回主菜单"
             echo ""
             read -p "请输入选项: " choice
@@ -1479,7 +1500,9 @@ singbox_main_menu() {
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
             log_warn "Sing-Box 尚未安装。"
+            echo ""
             echo "1. 安装 Sing-Box"
+            echo ""
             echo "0. 返回主菜单"
             echo ""
             read -p "请输入选项: " choice
