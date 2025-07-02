@@ -3,11 +3,19 @@
 #### 脚本汇总
 
 ```
+curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh && chmod +x vps-toolkit.sh && ./vps-toolkit.sh
+```
+
+
+
+#### 系统脚本
+
+```
 curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sys.sh && chmod +x sys.sh && ./sys.sh
 ```
 
 
-#### 自用Sing-Box节点搭建脚本
+#### Sing-Box节点脚本
 
 ```
 curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/singbox.sh && chmod +x singbox.sh && ./singbox.sh
@@ -15,7 +23,7 @@ curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell
 
 
 
-#### 一键搭建Sub-Store — 订阅节点管理
+#### Sub-Store — 搭建脚本
 
 ```
 curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store.sh && chmod +x sub-store.sh && ./sub-store.sh
