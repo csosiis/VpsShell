@@ -120,21 +120,23 @@ show_system_info() {
     clear
     log_info "正在查询系统信息，请稍候..."
 
-    # 检查核心命令是否存在，以防万一
+    # 检查核心命令是否存在
     if ! command -v lsb_release &> /dev/null || ! command -v lscpu &> /dev/null; then
         log_error "缺少核心查询命令 (如 lsb_release, lscpu)，请先执行依赖安装。"
         press_any_key
         return
     fi
 
-    # --- 数据获取部分 (与之前相同) ---
+    # --- 1. 更精确的数据获取 ---
     hostname_info=$(hostname)
     os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
     kernel_info=$(uname -r)
     cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
-    cpu_model=$(lscpu | grep "Model name" | awk -F: '{print $2}' | sed 's/^ *//')
+    # 将 CPU 型号和频率分开提取
+    cpu_model_full=$(lscpu | grep "^Model name:" | sed -e 's/Model name:[[:space:]]*//')
+    cpu_model=$(echo "$cpu_model_full" | sed 's/ @.*//') # 只取 '@' 前面的部分
+    cpu_freq_from_model=$(echo "$cpu_model_full" | sed -n 's/.*@ *//p') # 只取 '@' 后面的部分
     cpu_cores=$(lscpu | grep "^CPU(s):" | awk -F: '{print $2}' | sed 's/^ *//')
-    cpu_freq=$(lscpu | grep "CPU MHz" | awk -F: '{print $2}' | sed 's/^ *//')
     load_info=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^ *//')
     memory_info=$(free -h | grep Mem | awk '{printf "%s/%s (%.2f%%)", $3, $2, $3/$2*100}')
     disk_info=$(df -h | grep '/$' | awk '{print $3 "/" $2 " (" $5 ")"}')
@@ -150,42 +152,39 @@ show_system_info() {
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
 
-
-    # ==================== 关键修正点：使用 printf 格式化输出 ====================
-    # "%-14s" 的意思是：输出一个字符串，左对齐(-)，占据14个字符的宽度(14)，不足则补空格。
-    # 这样可以确保所有的冒号都能完美对齐。
-
+    # --- 2. 使用 printf 和全形空格进行手动视觉对齐 ---
     echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "主机名" "$hostname_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统版本" "$os_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "Linux版本" "$kernel_info"
+    # 使用全形空格“　”进行补位，确保视觉对齐
+    printf "${GREEN}主机名　　　: ${WHITE}%s${NC}\n" "$hostname_info"
+    printf "${GREEN}系统版本　　: ${WHITE}%s${NC}\n" "$os_info"
+    printf "${GREEN}Linux版本　 　: ${WHITE}%s${NC}\n" "$kernel_info"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU架构" "$cpu_arch"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU型号" "$cpu_model"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU核心数" "$cpu_cores"
-    printf "${GREEN}%-14s: ${WHITE}%s MHz${NC}\n" "CPU频率" "$cpu_freq"
+    printf "${GREEN}CPU架构　　 　: ${WHITE}%s${NC}\n" "$cpu_arch"
+    printf "${GREEN}CPU型号　　 　: ${WHITE}%s${NC}\n" "$cpu_model"
+    printf "${GREEN}CPU频率　　 　: ${WHITE}%s${NC}\n" "$cpu_freq_from_model"
+    printf "${GREEN}CPU核心数　 　: ${WHITE}%s${NC}\n" "$cpu_cores"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU占用" "$cpu_usage"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统负载" "$load_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "物理内存" "$memory_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "硬盘占用" "$disk_info"
+    printf "${GREEN}CPU占用　　 　: ${WHITE}%s${NC}\n" "$cpu_usage"
+    printf "${GREEN}系统负载　　: ${WHITE}%s${NC}\n" "$load_info"
+    printf "${GREEN}物理内存　　: ${WHITE}%s${NC}\n" "$memory_info"
+    printf "${GREEN}硬盘占用　　: ${WHITE}%s${NC}\n" "$disk_info"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "总接收" "$net_info_rx"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "总发送" "$net_info_tx"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "网络算法" "$net_algo"
+    printf "${GREEN}总接收　　　: ${WHITE}%s${NC}\n" "$net_info_rx"
+    printf "${GREEN}总发送　　　: ${WHITE}%s${NC}\n" "$net_info_tx"
+    printf "${GREEN}网络算法　　: ${WHITE}%s${NC}\n" "$net_algo"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "运营商" "$ip_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "IPv4地址" "$ip_addr"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "DNS地址" "$dns_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "地理位置" "$geo_info"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统时间" "$timezone $current_time"
+    printf "${GREEN}运营商　　　: ${WHITE}%s${NC}\n" "$ip_info"
+    printf "${GREEN}IPv4地址　  　: ${WHITE}%s${NC}\n" "$ip_addr"
+    printf "${GREEN}DNS地址　　 　: ${WHITE}%s${NC}\n" "$dns_info"
+    printf "${GREEN}地理位置　　: ${WHITE}%s${NC}\n" "$geo_info"
+    printf "${GREEN}系统时间　　: ${WHITE}%s${NC}\n" "$timezone $current_time"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "运行时长" "$uptime_info"
+    printf "${GREEN}运行时长　　: ${WHITE}%s${NC}\n" "$uptime_info"
     echo -e "${CYAN}-------------------------------------------------------${NC}"
 
     press_any_key
@@ -395,10 +394,12 @@ check_and_prompt_install_singbox() {
 # 安装 Sing-Box
 singbox_do_install() {
     if is_singbox_installed; then
+        echo ""
         log_info "Sing-Box 已经安装，跳过安装过程。"
         press_any_key
         return
     fi
+    echo ""
     log_info "Sing-Box 未安装，正在开始安装..."
     check_and_install_dependencies # 确保依赖就绪
     set -e
