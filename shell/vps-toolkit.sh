@@ -375,7 +375,7 @@ set_timezone() {
 
     # 恢复可能被修改的 PS3，避免影响其他可能使用 select 的地方
     unset PS3
-
+    echo ”“
     press_any_key
 }
 
