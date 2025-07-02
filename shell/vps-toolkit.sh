@@ -573,11 +573,19 @@ _handle_standalone_cert() {
     fi
 }
 
-
 # 主函数：申请SSL证书 (智能调度中心)
 apply_ssl_certificate() {
     local domain_name="$1"
-    log_info "开始智能检测环境并申请证书..."
+
+    # ==================== 关键修正点：在函数入口处统一检查证书是否存在 ====================
+    local cert_dir="/etc/letsencrypt/live/${domain_name}"
+    if [ -d "$cert_dir" ]; then
+        log_info "检测到域名 ${domain_name} 的证书已存在，跳过申请流程。"
+        return 0 # 返回 0 代表成功，因为我们已经有证书了
+    fi
+    # ======================================================================================
+
+    log_info "证书不存在，开始智能检测环境并为 ${domain_name} 申请新证书..."
 
     # 检查并安装 Certbot 主程序
     if ! command -v certbot &> /dev/null; then
@@ -589,19 +597,13 @@ apply_ssl_certificate() {
     if command -v caddy &> /dev/null; then
         _handle_caddy_cert "$domain_name"
     elif command -v apache2 &> /dev/null; then
-        # 检查 Apache 插件
         if ! dpkg -l | grep -q "python3-certbot-apache"; then
             log_info "正在安装 Certbot 的 Apache 插件..."
             apt-get install -y python3-certbot-apache
         fi
         _handle_apache_cert "$domain_name"
     else
-        # 默认使用 Nginx 模式。
-        # _handle_nginx_cert 函数内部会检查 nginx 是否已安装，如果没有则会提示用户安装。
-        # 这就完美地实现了“如果啥都没有，就默认装Nginx”的逻辑。
         log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
-
-        # 检查 Nginx 插件
         if ! dpkg -l | grep -q "python3-certbot-nginx"; then
             log_info "正在安装 Certbot 的 Nginx 插件..."
             apt-get install -y python3-certbot-nginx
@@ -1182,8 +1184,10 @@ update_sub_store_app() {
 
 # 查看访问链接
 substore_view_access_link() {
+    echo ""
     log_info "正在读取配置并生成访问链接...";
     if ! is_substore_installed; then
+        echo ""
         log_error "Sub-Store尚未安装。"
         press_any_key
         return
@@ -1283,6 +1287,7 @@ substore_reset_ports() {
 substore_reset_api_key() {
     if ! is_substore_installed; then log_error "Sub-Store 尚未安装。"; press_any_key; return; fi
 
+    echo ""
     log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"; echo ""; read -p "请输入 Y 确认: " choice;
     if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
         log_info "取消操作。"; press_any_key; return;
@@ -1656,7 +1661,7 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
-            echo -e "${WHITE}-----------------------${NC}\n"
+            echo -e "${WHITE}--------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_manage_menu ;;
