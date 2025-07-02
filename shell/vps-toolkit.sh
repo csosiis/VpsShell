@@ -1015,8 +1015,89 @@ substore_view_access_link() {
 
 # 重置端口
 substore_reset_ports() {
-    # 此函数与substore_do_install中的端口选择逻辑类似，篇幅原因暂不完全展开，核心是修改 $SUBSTORE_SERVICE_FILE 中的端口并重启服务。
-    log_info "该功能正在开发中，敬请期待！"
+    log_info "开始重置 Sub-Store 端口...";
+    if ! is_substore_installed; then
+        log_error "Sub-Store 尚未安装，无法重置端口。";
+        press_any_key
+        return
+    fi
+
+    CURRENT_FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    CURRENT_BACKEND_PORT=$(grep 'SUB_STORE_BACKEND_API_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+
+    log_info "当前前端端口: ${CURRENT_FRONTEND_PORT}"
+    log_info "当前后端端口: ${CURRENT_BACKEND_PORT}"
+    echo ""
+
+    local NEW_FRONTEND_PORT
+    while true; do
+        read -p "请输入新的前端访问端口 [直接回车则不修改: ${CURRENT_FRONTEND_PORT}]: " NEW_FRONTEND_PORT
+        NEW_FRONTEND_PORT=${NEW_FRONTEND_PORT:-$CURRENT_FRONTEND_PORT}
+        if [ "$NEW_FRONTEND_PORT" == "$CURRENT_FRONTEND_PORT" ]; then
+            break
+        fi
+        if check_port "$NEW_FRONTEND_PORT"; then
+            break
+        fi
+    done
+
+    local NEW_BACKEND_PORT
+    while true; do
+        read -p "请输入新的后端 API 端口 [直接回车则不修改: ${CURRENT_BACKEND_PORT}]: " NEW_BACKEND_PORT
+        NEW_BACKEND_PORT=${NEW_BACKEND_PORT:-$CURRENT_BACKEND_PORT}
+        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then
+            log_error "后端端口不能与前端端口相同！"
+            continue
+        fi
+        if [ "$NEW_BACKEND_PORT" == "$CURRENT_BACKEND_PORT" ]; then
+            break
+        fi
+        if check_port "$NEW_BACKEND_PORT"; then
+            break
+        fi
+    done
+
+    log_info "正在更新服务文件...";
+    set -e
+    sed -i "s|^Environment=\"SUB_STORE_FRONTEND_PORT=.*|Environment=\"SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}\"|" "$SUBSTORE_SERVICE_FILE"
+    sed -i "s|^Environment=\"SUB_STORE_BACKEND_API_PORT=.*|Environment=\"SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}\"|" "$SUBSTORE_SERVICE_FILE"
+
+    log_info "正在重载并重启服务...";
+    systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    sleep 2
+    set +e
+
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ 端口重置成功！"
+
+        # 检查并更新反向代理配置
+        REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
+            NGINX_CONF_PATH="/etc/nginx/sites-available/${REVERSE_PROXY_DOMAIN}.conf"
+            if [ -f "$NGINX_CONF_PATH" ]; then
+                log_info "检测到 Nginx 反代配置，正在自动更新端口...";
+                # 使用更精确的替换，避免错误修改其他 proxy_pass
+                sed -i "s|proxy_pass http://127.0.0.1:.*|proxy_pass http://127.0.0.1:${NEW_FRONTEND_PORT};|g" "$NGINX_CONF_PATH"
+                if nginx -t >/dev/null 2>&1; then
+                    systemctl reload nginx
+                    log_info "Nginx 配置已更新并重载。"
+                else
+                    log_error "更新 Nginx 端口后配置测试失败！请手动检查配置文件。"
+                fi
+            fi
+            # 未来可以加入对 Caddy 的支持
+            # if [ -f "/etc/caddy/Caddyfile" ] && grep -q "# Sub-Store config start" /etc/caddy/Caddyfile; then
+            #     log_info "检测到 Caddy 反代配置，正在自动更新端口...";
+            #     sed -i "/# Sub-Store config start/,/# Sub-Store config end/ s|reverse_proxy 127.0.0.1:.*|reverse_proxy 127.0.0.1:${NEW_FRONTEND_PORT}|" /etc/caddy/Caddyfile
+            #     systemctl reload caddy
+            #     log_info "Caddy 配置已更新并重载。"
+            # fi
+        fi
+        substore_view_access_link
+    else
+        log_error "服务重启失败！请检查日志。"
+    fi
     press_any_key
 }
 
