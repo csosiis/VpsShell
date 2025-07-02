@@ -31,6 +31,7 @@ SINGBOX_NODE_LINKS_FILE="/etc/sing-box/nodes_links.txt"
 SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/vs"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
+FLAG_FILE="/root/.vps_toolkit.initialized"
 
 # 日志与交互函数
 log_info() { echo -e "${GREEN}[信息] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
@@ -95,16 +96,6 @@ check_and_install_dependencies() {
 show_system_info() {
     clear
     log_info "正在查询系统信息，请稍候..."
-
-    # 依赖检查
-    local sys_deps=("lsb-release" "curl" "hostname" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig" "jq")
-    for dep in "${sys_deps[@]}"; do
-        if ! command -v $dep &> /dev/null; then
-            log_error "命令 '$dep' 未找到。请先运行依赖安装程序。"
-            press_any_key
-            return
-        fi
-    done
 
     # 主机名
     hostname_info=$(hostname)
@@ -1082,7 +1073,8 @@ setup_shortcut() {
 sys_manage_menu() {
     while true; do
         clear
-        echo -e "${WHITE}------ 系统综合管理 ------${NC}\n"
+        echo ""
+        echo -e "${WHITE}------ 系统综合管理 -------${NC}\n"
         echo "1. 系统信息查询"
         echo ""
         echo "2. 清理系统垃圾"
@@ -1316,7 +1308,24 @@ main_menu() {
         esac
     done
 }
-
+# 首次运行检查函数
+initial_setup_check() {
+    if [ ! -f "$FLAG_FILE" ]; then
+        log_info "脚本首次运行，开始自动检查并安装所有依赖..."
+        log_warn "这个过程可能需要一些时间，请耐心等待..."
+        check_and_install_dependencies
+        if [ $? -eq 0 ]; then
+            log_info "依赖项初始化完成，创建标记文件以跳过下次检查。"
+            touch "$FLAG_FILE"
+            log_info "按任意键继续进入主菜单..."
+            press_any_key
+        else
+            log_error "依赖安装失败！请检查网络或错误输出。脚本将退出。"
+            exit 1
+        fi
+    fi
+}
 # --- 脚本入口 ---
 check_root
+initial_setup_check # 新增这一行调用
 main_menu
