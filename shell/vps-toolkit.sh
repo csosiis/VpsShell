@@ -1308,17 +1308,29 @@ substore_manage_menu() {
         echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"
-        echo "1. 启动服务"; echo "2. 停止服务"; echo "3. 重启服务"
-        echo "4. 查看状态"; echo "5. 查看日志"
-        echo "---------------------------------"
+        echo "1. 启动服务"
+        echo ""
+        echo "2. 停止服务";
+        echo ""
+        echo "3. 重启服务"
+        echo ""
+        echo "4. 查看状态";
+        echo ""
+        echo "5. 查看日志"
+        echo ""
+        echo "--------------------------"
+        echo ""
         echo "6. 查看访问链接"
+        echo ""
         echo "7. 重置端口"
+        echo ""
         echo "8. 重置 API 密钥"
+        echo ""
         echo -e "9. ${YELLOW}${rp_menu_text}${NC}"
         echo ""
         echo "0. 返回主菜单"
         echo ""
-        echo -e "${WHITE}-------------------${NC}\n"
+        echo -e "${WHITE}--------------------------${NC}\n"
         read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
