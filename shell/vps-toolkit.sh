@@ -1574,6 +1574,7 @@ singbox_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
+            echo -e "${WHITE}-------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) singbox_do_install ;;
@@ -1648,7 +1649,7 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
-            echo -e "${WHITE}-------------------${NC}\n"
+            echo -e "${WHITE}-----------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_manage_menu ;;
