@@ -757,12 +757,14 @@ add_protocol_node() {
 add_vless_node() {
     if ! get_domain_and_common_config 1; then press_any_key; return; fi
     log_info "正在生成 VLESS 节点配置..."
+
+    # ==================== 关键修正点：移除了与 ws 传输不兼容的 "flow" 设置 ====================
     config="{
       \"type\": \"vless\",
       \"tag\": \"$tag\",
       \"listen\": \"::\",
       \"listen_port\": $port,
-      \"users\": [{\"uuid\": \"$uuid\", \"flow\": \"xtls-rprx-vision\"}],
+      \"users\": [{\"uuid\": \"$uuid\"}],
       \"tls\": {
         \"enabled\": true,
         \"server_name\": \"$domain_name\",
@@ -774,6 +776,8 @@ add_vless_node() {
         \"path\": \"/\"
       }
     }"
+    # ======================================================================================
+
     add_protocol_node "VLESS" "$config"
 }
 
@@ -863,9 +867,9 @@ view_node_info() {
             press_any_key
             return
         fi
-
+        echo “”
         log_info "当前已配置的节点链接信息："
-        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+        echo -e "${CYAN}--------------------------------------------------------------${NC}\n"
 
         mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
         all_links=""
@@ -875,22 +879,31 @@ view_node_info() {
             if [[ "$line" =~ ^vmess:// ]]; then
                 node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
             fi
+            echo ""
             echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+            echo ""
             echo -e "${line}"
+            echo ""
             echo -e "${CYAN}--------------------------------------------------------------${NC}"
             all_links+="$line"$'\n'
         done
 
         aggregated_link=$(echo -n "$all_links" | base64 -w0)
         echo -e "${GREEN}聚合订阅链接 (Base64):${NC}"
+        echo ""
         echo -e "${YELLOW}${aggregated_link}${NC}"
+        echo ""
         echo -e "${CYAN}--------------------------------------------------------------${NC}"
 
         echo ""
         echo "1. 新增节点"
+        echo ""
         echo "2. 删除节点"
+        echo ""
         echo "3. 推送节点到 Sub-Store / Telegram"
+        echo ""
         echo "0. 返回上级菜单"
+        echo ""
         read -p "请输入选项: " choice
         case $choice in
             1) singbox_add_node_menu; break ;;
