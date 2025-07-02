@@ -403,12 +403,28 @@ singbox_do_install() {
         exit 1
     fi
     log_info "✅ Sing-Box 安装成功！"
+
+    log_info "正在自动定位服务文件并修改运行权限..."
+    local service_file_path
+    service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+')
+
+    if [ -n "$service_file_path" ] && [ -f "$service_file_path" ]; then
+        log_info "找到服务文件位于: ${service_file_path}"
+        sed -i 's/User=sing-box/User=root/' "$service_file_path"
+        sed -i 's/Group=sing-box/Group=root/' "$service_file_path"
+        systemctl daemon-reload
+        log_info "服务权限修改完成。"
+    else
+        log_error "无法自动定位 sing-box.service 文件！跳过权限修改。可能会导致证书读取失败。"
+    fi
+
     config_dir="/etc/sing-box"
     mkdir -p "$config_dir"
 
-    # ==================== 关键修正点：修正 DNS 配置 ====================
-    log_info "正在创建修正后的 Sing-Box 默认配置文件..."
-    cat > "$SINGBOX_CONFIG_FILE" <<EOL
+    # ==================== 最终修正点：采用正确的 DNS 配置结构 ====================
+    if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
+        log_info "正在创建最终修正版的 Sing-Box 默认配置文件..."
+        cat > "$SINGBOX_CONFIG_FILE" <<EOL
 {
   "log": {
     "level": "info",
@@ -417,15 +433,20 @@ singbox_do_install() {
   "dns": {
     "servers": [
       {
-        "tag": "google",
-        "address": "https://dns.google/dns-query",
-        "address_resolver": "8.8.8.8",
+        "tag": "dns-bootstrap",
+        "address": "8.8.8.8",
         "detour": "direct"
       },
       {
-        "tag": "cloudflare",
+        "tag": "google-doh",
+        "address": "https://dns.google/dns-query",
+        "address_resolver": "dns-bootstrap",
+        "detour": "direct"
+      },
+      {
+        "tag": "cloudflare-doh",
         "address": "https://1.1.1.1/dns-query",
-        "address_resolver": "1.1.1.1",
+        "address_resolver": "dns-bootstrap",
         "detour": "direct"
       }
     ]
@@ -443,11 +464,12 @@ singbox_do_install() {
   }
 }
 EOL
-    # =================================================================
+    fi
+    # ==============================================================================
 
-    log_info "正在启用并启动 Sing-Box 服务..."
+    log_info "正在启用并重启 Sing-Box 服务..."
     systemctl enable sing-box.service
-    systemctl start sing-box
+    systemctl restart sing-box
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
     press_any_key
 }
@@ -1501,7 +1523,7 @@ singbox_main_menu() {
         else
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
-            log_warn "Sing-Box 尚未安装。"
+            " - Sing-Box 尚未安装。"
             echo ""
             echo "1. 安装 Sing-Box"
             echo ""
