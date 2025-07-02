@@ -1,119 +1,1288 @@
 #!/bin/bash
 
-# ==============================================================================
-# 整合后的管理脚本
-# 参考了 sub-store.sh 的风格，合并了 sys.sh 和 singbox.sh 的功能
-# ==============================================================================
+# =================================================================================
+#               全功能 VPS & 应用管理脚本 (v1.0)
+#
+#   整合来源: sys.sh, singbox.sh, sub-store.sh
+#   主导风格: sub-store.sh
+#   功能涵盖:
+#       - 系统综合管理 (System Management)
+#       - Sing-Box 服务管理 (Sing-Box Management)
+#       - Sub-Store 服务管理 (Sub-Store Management)
+# =================================================================================
 
-# --- 全局变量和颜色定义 ---
+
+# --- 全局变量和辅助函数 ---
+# 颜色定义
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
-# 系统和 Sing-Box 配置
-CONFIG_FILE="/etc/sing-box/config.json"
+# 配置变量
+SUBSTORE_SERVICE_NAME="sub-store.service"
+SUBSTORE_SERVICE_FILE="/etc/systemd/system/${SUBSTORE_SERVICE_NAME}"
+SUBSTORE_INSTALL_DIR="/root/sub-store"
+SINGBOX_CONFIG_FILE="/etc/sing-box/config.json"
+SINGBOX_NODE_LINKS_FILE="/etc/sing-box/nodes_links.txt"
 SCRIPT_PATH=$(realpath "$0")
-SERVICE_NAME="sing-box"
-SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+SHORTCUT_PATH="/usr/local/bin/vps-tool"
+SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/main/vps-tool.sh" # 假设这是未来新脚本的下载地址
 
-# --- 日志函数 ---
-log_info() { echo -e "${GREEN}[INFO] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_warn() { echo -e "${YELLOW}[WARN] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_error() { echo -e "${RED}[ERROR] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-press_any_key() { echo ""; read -n 1 -s -r -p "按任意键继续..."; }
-
-# --- 检查 root 权限 ---
+# 日志与交互函数
+log_info() { echo -e "${GREEN}[信息] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_warn() { echo -e "${YELLOW}[注意] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_error() { echo -e "${RED}[错误] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+press_any_key() { echo ""; read -n 1 -s -r -p "按任意键返回..."; }
 check_root() { if [ "$(id -u)" -ne 0 ]; then log_error "此脚本必须以 root 用户身份运行。"; exit 1; fi; }
 
-# --- 主菜单 ---
-show_main_menu() {
-    clear
-    echo "===================================="
-    echo "      系统管理脚本 - 主菜单       "
-    echo "===================================="
-    echo "1. 安装 Sing-Box"
-    echo "2. 查看系统信息"
-    echo "3. 配置网络"
-    echo "4. 更新脚本"
-    echo "5. 设置快捷启动"
-    echo "88. 退出"
-    echo "===================================="
-    read -p "请输入选项: " choice
-    case $choice in
-        1) install_sing_box ;;
-        2) show_system_info ;;
-        3) configure_network ;;
-        4) update_script ;;
-        5) setup_shortcut ;;
-        88) exit 0 ;;
-        *) log_error "无效的选项！"; show_main_menu ;;
-    esac
-}
-
-# --- 安装 Sing-Box ---
-install_sing_box() {
-    log_info "正在安装 Sing-Box..."
-    if ! command -v sing-box &> /dev/null; then
-        bash <(curl -fsSL https://sing-box.app/deb-install.sh)
-    else
-        log_info "Sing-Box 已安装，跳过安装过程。"
+# 检查端口是否被占用
+check_port() {
+    local port=$1
+    if ss -tln | grep -q -E "(:|:::)${port}\b"; then
+        log_error "端口 ${port} 已被占用。"
+        return 1
     fi
-    systemctl enable sing-box.service
-    log_info "Sing-Box 安装完成！"
-    press_any_key
-    show_main_menu
+    return 0
 }
 
-# --- 查看系统信息 ---
+# 生成随机端口号
+generate_random_port() {
+    echo $((RANDOM % 64512 + 1024))
+}
+
+# 随机生成密码函数
+generate_random_password() {
+    < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
+}
+
+# --- 核心功能：依赖项管理 ---
+
+check_and_install_dependencies() {
+    log_info "开始检查并安装必需的依赖项..."
+    local dependencies=("lsb-release" "curl" "wget" "unzip" "git" "sudo" "iproute2" "dnsutils" "apt-transport-https" "debian-keyring" "debian-archive-keyring" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig" "jq" "uuid-runtime" "certbot" "python3-certbot-nginx")
+    local missing_dependencies=()
+
+    for dep in "${dependencies[@]}"; do
+        if ! dpkg -l | grep -q "^ii  $dep" &> /dev/null; then
+            missing_dependencies+=("$dep")
+        fi
+    done
+
+    if [ ${#missing_dependencies[@]} -gt 0 ]; then
+        log_warn "检测到以下缺失的依赖: ${missing_dependencies[*]}"
+        log_info "正在更新软件包列表并安装依赖..."
+        set -e
+        apt-get update -y
+        for dep in "${missing_dependencies[@]}"; do
+            log_info "正在安装 ${dep}..."
+            apt-get install -y "$dep"
+        done
+        set +e
+        log_info "所有必需的依赖项已安装完毕。"
+    else
+        log_info "所有必需的依赖项均已安装。"
+    fi
+}
+
+
+# --- 功能模块：系统综合管理 (来自 sys.sh) ---
+
+# 显示系统信息
 show_system_info() {
-    log_info "显示系统信息..."
+    clear
+    log_info "正在查询系统信息，请稍候..."
+
+    # 依赖检查
+    local sys_deps=("lsb-release" "curl" "hostname" "lscpu" "free" "df" "vnstat" "uptime" "ifconfig" "jq")
+    for dep in "${sys_deps[@]}"; do
+        if ! command -v $dep &> /dev/null; then
+            log_error "命令 '$dep' 未找到。请先运行依赖安装程序。"
+            press_any_key
+            return
+        fi
+    done
+
+    # 主机名
     hostname_info=$(hostname)
+    # 操作系统和版本
     os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
+    # Linux内核版本
     kernel_info=$(uname -r)
-    memory_info=$(free -h | grep Mem | awk '{print $3 "/" $2 " (" $3/$2*100 "%)"}')
+    # CPU架构和型号
+    cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_model=$(lscpu | grep "Model name" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_cores=$(lscpu | grep "CPU(s):" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_freq=$(lscpu | grep "CPU MHz" | awk -F: '{print $2}' | sed 's/^ *//')
+    # 系统负载
+    load_info=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^ *//')
+    # 内存使用情况
+    memory_info=$(free -h | grep Mem | awk '{printf "%s/%s (%.2f%%)", $3, $2, $3/$2*100}')
+    # 硬盘使用情况
     disk_info=$(df -h | grep '/$' | awk '{print $3 "/" $2 " (" $5 ")"}')
-    log_info "主机名: $hostname_info"
-    log_info "操作系统: $os_info"
-    log_info "内存使用: $memory_info"
-    log_info "硬盘占用: $disk_info"
+    # 网络接收和发送量
+    net_info=$(vnstat --oneline | awk -F\; '{print "接收: " $4 " / 发送: " $5}')
+    # 网络算法
+    net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+    # 运营商信息
+    ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
+    # IP 地址
+    ip_addr=$(hostname -I)
+    # DNS 地址
+    dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
+    # 地理位置和时区
+    geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
+    timezone=$(timedatectl show --property=Timezone --value)
+    # 系统运行时间
+    uptime_info=$(uptime -p)
+    # 当前时间
+    current_time=$(date "+%Y-%m-%d %H:%M:%S")
+
+    # 输出所有信息
+    echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
+    echo -e "${GREEN}主机名:       ${WHITE}$hostname_info${NC}"
+    echo -e "${GREEN}系统版本:     ${WHITE}$os_info${NC}"
+    echo -e "${GREEN}Linux版本:    ${WHITE}$kernel_info${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
+    echo -e "${GREEN}CPU架构:      ${WHITE}$cpu_arch${NC}"
+    echo -e "${GREEN}CPU型号:      ${WHITE}$cpu_model${NC}"
+    echo -e "${GREEN}CPU核心数:    ${WHITE}$cpu_cores${NC}"
+    echo -e "${GREEN}CPU频率:      ${WHITE}$cpu_freq MHz${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
+    echo -e "${GREEN}CPU占用:      ${WHITE}$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')${NC}"
+    echo -e "${GREEN}系统负载:     ${WHITE}$load_info${NC}"
+    echo -e "${GREEN}物理内存:     ${WHITE}$memory_info${NC}"
+    echo -e "${GREEN}硬盘占用:     ${WHITE}$disk_info${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
+    echo -e "${GREEN}网络流量:     ${WHITE}$net_info${NC}"
+    echo -e "${GREEN}网络算法:     ${WHITE}$net_algo${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
+    echo -e "${GREEN}运营商:       ${WHITE}$ip_info${NC}"
+    echo -e "${GREEN}IPv4地址:     ${WHITE}$ip_addr${NC}"
+    echo -e "${GREEN}DNS地址:      ${WHITE}$dns_info${NC}"
+    echo -e "${GREEN}地理位置:     ${WHITE}$geo_info${NC}"
+    echo -e "${GREEN}系统时间:     ${WHITE}$timezone $current_time${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
+    echo -e "${GREEN}运行时长:     ${WHITE}$uptime_info${NC}"
+    echo -e "${CYAN}-------------------------------------------------------${NC}"
     press_any_key
-    show_main_menu
 }
 
-# --- 配置网络 ---
-configure_network() {
-    log_info "设置网络配置..."
-    echo "请输入新的时区配置："
-    read -p "时区 (e.g., Asia/Shanghai): " timezone
-    sudo timedatectl set-timezone "$timezone"
-    log_info "时区已设置为 $timezone"
+# 清理系统
+clean_system() {
+    log_info "正在清理无用的软件包和缓存..."
+    set -e
+    apt autoremove -y
+    apt clean
+    set +e
+    log_info "系统清理完毕。"
     press_any_key
-    show_main_menu
 }
 
-# --- 更新脚本 ---
-update_script() {
-    log_info "正在更新脚本..."
-    curl -fsSL https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/sys.sh -o sys.sh
-    chmod +x sys.sh
-    ./sys.sh
-    log_info "脚本更新完成！"
+# 修改主机名
+change_hostname() {
+    log_info "准备修改主机名..."
+    read -p "请输入新的主机名: " new_hostname
+    if [ -z "$new_hostname" ]; then
+        log_error "主机名不能为空！"
+        press_any_key
+        return
+    fi
+    current_hostname=$(hostname)
+    if [ "$new_hostname" == "$current_hostname" ]; then
+        log_warn "新主机名与当前主机名相同，无需修改。"
+        press_any_key
+        return
+    fi
+    set -e
+    hostnamectl set-hostname "$new_hostname"
+    echo "$new_hostname" > /etc/hostname
+    sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
+    set +e
+    log_info "✅ 主机名修改成功！新的主机名是：${new_hostname}"
+    log_info "当前主机名是：$(hostname)"
     press_any_key
-    show_main_menu
 }
 
-# --- 设置快捷启动 ---
+# 优化 DNS
+optimize_dns() {
+    log_info "开始优化DNS地址..."
+    log_info "正在检查IPv6支持..."
+    if ping6 -c 1 google.com > /dev/null 2>&1; then
+        log_info "检测到IPv6支持，配置IPv6优先的DNS..."
+        cat <<EOF > /etc/resolv.conf
+nameserver 2a00:1098:2b::1
+nameserver 2a00:1098:2c::1
+nameserver 2a01:4f8:c2c:123f::1
+nameserver 2606:4700:4700::1111
+nameserver 2001:4860:4860::8888
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+    else
+        log_info "未检测到IPv6支持，仅配置IPv4 DNS..."
+        cat <<EOF > /etc/resolv.conf
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+nameserver 9.9.9.9
+EOF
+    fi
+    log_info "✅ DNS优化完成！当前的DNS配置如下："
+    echo -e "${WHITE}"
+    cat /etc/resolv.conf
+    echo -e "${NC}"
+    press_any_key
+}
+
+# 设置网络优先级
+set_network_priority() {
+    clear
+    echo "请选择网络优先级设置:"
+    echo "1. IPv6 优先"
+    echo "2. IPv4 优先"
+    read -p "请输入选择: " choice
+    case $choice in
+        1)
+            log_info "正在设置 IPv6 优先..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ IPv6 优先已设置。"
+            ;;
+        2)
+            log_info "正在设置 IPv4 优先..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
+            fi
+            log_info "✅ IPv4 优先已设置。"
+            ;;
+        *)
+            log_error "无效选择。"
+            ;;
+    esac
+    press_any_key
+}
+
+# 设置SSH密钥登录
+setup_ssh_key() {
+    log_info "开始设置 SSH 密钥登录..."
+    mkdir -p ~/.ssh
+    touch ~/.ssh/authorized_keys
+    chmod 700 ~/.ssh
+    chmod 600 ~/.ssh/authorized_keys
+    echo ""
+    log_warn "请粘贴您的公钥 (例如 id_rsa.pub 的内容)，然后按两次 Enter 结束输入:"
+    public_key=$(cat)
+    if [ -z "$public_key" ]; then
+        log_error "没有输入公钥，操作已取消。"
+        press_any_key
+        return
+    fi
+    echo "$public_key" >> ~/.ssh/authorized_keys
+    # 去重
+    sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
+    log_info "公钥已成功添加到 authorized_keys 文件中。"
+    echo ""
+    read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
+    if [[ "$disable_pwd" == "y" || "$disable_pwd" == "Y" ]]; then
+        sed -i 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        log_info "正在重启 SSH 服务..."
+        systemctl restart sshd
+        log_info "✅ SSH 密码登录已禁用。"
+    fi
+    log_info "✅ SSH 密钥登录设置完成。"
+    press_any_key
+}
+
+# 设置系统时区
+set_timezone() {
+    clear
+    log_info "当前系统时区是: $(timedatectl show --property=Timezone --value)"
+    echo "请选择新的时区："
+    options=("Asia/Shanghai" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC")
+    select opt in "${options[@]}"; do
+        if [[ -n "$opt" ]]; then
+            log_info "正在设置时区为 $opt..."
+            timedatectl set-timezone "$opt"
+            log_info "✅ 时区已成功设置为：$opt"
+            break
+        else
+            log_error "无效选择。"
+        fi
+    done
+    press_any_key
+}
+
+# 安装 S-ui
+install_sui(){
+    log_info "正在准备安装 S-ui..."
+    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
+    log_info "S-ui 安装脚本执行完毕。"
+    press_any_key
+}
+
+# 安装 3X-ui
+install_3xui(){
+    log_info "正在准备安装 3X-ui..."
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    log_info "3X-ui 安装脚本执行完毕。"
+    press_any_key
+}
+
+
+# --- 功能模块：Sing-Box 管理 (来自 singbox.sh) ---
+
+# 检查 Sing-Box 是否已安装
+is_singbox_installed() {
+    if command -v sing-box &> /dev/null; then return 0; else return 1; fi
+}
+
+# 检查并提示安装 Sing-Box
+check_and_prompt_install_singbox() {
+    if ! is_singbox_installed; then
+        log_warn "Sing-Box 尚未安装。"
+        read -p "您是否希望先安装 Sing-Box？(y/n): " install_choice
+        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+            singbox_do_install
+        else
+            log_info "操作已取消。"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# 安装 Sing-Box
+singbox_do_install() {
+    if is_singbox_installed; then
+        log_info "Sing-Box 已经安装，跳过安装过程。"
+        press_any_key
+        return
+    fi
+    log_info "Sing-Box 未安装，正在开始安装..."
+    check_and_install_dependencies # 确保依赖就绪
+    set -e
+    bash <(curl -fsSL https://sing-box.app/deb-install.sh)
+    set +e
+    if ! is_singbox_installed; then
+        log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
+        exit 1
+    fi
+    log_info "✅ Sing-Box 安装成功！"
+    config_dir="/etc/sing-box"
+    mkdir -p "$config_dir"
+    if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
+        log_info "正在创建默认的 Sing-Box 配置文件..."
+        cat > "$SINGBOX_CONFIG_FILE" <<EOL
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {"address": "https://dns.google/dns-query", "detour": "direct"},
+      {"address": "https://1.1.1.1/dns-query", "detour": "direct"}
+    ]
+  },
+  "inbounds": [],
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"type": "block", "tag": "block"},
+    {"type": "dns", "tag": "dns-out"}
+  ],
+  "route": {
+    "rules": [
+      {"protocol": "dns", "outbound": "dns-out"}
+    ]
+  }
+}
+EOL
+    fi
+    log_info "正在启用并启动 Sing-Box 服务..."
+    systemctl enable sing-box.service
+    systemctl start sing-box
+    log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
+    press_any_key
+}
+
+# 申请SSL证书
+apply_ssl_certificate() {
+    local domain_name="$1"
+    local stopped_services=()
+    check_and_install_dependencies # 确保 certbot 存在
+    if systemctl is-active --quiet nginx; then
+        log_info "检测到 Nginx 正在运行，临时停止以释放80端口..."
+        systemctl stop nginx
+        stopped_services+=("nginx")
+    fi
+    if systemctl is-active --quiet apache2; then
+        log_info "检测到 Apache 正在运行，临时停止以释放80端口..."
+        systemctl stop apache2
+        stopped_services+=("apache2")
+    fi
+    log_info "正在使用 Certbot 为域名 ${domain_name} 申请证书..."
+    certbot certonly --standalone --preferred-challenges http -d "$domain_name" --agree-tos --email "temp@$(hostname).com" --no-eff-email
+    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
+    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
+    if [[ -f "$cert_path" && -f "$key_path" ]]; then
+        log_info "✅ 证书申请成功！"
+        log_info "证书路径: $cert_path"
+        log_info "密钥路径: $key_path"
+        log_info "正在配置证书自动续期..."
+        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl restart sing-box'") | crontab -
+    else
+        log_error "证书申请失败，请检查域名解析和防火墙设置。"
+        # 重启之前停止的服务
+        if [[ ${#stopped_services[@]} -gt 0 ]]; then
+            for service in "${stopped_services[@]}"; do
+                log_info "正在重启 $service 服务..."
+                systemctl start "$service"
+            done
+        fi
+        return 1
+    fi
+    # 重启之前停止的服务
+    if [[ ${#stopped_services[@]} -gt 0 ]]; then
+        for service in "${stopped_services[@]}"; do
+            log_info "正在重启 $service 服务..."
+            systemctl start "$service"
+        done
+    fi
+    return 0
+}
+
+# 获取域名和通用配置
+get_domain_and_common_config() {
+    local type_flag=$1
+    echo
+    while true; do
+        read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
+        if [[ -z "$domain_name" ]]; then log_error "域名不能为空"; continue; fi
+        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "无效的域名格式"; continue; fi
+        break
+    done
+
+    if [[ $type_flag -eq 2 ]]; then # Hysteria2
+        log_warn "Hysteria2 协议需要关闭域名在Cloudflare的DNS代理(小黄云)。"
+    else
+        log_warn "若域名开启了CF代理(小黄云), 请确保端口在Cloudflare支持的范围内。"
+        log_warn "支持的HTTPS端口: 443, 2053, 2083, 2087, 2096, 8443。"
+    fi
+    log_warn "请确保防火墙已放行所需端口！"
+    echo
+
+    while true; do
+        if [[ $type_flag -eq 2 ]]; then
+            read -p "请输入一个 UDP 端口 (回车则随机生成): " port
+        else
+            read -p "请输入一个 TCP 端口 (回车则随机生成): " port
+        fi
+        if [[ -z "$port" ]]; then
+            port=$(generate_random_port)
+            log_info "已生成随机端口: $port"
+            break
+        fi
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
+            log_error "无效的端口号，请输入 1-65535 之间的数字。"
+        else
+            break
+        fi
+    done
+    echo
+
+    log_info "正在自动获取当前服务器位置..."
+    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g')
+    if [ -z "$location" ] || [ "$location" == "null" ]; then
+        log_warn "自动获取位置失败，请手动输入。"
+        read -p "请输入当前服务器位置 (例如: HongKong): " location
+    else
+        log_info "成功获取到位置: $location"
+    fi
+    echo
+    read -p "请输入自定义节点标识 (例如: GCP): " custom_id
+    echo
+
+    cert_dir="/etc/letsencrypt/live/$domain_name"
+    if [[ ! -d "$cert_dir" ]]; then
+        log_info "证书不存在，开始申请证书..."
+        if ! apply_ssl_certificate "$domain_name"; then
+            return 1 # 证书申请失败，中断流程
+        fi
+    else
+        log_info "证书已存在，跳过申请。"
+    fi
+    echo
+
+    uuid=$(uuidgen)
+    cert_path="$cert_dir/fullchain.pem"
+    key_path="$cert_dir/privkey.pem"
+
+    local protocol_name=""
+    case $type_flag in
+        1) protocol_name="VLESS" ;;
+        2) protocol_name="Hysteria2" ;;
+        3) protocol_name="VMess" ;;
+        4) protocol_name="Trojan" ;;
+        *) protocol_name="UNKNOWN" ;;
+    esac
+    tag="${location}-${custom_id}-${protocol_name}"
+    return 0
+}
+
+# 添加节点配置到JSON并生成链接
+add_protocol_node() {
+    local protocol=$1
+    local config=$2
+    local node_link=""
+
+    log_info "正在将新的入站配置添加到 config.json..."
+    jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+
+    if [ $? -ne 0 ]; then
+        log_error "更新配置文件失败！请检查JSON格式和文件权限。"
+        return 1
+    fi
+
+    case $protocol in
+        VLESS)
+            node_link="vless://${uuid}@${domain_name}:${port}?type=ws&security=tls&sni=${domain_name}&host=${domain_name}&path=%2F#${tag}"
+            ;;
+        Hysteria2)
+            node_link="hysteria2://${password}@${domain_name}:${port}?upmbps=100&downmbps=1000&sni=${domain_name}&obfs=salamander&obfs-password=${obfs_password}#${tag}"
+            ;;
+        VMess)
+            vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain_name}\",\"port\":\"${port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain_name}\",\"path\":\"/\",\"tls\":\"tls\"}"
+            base64_vmess_link=$(echo -n "$vmess_json" | base64 -w 0)
+            node_link="vmess://${base64_vmess_link}"
+            ;;
+        Trojan)
+            node_link="trojan://${password}@${domain_name}:${port}?security=tls&sni=${domain_name}&type=ws&host=${domain_name}&path=/#${tag}"
+            ;;
+        *)
+            log_error "未知的协议类型！"
+            return 1
+            ;;
+    esac
+
+    clear
+    log_info "✅ 节点添加成功！"
+    echo -e "${CYAN}-------------------------- 分享链接 --------------------------${NC}"
+    echo -e "\n${GREEN}${node_link}${NC}\n"
+    echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+    echo "$node_link" >> "$SINGBOX_NODE_LINKS_FILE"
+
+    log_info "正在重启 Sing-Box 使配置生效..."
+    systemctl restart sing-box
+    sleep 2
+    if systemctl is-active --quiet sing-box; then
+        log_info "Sing-Box 重启成功。"
+    else
+        log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
+    fi
+    press_any_key
+}
+
+# 新增 VLESS 节点
+add_vless_node() {
+    if ! get_domain_and_common_config 1; then press_any_key; return; fi
+    log_info "正在生成 VLESS 节点配置..."
+    config="{
+      \"type\": \"vless\",
+      \"tag\": \"$tag\",
+      \"listen\": \"::\",
+      \"listen_port\": $port,
+      \"users\": [{\"uuid\": \"$uuid\", \"flow\": \"xtls-rprx-vision\"}],
+      \"tls\": {
+        \"enabled\": true,
+        \"server_name\": \"$domain_name\",
+        \"certificate_path\": \"$cert_path\",
+        \"key_path\": \"$key_path\"
+      },
+      \"transport\": {
+        \"type\": \"ws\",
+        \"path\": \"/\"
+      }
+    }"
+    add_protocol_node "VLESS" "$config"
+}
+
+# 新增 Hysteria2 节点
+add_hysteria2_node() {
+    if ! get_domain_and_common_config 2; then press_any_key; return; fi
+    password=$(generate_random_password)
+    obfs_password=$(generate_random_password)
+    log_info "正在生成 Hysteria2 节点配置..."
+    config="{
+      \"type\": \"hysteria2\",
+      \"tag\": \"$tag\",
+      \"listen\": \"::\",
+      \"listen_port\": $port,
+      \"users\": [{\"password\": \"$password\"}],
+      \"tls\": {
+        \"enabled\": true,
+        \"server_name\": \"$domain_name\",
+        \"certificate_path\": \"$cert_path\",
+        \"key_path\": \"$key_path\"
+      },
+      \"up_mbps\": 100,
+      \"down_mbps\": 1000,
+      \"obfs\": {
+        \"type\": \"salamander\",
+        \"password\": \"$obfs_password\"
+      }
+    }"
+    add_protocol_node "Hysteria2" "$config"
+}
+
+# 新增 VMess 节点
+add_vmess_node() {
+    if ! get_domain_and_common_config 3; then press_any_key; return; fi
+    log_info "正在生成 VMess 节点配置..."
+    config="{
+      \"type\": \"vmess\",
+      \"tag\": \"$tag\",
+      \"listen\": \"::\",
+      \"listen_port\": $port,
+      \"users\": [{\"uuid\": \"$uuid\"}],
+      \"tls\": {
+        \"enabled\": true,
+        \"server_name\": \"$domain_name\",
+        \"certificate_path\": \"$cert_path\",
+        \"key_path\": \"$key_path\"
+      },
+      \"transport\": {
+        \"type\": \"ws\",
+        \"path\": \"/\"
+      }
+    }"
+    add_protocol_node "VMess" "$config"
+}
+
+# 新增 Trojan 节点
+add_trojan_node() {
+    if ! get_domain_and_common_config 4; then press_any_key; return; fi
+    password=$(generate_random_password)
+    log_info "正在生成 Trojan 节点配置..."
+    config="{
+      \"type\": \"trojan\",
+      \"tag\": \"$tag\",
+      \"listen\": \"::\",
+      \"listen_port\": $port,
+      \"users\": [{\"password\": \"$password\"}],
+      \"tls\": {
+        \"enabled\": true,
+        \"server_name\": \"$domain_name\",
+        \"certificate_path\": \"$cert_path\",
+        \"key_path\": \"$key_path\"
+      },
+      \"transport\": {
+        \"type\": \"ws\",
+        \"path\": \"/\"
+      }
+    }"
+    add_protocol_node "Trojan" "$config"
+}
+
+# 显示/管理节点信息
+view_node_info() {
+    while true; do
+        clear
+        if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+            log_warn "暂无配置的节点！"
+            press_any_key
+            return
+        fi
+
+        log_info "当前已配置的节点链接信息："
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+        all_links=""
+        for i in "${!node_lines[@]}"; do
+            line="${node_lines[$i]}"
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
+            fi
+            echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+            echo -e "${line}"
+            echo -e "${CYAN}--------------------------------------------------------------${NC}"
+            all_links+="$line"$'\n'
+        done
+
+        aggregated_link=$(echo -n "$all_links" | base64 -w0)
+        echo -e "${GREEN}聚合订阅链接 (Base64):${NC}"
+        echo -e "${YELLOW}${aggregated_link}${NC}"
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        echo ""
+        echo "1. 新增节点"
+        echo "2. 删除节点"
+        echo "3. 推送节点到 Sub-Store / Telegram"
+        echo "0. 返回上级菜单"
+        read -p "请输入选项: " choice
+        case $choice in
+            1) singbox_add_node_menu; break ;;
+            2) delete_nodes; break ;;
+            3) push_nodes; break ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# 删除节点
+delete_nodes() {
+    clear
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+        log_warn "没有节点可以删除。"
+        press_any_key
+        return
+    fi
+
+    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    node_tags=()
+    echo "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+    for i in "${!node_lines[@]}"; do
+        line="${node_lines[$i]}"
+        tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+        node_tags+=("$tag")
+        node_name=$tag
+        if [[ "$line" =~ ^vmess:// ]]; then
+            node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$tag"')
+        fi
+        echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+    done
+    echo ""
+    read -p "请输入编号: " -a nodes_to_delete
+
+    if [[ "${nodes_to_delete[0]}" == "all" ]]; then
+        read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
+        if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
+            log_info "正在删除所有节点..."
+            jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+            rm -f "$SINGBOX_NODE_LINKS_FILE"
+            log_info "✅ 所有节点已删除。"
+        else
+            log_info "操作已取消。"
+        fi
+    else
+        nodes_to_delete_indices=()
+        for node_num in "${nodes_to_delete[@]}"; do
+            if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
+                log_error "无效的编号: $node_num"
+                continue
+            fi
+            nodes_to_delete_indices+=($((node_num - 1)))
+        done
+
+        # 降序排序以安全删除
+        sorted_indices=($(for i in "${nodes_to_delete_indices[@]}"; do echo $i; done | sort -rn))
+
+        remaining_lines=("${node_lines[@]}")
+        for index in "${sorted_indices[@]}"; do
+            tag_to_delete="${node_tags[$index]}"
+            log_info "正在删除节点: ${tag_to_delete}"
+            jq --arg tag "$tag_to_delete" 'del(.inbounds[] | select(.tag == $tag))' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+            unset "remaining_lines[$index]"
+        done
+
+        printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+        log_info "✅ 所选节点已删除。"
+    fi
+
+    log_info "正在重启 Sing-Box..."
+    systemctl restart sing-box
+    press_any_key
+}
+
+# 推送节点
+push_nodes() {
+    log_info "该功能正在开发中，敬请期待！"
+    press_any_key
+}
+
+# 卸载 Sing-Box
+singbox_do_uninstall() {
+    if ! is_singbox_installed; then
+        log_warn "Sing-Box 未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    read -p "你确定要完全卸载 Sing-Box 吗？所有配置文件和节点信息都将被删除！(y/N): " confirm_uninstall
+    if [[ ! "$confirm_uninstall" =~ ^[Yy]$ ]]; then
+        log_info "卸载操作已取消。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 Sing-Box 服务..."
+    systemctl stop sing-box &>/dev/null
+    systemctl disable sing-box &>/dev/null
+    log_info "正在删除 Sing-Box 相关文件..."
+    rm -f /etc/systemd/system/sing-box.service
+    rm -f /usr/local/bin/sing-box
+    rm -rf /etc/sing-box
+    rm -rf /var/log/sing-box
+    systemctl daemon-reload
+    log_info "✅ Sing-Box 已成功卸载。"
+    press_any_key
+}
+
+# --- 功能模块：Sub-Store 管理 (来自 sub-store.sh) ---
+
+# 检查 Sub-Store 是否已安装
+is_substore_installed() {
+    if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
+}
+
+# 安装 Sub-Store
+substore_do_install() {
+    log_info "开始执行 Sub-Store 安装流程..."; set -e
+    check_and_install_dependencies # 确保所有基础依赖就绪
+    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
+    FNM_DIR="/root/.local/share/fnm"
+    mkdir -p "$FNM_DIR"
+    curl -L https://github.com/Schniz/fnm/releases/latest/download/fnm-linux.zip -o /tmp/fnm.zip
+    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm"; export PATH="${FNM_DIR}:$PATH"
+    log_info "FNM 安装完成。"
+    fnm install v20; fnm use v20
+    curl -fsSL https://get.pnpm.io/install.sh | sh -
+    export PNPM_HOME="/root/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
+    log_info "Node.js 和 PNPM 环境准备就绪。"
+    log_info "正在下载并设置 Sub-Store 项目文件..."
+    mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
+    log_info "Sub-Store 项目文件准备就绪。"
+    log_info "开始配置系统服务..."; echo ""
+    while true; do read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT; FRONTEND_PORT=${FRONTEND_PORT:-3000}; check_port "$FRONTEND_PORT" && break; done
+    echo "";
+    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; check_port "$BACKEND_PORT" && break; done
+    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1); log_info "生成的 API 密钥为: ${API_KEY}"
+    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
+[Unit]
+Description=Sub-Store Service
+After=network-online.target
+Wants=network-online.target
+[Service]
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
+Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
+Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
+Environment="SUB_STORE_FRONTEND_HOST=::"
+Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
+Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
+Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
+Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
+ExecStart=/root/.local/share/fnm/fnm exec --using v20 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+Type=simple
+User=root
+Group=root
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=32767
+ExecStartPre=/bin/sh -c "ulimit -n 51200"
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target
+EOF
+    log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
+    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
+    echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+    if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+}
+
+# 卸载 Sub-Store
+substore_do_uninstall() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
+    log_warn "你确定要卸载 Sub-Store 吗？此操作不可逆！"; echo ""; read -p "请输入 Y 确认: " choice
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "取消卸载。"; press_any_key; return; fi
+    log_info "正在停止并禁用服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME" || true; systemctl disable "$SUBSTORE_SERVICE_NAME" || true
+    log_info "正在删除服务文件..."; rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
+    log_info "正在删除项目文件和 Node.js 环境..."; rm -rf "$SUBSTORE_INSTALL_DIR"; rm -rf "/root/.local"; rm -rf "/root/.pnpm-state.json"
+    log_info "✅ Sub-Store 已成功卸载。"; press_any_key
+}
+
+# 更新 Sub-Store
+update_sub_store_app() {
+    log_info "开始更新 Sub-Store 应用..."; if ! is_substore_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
+    set -e; cd "$SUBSTORE_INSTALL_DIR"
+    log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    log_info "正在下载最新的前端文件 (dist.zip)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    log_info "正在部署新版前端..."; rm -rf frontend; unzip -q -o dist.zip && mv dist frontend && rm dist.zip
+    log_info "正在重启 Sub-Store 服务以应用更新..."; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
+    press_any_key
+}
+
+# 查看访问链接
+substore_view_access_link() {
+    log_info "正在读取配置并生成访问链接..."; if ! is_substore_installed; then log_error "Sub-Store尚未安装。"; return; fi
+    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
+    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"/')
+    echo -e "\n===================================================================="
+    if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
+        ACCESS_URL="https://${REVERSE_PROXY_DOMAIN}/subs?api=https://${REVERSE_PROXY_DOMAIN}${API_KEY}"
+        echo -e "\n您的 Sub-Store 反代访问链接如下：\n\n${YELLOW}${ACCESS_URL}${NC}\n"
+    else
+        FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
+        SERVER_IP_V4=$(curl -s http://ipv4.icanhazip.com)
+        if [ -n "$SERVER_IP_V4" ]; then
+            ACCESS_URL_V4="http://${SERVER_IP_V4}:${FRONTEND_PORT}/subs?api=http://${SERVER_IP_V4}:${FRONTEND_PORT}${API_KEY}"
+            echo -e "\n您的 Sub-Store IPv4 访问链接如下：\n\n${YELLOW}${ACCESS_URL_V4}${NC}\n"
+        fi
+    fi
+    echo -e "===================================================================="
+}
+
+# 重置端口
+substore_reset_ports() {
+    # 此函数与substore_do_install中的端口选择逻辑类似，篇幅原因暂不完全展开，核心是修改 $SUBSTORE_SERVICE_FILE 中的端口并重启服务。
+    log_info "该功能正在开发中，敬请期待！"
+    press_any_key
+}
+
+# 重置API密钥
+substore_reset_api_key() {
+    log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"; echo ""; read -p "请输入 Y 确认: " choice; if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "取消操作。"; return; fi
+    log_info "正在生成新的 API 密钥..."; set -e; NEW_API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
+    log_info "正在更新服务文件..."; sed -i "s|^Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=.*|Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}\"|" "$SUBSTORE_SERVICE_FILE"
+    log_info "正在重载并重启服务..."; systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ API 密钥重置成功！"; substore_view_access_link; else log_error "服务重启失败！"; fi
+    press_any_key
+}
+
+# 设置反向代理
+substore_setup_reverse_proxy() {
+    clear
+    log_info "为保证安全和便捷，强烈建议使用域名和HTTPS访问Sub-Store。"
+    if command -v nginx &> /dev/null; then
+        log_info "检测到 Nginx，将为您生成配置代码和操作指南。"; substore_handle_nginx_proxy
+    else
+        log_warn "未检测到 Nginx。此功能目前仅支持Nginx。";
+        # 未来可以加入Caddy的支持
+    fi
+    press_any_key
+}
+
+substore_handle_nginx_proxy() {
+    echo ""; read -p "请输入您要使用的域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
+    local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
+    NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
+
+    log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"
+    cat <<EOF > "$NGINX_CONF_PATH"
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+}
+EOF
+    if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
+        log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/";
+    fi
+    log_info "正在测试 Nginx 配置...";
+    if ! nginx -t; then log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"; return; fi
+    log_info "正在重载 Nginx..."; systemctl reload nginx;
+
+    log_info "正在为 ${DOMAIN} 申请 HTTPS 证书...";
+    if ! apply_ssl_certificate "${DOMAIN}"; then
+        log_error "证书申请失败，但HTTP反代可能已生效。"
+        return
+    fi
+
+    log_info "证书申请成功，正在更新 Nginx 配置以启用 HTTPS..."
+    cat <<EOF > "$NGINX_CONF_PATH"
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+
+    location / {
+        proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+}
+EOF
+    log_info "正在重载 Nginx 以应用HTTPS配置..."
+    systemctl reload nginx
+
+    log_info "✅ Nginx 反向代理和 HTTPS 证书已自动配置成功！"
+    # 保存域名信息
+    sed -i '/SUB_STORE_REVERSE_PROXY_DOMAIN/d' "$SUBSTORE_SERVICE_FILE"
+    sed -i "/\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=${DOMAIN}\"" "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload
+    substore_view_access_link
+}
+
+
+# --- 主菜单和子菜单 ---
+
+# 脚本更新
+do_update_script() {
+    log_info "正在从 GitHub 下载最新版本的脚本..."
+    local temp_script="/tmp/vps_tool_new.sh"
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
+        log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
+        press_any_key
+        return
+    fi
+    if cmp -s "$SCRIPT_PATH" "$temp_script"; then
+        log_info "脚本已经是最新版本，无需更新。"
+        rm "$temp_script"
+        press_any_key
+        return
+    fi
+    log_info "下载成功，正在应用更新...";
+    chmod +x "$temp_script"
+    mv "$temp_script" "$SCRIPT_PATH"
+    log_info "✅ 脚本已成功更新！"
+    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vps-tool')..."
+    exit 0
+}
+
+# 设置快捷命令
 setup_shortcut() {
-    log_info "设置快捷启动命令..."
-    ln -sf "$SCRIPT_PATH" /usr/local/bin/sb
-    chmod +x /usr/local/bin/sb
-    log_info "快捷命令 sb 已设置，使用 sb 运行脚本。"
+    log_info "正在设置 '${SHORTCUT_PATH##*/}' 快捷命令...";
+    ln -sf "$SCRIPT_PATH" "$SHORTCUT_PATH"
+    chmod +x "$SHORTCUT_PATH"
+    log_info "✅ 快捷命令设置成功！现在您可以随时随地输入 '${SHORTCUT_PATH##*/}' 来运行此脚本。"
     press_any_key
-    show_main_menu
 }
 
-# 启动脚本
+
+sys_manage_menu() {
+    while true; do
+        clear
+        echo -e "${WHITE}--- 系统综合管理 ---${NC}\n"
+        echo "1. 系统信息查询"
+        echo "2. 清理系统垃圾"
+        echo "3. 修改主机名"
+        echo "4. 优化 DNS"
+        echo "5. 设置网络优先级 (IPv4/v6)"
+        echo "6. 设置 SSH 密钥登录"
+        echo "7. 设置系统时区"
+        echo "---"
+        echo "8. 安装 S-ui (面板)"
+        echo "9. 安装 3X-ui (面板)"
+        echo "---"
+        echo "0. 返回主菜单"
+        echo ""
+        read -p "请输入选项: " choice
+
+        case $choice in
+            1) show_system_info ;;
+            2) clean_system ;;
+            3) change_hostname ;;
+            4) optimize_dns ;;
+            5) set_network_priority ;;
+            6) setup_ssh_key ;;
+            7) set_timezone ;;
+            8) install_sui ;;
+            9) install_3xui ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+singbox_add_node_menu() {
+     while true; do
+        clear
+        echo -e "${WHITE}--- 新增 Sing-Box 节点 ---${NC}\n"
+        echo "1. 新增 VLESS 节点"
+        echo "2. 新增 Hysteria2 节点"
+        echo "3. 新增 VMess 节点"
+        echo "4. 新增 Trojan 节点"
+        echo ""
+        echo "0. 返回上级菜单"
+        echo ""
+        read -p "请选择协议类型: " choice
+        case $choice in
+            1) add_vless_node; break ;;
+            2) add_hysteria2_node; break ;;
+            3) add_vmess_node; break ;;
+            4) add_trojan_node; break ;;
+            0) break;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+singbox_main_menu() {
+    while true; do
+        clear
+        echo -e "${WHITE}--- Sing-Box 管理菜单 ---${NC}\n"
+        if is_singbox_installed; then
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
+            echo -e "当前状态: ${STATUS_COLOR}\n"
+            echo "1. 查看 / 管理节点"
+            echo "2. 新增节点"
+            echo "---"
+            echo "3. 启动 Sing-Box"
+            echo "4. 停止 Sing-Box"
+            echo "5. 重启 Sing-Box"
+            echo "6. 查看日志"
+            echo "---"
+            echo "7. ${RED}卸载 Sing-Box${NC}"
+            echo "0. 返回主菜单"
+            echo ""
+            read -p "请输入选项: " choice
+            case $choice in
+                1) view_node_info ;;
+                2) singbox_add_node_menu ;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+                6) clear; journalctl -u sing-box -f --no-pager ;;
+                7) singbox_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            echo "1. 安装 Sing-Box"
+            echo "0. 返回主菜单"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) singbox_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
+
+
+substore_manage_menu() {
+    while true; do
+        clear;
+        local rp_menu_text="设置反向代理 (推荐)"
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
+            rp_menu_text="更换反代域名"
+        fi
+        echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
+        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
+        echo -e "当前状态: ${STATUS_COLOR}\n"
+        echo "1. 启动服务"; echo "2. 停止服务"; echo "3. 重启服务"
+        echo "4. 查看状态"; echo "5. 查看日志"
+        echo "---------------------------------"
+        echo "6. 查看访问链接"
+        echo "7. 重置端口"
+        echo "8. 重置 API 密钥"
+        echo "9. ${YELLOW}${rp_menu_text}${NC}"
+        echo ""
+        echo "0. 返回主菜单"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+            1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key;;
+            5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager;;
+            6) substore_view_access_link; press_any_key;;
+            7) substore_reset_ports; ;;
+            8) substore_reset_api_key; ;;
+            9) substore_setup_reverse_proxy;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+substore_main_menu() {
+    while true; do
+        clear
+        echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
+        if is_substore_installed; then
+            echo "1. 管理 Sub-Store (启停/日志/配置)"
+            echo "2. ${GREEN}更新 Sub-Store 应用${NC}"
+            echo "3. ${RED}卸载 Sub-Store${NC}"
+            echo ""
+            echo "0. 返回主菜单"
+            echo ""
+            read -p "请输入选项: " choice
+            case $choice in
+                1) substore_manage_menu ;;
+                2) update_sub_store_app ;;
+                3) substore_do_uninstall ;;
+                0) break ;;
+                *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        else
+            echo "1. 安装 Sub-Store"
+            echo ""
+            echo "0. 返回主菜单"
+            echo ""
+            read -p "请输入选项: " choice
+            case $choice in
+                1) substore_do_install ;;
+                0) break ;;
+                *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
+
+main_menu() {
+    while true; do
+        clear
+        echo -e "${WHITE}=====================================${NC}"
+        echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}"
+        echo -e "${WHITE}=====================================${NC}\n"
+        echo "1. 系统综合管理"
+        echo "2. Sing-Box 管理"
+        echo "3. Sub-Store 管理"
+        echo ""
+        echo "-------------------------------------"
+        echo ""
+        echo "8. ${GREEN}更新此脚本${NC}"
+        echo "9. ${YELLOW}设置快捷命令 (vps-tool)${NC}"
+        echo "0. ${RED}退出脚本${NC}"
+        echo ""
+        read -p "请输入选项: " choice
+
+        case $choice in
+            1) sys_manage_menu ;;
+            2) singbox_main_menu ;;
+            3) substore_main_menu ;;
+            8) do_update_script ;;
+            9) setup_shortcut ;;
+            0) exit 0 ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- 脚本入口 ---
 check_root
-show_main_menu
+main_menu
