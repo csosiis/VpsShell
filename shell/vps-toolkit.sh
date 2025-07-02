@@ -869,7 +869,7 @@ view_node_info() {
         fi
         echo “”
         log_info "当前已配置的节点链接信息："
-        echo -e "${CYAN}--------------------------------------------------------------${NC}\n"
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
 
         mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
         all_links=""
@@ -889,6 +889,7 @@ view_node_info() {
         done
 
         aggregated_link=$(echo -n "$all_links" | base64 -w0)
+         echo ""
         echo -e "${GREEN}聚合订阅链接 (Base64):${NC}"
         echo ""
         echo -e "${YELLOW}${aggregated_link}${NC}"
@@ -925,15 +926,25 @@ delete_nodes() {
     fi
 
     mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
-    node_tags=()
-    echo "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+
+    # 提取所有节点的标签用于后续的 JSON 文件操作
+    declare -A node_tags_map
     for i in "${!node_lines[@]}"; do
         line="${node_lines[$i]}"
         tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-        node_tags+=("$tag")
-        node_name=$tag
         if [[ "$line" =~ ^vmess:// ]]; then
-            node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$tag"')
+            # 对于 Vmess, #后面的内容就是tag，无需特殊解码
+            :
+        fi
+        node_tags_map[$i]=$tag
+    done
+
+    echo "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+    for i in "${!node_lines[@]}"; do
+        line="${node_lines[$i]}"
+        node_name=${node_tags_map[$i]}
+        if [[ "$line" =~ ^vmess:// ]]; then
+            node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
         fi
         echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
     done
@@ -951,27 +962,52 @@ delete_nodes() {
             log_info "操作已取消。"
         fi
     else
-        nodes_to_delete_indices=()
+        indices_to_delete=()
         for node_num in "${nodes_to_delete[@]}"; do
             if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
                 log_error "无效的编号: $node_num"
                 continue
             fi
-            nodes_to_delete_indices+=($((node_num - 1)))
+            indices_to_delete+=($((node_num - 1)))
         done
 
-        # 降序排序以安全删除
-        sorted_indices=($(for i in "${nodes_to_delete_indices[@]}"; do echo $i; done | sort -rn))
+        # 从 config.json 中删除
+        tags_to_delete=()
+        for index in "${indices_to_delete[@]}"; do
+            tags_to_delete+=("${node_tags_map[$index]}")
+        done
+        # 使用 jq 一次性删除所有选中的 tag
+        if [ ${#tags_to_delete[@]} -gt 0 ]; then
+            log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
+            jq_filter='del(.inbounds[] | select(.tag as $tag | ($ARGS.positional | index($tag))))'
+            jq --argjson tags_to_delete "$(printf '%s\n' "${tags_to_delete[@]}" | jq -R . | jq -s .)" "$jq_filter" --args "${tags_to_delete[@]}" "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+        fi
 
-        remaining_lines=("${node_lines[@]}")
-        for index in "${sorted_indices[@]}"; do
-            tag_to_delete="${node_tags[$index]}"
-            log_info "正在删除节点: ${tag_to_delete}"
-            jq --arg tag "$tag_to_delete" 'del(.inbounds[] | select(.tag == $tag))' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-            unset "remaining_lines[$index]"
+        # 从 nodes_links.txt 中删除 (通过重建文件)
+        remaining_lines=()
+        for i in "${!node_lines[@]}"; do
+            should_keep=true
+            for del_idx in "${indices_to_delete[@]}"; do
+                if [[ $i -eq $del_idx ]]; then
+                    should_keep=false
+                    break
+                fi
+            done
+            if $should_keep; then
+                remaining_lines+=("${node_lines[$i]}")
+            fi
         done
 
-        printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+        # ==================== 关键修正点 ====================
+        if [ ${#remaining_lines[@]} -eq 0 ]; then
+            # 如果没有剩余节点，则直接删除文件
+            log_info "所有节点均已删除，正在移除节点链接文件..."
+            rm -f "$SINGBOX_NODE_LINKS_FILE"
+        else
+            # 如果还有剩余节点，则将它们写回文件
+            printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+        fi
+        # ===================================================
         log_info "✅ 所选节点已删除。"
     fi
 
@@ -1536,7 +1572,7 @@ singbox_main_menu() {
         else
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
-            " - Sing-Box 尚未安装。"
+            echo " - Sing-Box 尚未安装。"
             echo ""
             echo "1. 安装 Sing-Box"
             echo ""
