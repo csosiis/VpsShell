@@ -336,19 +336,38 @@ setup_ssh_key() {
 # 设置系统时区
 set_timezone() {
     clear
-    log_info "当前系统时区是: $(timedatectl show --property=Timezone --value)"
-    echo "请选择新的时区："
-    options=("Asia/Shanghai" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC")
+
+    # ==================== 关键修正点 1：修正 log_info 调用 ====================
+    # 将变量传递给 log_info 函数，而不是在函数外部拼接字符串
+    local current_timezone
+    current_timezone=$(timedatectl show --property=Timezone --value)
+    log_info "当前系统时区是: ${current_timezone}"
+    # ======================================================================
+
+    echo ""
+    log_info "请选择新的时区："
+
+    # ==================== 关键修正点 2：在选项中增加“返回”选项 ====================
+    options=("Asia/Shanghai" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
+
     select opt in "${options[@]}"; do
-        if [[ -n "$opt" ]]; then
+        # 当用户选择“返回上一级菜单”或输入无效选项后按回车时
+        if [[ "$opt" == "返回上一级菜单" ]]; then
+            log_info "操作已取消。"
+            break
+        elif [[ -n "$opt" ]]; then
+            # 如果选择的是一个有效的时区
             log_info "正在设置时区为 $opt..."
             timedatectl set-timezone "$opt"
             log_info "✅ 时区已成功设置为：$opt"
             break
         else
-            log_error "无效选择。"
+            # 如果输入了无效的数字
+            log_error "无效选项，请输入列表中的数字。"
         fi
     done
+    # ============================================================================
+
     press_any_key
 }
 
@@ -1556,6 +1575,7 @@ sys_manage_menu() {
         echo "6. 设置 SSH 密钥登录"
         echo ""
         echo "7. 设置系统时区"
+        echo ""
         echo "-------- 网络优化 ---------"
         echo ""
         echo "8. BBR 拥塞控制管理"
