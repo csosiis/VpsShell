@@ -591,11 +591,15 @@ get_domain_and_common_config() {
     done
 
     if [[ $type_flag -eq 2 ]]; then # Hysteria2
+        echo ""
         log_warn "Hysteria2 协议需要关闭域名在Cloudflare的DNS代理(小黄云)。"
     else
+        echo ""
         log_warn "若域名开启了CF代理(小黄云), 请确保端口在Cloudflare支持的范围内。"
+        echo ""
         log_warn "支持的HTTPS端口: 443, 2053, 2083, 2087, 2096, 8443。"
     fi
+    echo ""
     log_warn "请确保防火墙已放行所需端口！"
     echo
 
@@ -664,12 +668,13 @@ add_protocol_node() {
     local node_link=""
 
     log_info "正在将新的入站配置添加到 config.json..."
-    jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-
-    if [ $? -ne 0 ]; then
+    # 使用临时文件确保原子性操作，防止配置文件损坏
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp"; then
         log_error "更新配置文件失败！请检查JSON格式和文件权限。"
+        rm -f "$SINGBOX_CONFIG_FILE.tmp"
         return 1
     fi
+    mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
 
     case $protocol in
         VLESS)
@@ -692,12 +697,7 @@ add_protocol_node() {
             ;;
     esac
 
-    clear
-    log_info "✅ 节点添加成功！"
-    echo -e "${CYAN}-------------------------- 分享链接 --------------------------${NC}"
-    echo -e "\n${GREEN}${node_link}${NC}\n"
-    echo -e "${CYAN}--------------------------------------------------------------${NC}"
-
+    # 将新生成的链接追加到文件中
     echo "$node_link" >> "$SINGBOX_NODE_LINKS_FILE"
 
     log_info "正在重启 Sing-Box 使配置生效..."
@@ -707,8 +707,16 @@ add_protocol_node() {
         log_info "Sing-Box 重启成功。"
     else
         log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
+        press_any_key
+        return
     fi
-    press_any_key
+
+    # ==================== 关键修正点 ====================
+    # 新增节点成功后，直接调用查看函数，显示所有节点信息
+    log_info "✅ 节点添加成功！正在显示所有节点信息..."
+    sleep 1
+    view_node_info
+    # ===================================================
 }
 
 # 新增 VLESS 节点
@@ -1394,8 +1402,11 @@ singbox_add_node_menu() {
         clear
         echo -e "${WHITE}--- 新增 Sing-Box 节点 ---${NC}\n"
         echo "1. 新增 VLESS 节点"
+        echo ""
         echo "2. 新增 Hysteria2 节点"
+        echo ""
         echo "3. 新增 VMess 节点"
+        echo ""
         echo "4. 新增 Trojan 节点"
         echo ""
         echo "0. 返回上级菜单"
@@ -1419,30 +1430,17 @@ singbox_main_menu() {
         echo -e "${WHITE}--- Sing-Box 管理菜单 ---${NC}\n"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
-            echo ""
             echo -e "当前状态: ${STATUS_COLOR}\n"
-            echo ""
             echo "1. 查看 / 管理节点"
-            echo ""
             echo "2. 新增节点"
-            echo ""
-            echo "-------------------------"
-            echo ""
+            echo "---"
             echo "3. 启动 Sing-Box"
-            echo ""
             echo "4. 停止 Sing-Box"
-            echo ""
             echo "5. 重启 Sing-Box"
-            echo ""
             echo "6. 查看日志"
-            echo ""
-            echo "-------------------------"
-            echo ""
+            echo "---"
             echo -e "7. ${RED}卸载 Sing-Box${NC}"
-            echo ""
             echo "0. 返回主菜单"
-            echo ""
-            echo "-------------------------"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
@@ -1457,8 +1455,10 @@ singbox_main_menu() {
                 *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
+            # ==================== 关键修正点 ====================
+            # 当 sing-box 未安装时，显示这个菜单
+            log_warn "Sing-Box 尚未安装。"
             echo "1. 安装 Sing-Box"
-            echo ""
             echo "0. 返回主菜单"
             echo ""
             read -p "请输入选项: " choice
@@ -1467,6 +1467,7 @@ singbox_main_menu() {
                 0) break ;;
                 *) log_error "无效选项！"; sleep 1 ;;
             esac
+            # ===================================================
         fi
     done
 }
