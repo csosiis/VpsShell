@@ -657,6 +657,7 @@ substore_do_install() {
     mkdir -p "$FNM_DIR"
     curl -L https://github.com/Schniz/fnm/releases/latest/download/fnm-linux.zip -o /tmp/fnm.zip
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm"; export PATH="${FNM_DIR}:$PATH"
+     eval "$(${FNM_DIR}/fnm env --shell bash)"
     log_info "FNM 安装完成。"
     log_info "正在使用 FNM 安装 Node.js 和 PNPM..."; fnm install v20 > /dev/null; fnm use v20
     curl -fsSL https://get.pnpm.io/install.sh | sh - > /dev/null
@@ -957,13 +958,10 @@ sys_show_info() {
     local kernel_info=$(uname -r)
     local cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
     local cpu_model=$(lscpu | grep "Model name" | awk -F: '{print $2}' | sed 's/^ *//')
-    local cpu_cores=$(lscpu | grep "CPU(s):" | awk '{print $2}')
-    local memory_info=$(free -h | grep Mem | awk '{print $3 "/" $2}')
-    local disk_info=$(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"}')
-    local uptime_info=$(uptime -p)
-    local ip_addr=$(hostname -I | awk '{print $1}')
-    local ip_info=$(curl -s http://ip-api.com/json/"$ip_addr" | jq -r '.org' 2>/dev/null)
-    local geo_info=$(curl -s http://ip-api.com/json/"$ip_addr" | jq -r '.city, .country' 2>/dev/null | tr '\n' ' ')
+    local public_ip=$(curl -s http://ipv4.icanhazip.com)
+    local ip_info=$(curl -s http://ip-api.com/json/"$public_ip" | jq -r '.org' 2>/dev/null)
+    local geo_info=$(curl -s http://ip-api.com/json/"$public_ip" | jq -r '.city, .country' 2>/dev/null | tr '\n' ' ')
+    local cpu_cores=$(nproc)
 
     echo "主机名       : ${YELLOW}${hostname_info}${NC}"
     echo "运营商       : ${YELLOW}${ip_info}${NC}"
