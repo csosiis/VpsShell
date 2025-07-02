@@ -1284,8 +1284,8 @@ substore_main_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}=====================================${NC}"
-        echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}"
+        echo -e "${WHITE}=====================================${NC}\n"
+        echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}\n"
         echo -e "${WHITE}=====================================${NC}\n"
         echo "1. 系统综合管理"
         echo ""
