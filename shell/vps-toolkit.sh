@@ -1236,28 +1236,17 @@ substore_reset_ports() {
     while true; do
         read -p "请输入新的前端访问端口 [直接回车则不修改: ${CURRENT_FRONTEND_PORT}]: " NEW_FRONTEND_PORT
         NEW_FRONTEND_PORT=${NEW_FRONTEND_PORT:-$CURRENT_FRONTEND_PORT}
-        if [ "$NEW_FRONTEND_PORT" == "$CURRENT_FRONTEND_PORT" ]; then
-            break
-        fi
-        if check_port "$NEW_FRONTEND_PORT"; then
-            break
-        fi
+        if [ "$NEW_FRONTEND_PORT" == "$CURRENT_FRONTEND_PORT" ]; then break; fi
+        if check_port "$NEW_FRONTEND_PORT"; then break; fi
     done
 
     local NEW_BACKEND_PORT
     while true; do
         read -p "请输入新的后端 API 端口 [直接回车则不修改: ${CURRENT_BACKEND_PORT}]: " NEW_BACKEND_PORT
         NEW_BACKEND_PORT=${NEW_BACKEND_PORT:-$CURRENT_BACKEND_PORT}
-        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then
-            log_error "后端端口不能与前端端口相同！"
-            continue
-        fi
-        if [ "$NEW_BACKEND_PORT" == "$CURRENT_BACKEND_PORT" ]; then
-            break
-        fi
-        if check_port "$NEW_BACKEND_PORT"; then
-            break
-        fi
+        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同！"; continue; fi
+        if [ "$NEW_BACKEND_PORT" == "$CURRENT_BACKEND_PORT" ]; then break; fi
+        if check_port "$NEW_BACKEND_PORT"; then break; fi
     done
 
     log_info "正在更新服务文件...";
@@ -1266,38 +1255,24 @@ substore_reset_ports() {
     sed -i "s|^Environment=\"SUB_STORE_BACKEND_API_PORT=.*|Environment=\"SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}\"|" "$SUBSTORE_SERVICE_FILE"
 
     log_info "正在重载并重启服务...";
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    sleep 2
-    set +e
+    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
 
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 端口重置成功！"
-
-        # 检查并更新反向代理配置
         REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
         if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
             NGINX_CONF_PATH="/etc/nginx/sites-available/${REVERSE_PROXY_DOMAIN}.conf"
             if [ -f "$NGINX_CONF_PATH" ]; then
                 log_info "检测到 Nginx 反代配置，正在自动更新端口...";
-                # 使用更精确的替换，避免错误修改其他 proxy_pass
                 sed -i "s|proxy_pass http://127.0.0.1:.*|proxy_pass http://127.0.0.1:${NEW_FRONTEND_PORT};|g" "$NGINX_CONF_PATH"
-                if nginx -t >/dev/null 2>&1; then
-                    systemctl reload nginx
-                    log_info "Nginx 配置已更新并重载。"
-                else
-                    log_error "更新 Nginx 端口后配置测试失败！请手动检查配置文件。"
-                fi
+                if nginx -t >/dev/null 2>&1; then systemctl reload nginx; log_info "Nginx 配置已更新并重载。"; else log_error "更新 Nginx 端口后配置测试失败！"; fi
             fi
-            # 未来可以加入对 Caddy 的支持
-            # if [ -f "/etc/caddy/Caddyfile" ] && grep -q "# Sub-Store config start" /etc/caddy/Caddyfile; then
-            #     log_info "检测到 Caddy 反代配置，正在自动更新端口...";
-            #     sed -i "/# Sub-Store config start/,/# Sub-Store config end/ s|reverse_proxy 127.0.0.1:.*|reverse_proxy 127.0.0.1:${NEW_FRONTEND_PORT}|" /etc/caddy/Caddyfile
-            #     systemctl reload caddy
-            #     log_info "Caddy 配置已更新并重载。"
-            # fi
         fi
+
+        # ==================== 关键修正点：调用函数显示新链接 ====================
         substore_view_access_link
+        # ======================================================================
+
     else
         log_error "服务重启失败！请检查日志。"
     fi
@@ -1306,11 +1281,33 @@ substore_reset_ports() {
 
 # 重置API密钥
 substore_reset_api_key() {
-    log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"; echo ""; read -p "请输入 Y 确认: " choice; if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "取消操作。"; return; fi
-    log_info "正在生成新的 API 密钥..."; set -e; NEW_API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
-    log_info "正在更新服务文件..."; sed -i "s|^Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=.*|Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}\"|" "$SUBSTORE_SERVICE_FILE"
-    log_info "正在重载并重启服务..."; systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ API 密钥重置成功！"; substore_view_access_link; else log_error "服务重启失败！"; fi
+    if ! is_substore_installed; then log_error "Sub-Store 尚未安装。"; press_any_key; return; fi
+
+    log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"; echo ""; read -p "请输入 Y 确认: " choice;
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
+        log_info "取消操作。"; press_any_key; return;
+    fi
+
+    log_info "正在生成新的 API 密钥...";
+    set -e;
+    NEW_API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
+
+    log_info "正在更新服务文件...";
+    sed -i "s|^Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=.*|Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}\"|" "$SUBSTORE_SERVICE_FILE"
+
+    log_info "正在重载并重启服务...";
+    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ API 密钥重置成功！";
+
+        # ==================== 关键修正点：调用函数显示新链接 ====================
+        substore_view_access_link;
+        # ======================================================================
+
+    else
+        log_error "服务重启失败！";
+    fi
     press_any_key
 }
 
@@ -1570,7 +1567,8 @@ singbox_main_menu() {
         else
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
-            log_warn " Sing-Box 尚未安装。"
+            log_warn "Sing-Box 尚未安装。"
+            echo ""
             echo -e "${WHITE}-------------------------${NC}\n"
             echo "1. 安装 Sing-Box"
             echo ""
