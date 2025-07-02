@@ -1082,7 +1082,7 @@ setup_shortcut() {
 sys_manage_menu() {
     while true; do
         clear
-        echo -e "${WHITE}--- 系统综合管理 ---${NC}\n"
+        echo -e "${WHITE}------ 系统综合管理 ------${NC}\n"
         echo "1. 系统信息查询"
         echo ""
         echo "2. 清理系统垃圾"
@@ -1097,13 +1097,13 @@ sys_manage_menu() {
         echo ""
         echo "7. 设置系统时区"
         echo ""
-        echo "--------------------------------"
+        echo "---------------------------"
         echo ""
         echo "8. 安装 S-ui (面板)"
         echo ""
         echo "9. 安装 3X-ui (面板)"
         echo ""
-        echo "--------------------------------"
+        echo "---------------------------"
         echo ""
         echo "0. 返回主菜单"
         echo ""
