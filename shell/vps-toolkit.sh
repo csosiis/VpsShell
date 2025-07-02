@@ -34,9 +34,9 @@ SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/s
 FLAG_FILE="/root/.vps_toolkit.initialized"
 
 # 日志与交互函数
-log_info() { echo -e "${GREEN}[信息] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_warn() { echo -e "${YELLOW}[注意] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_error() { echo -e "${RED}[错误] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_info() { echo -e "${GREEN}[信息]  - $1${NC}"; }
+log_warn() { echo -e "${YELLOW}[注意]  - $1${NC}"; }
+log_error() { echo -e "${RED}[错误]  - $1${NC}"; }
 press_any_key() { echo ""; read -n 1 -s -r -p "按任意键返回..."; }
 check_root() { if [ "$(id -u)" -ne 0 ]; then log_error "此脚本必须以 root 用户身份运行。"; exit 1; fi; }
 
@@ -860,9 +860,9 @@ add_trojan_node() {
 
 # 显示/管理节点信息
 view_node_info() {
-    echo ""
     while true; do
         clear
+        echo ""
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             press_any_key
@@ -1570,8 +1570,8 @@ singbox_main_menu() {
         else
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
-            echo " - Sing-Box 尚未安装。"
-            echo ""
+            log_warn " Sing-Box 尚未安装。"
+            echo -e "${WHITE}-------------------------${NC}\n"
             echo "1. 安装 Sing-Box"
             echo ""
             echo "0. 返回主菜单"
