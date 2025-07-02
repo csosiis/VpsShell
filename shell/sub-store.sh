@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # ==============================================================================
-# Sub-Store 管理脚本 (v6.0)
+# Sub-Store 管理脚本 (v6.1)
 #
-# 基于 v5.9 版本修改：
-# 1. [特性] 新增“更新 Sub-Store”功能，可一键更新应用到最新版并重启。
+# 基于 v6.0 版本修改：
+# 1. [优化] 将“更新脚本”和“更新Sub-Store”功能提升至主菜单，方便访问。
+# 2. [BUG修复] 修正菜单项颜色代码无法正确显示的问题。
 # ==============================================================================
 
 # --- 全局变量和辅助函数 ---
@@ -22,7 +23,6 @@ INSTALL_DIR="/root/sub-store"
 SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/sub"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/singbox.sh"
-
 
 # 日志函数
 log_info() { echo -e "${GREEN}[INFO] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
@@ -240,33 +240,17 @@ do_update_script() {
     log_info "✅ 脚本已成功更新！"; log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'sub')..."; exit 0
 }
 
-# v6.0 新增: 更新 Sub-Store 应用
 update_sub_store() {
-    log_info "开始更新 Sub-Store 应用..."
-    if ! is_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
-
-    set -e
-    cd "$INSTALL_DIR"
+    log_info "开始更新 Sub-Store 应用..."; if ! is_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
+    set -e; cd "$INSTALL_DIR"
     log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-
     log_info "正在下载最新的前端文件 (dist.zip)..."
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-
-    log_info "正在部署新版前端..."
-    rm -rf frontend
+    log_info "正在部署新版前端..."; rm -rf frontend
     unzip -q dist.zip && mv dist frontend && rm dist.zip
-
-    log_info "正在重启 Sub-Store 服务以应用更新..."
-    systemctl restart "$SERVICE_NAME"
-    sleep 2
-    set +e
-
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        log_info "✅ Sub-Store 更新成功并已重启！"
-    else
-        log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"
-    fi
+    log_info "正在重启 Sub-Store 服务以应用更新..."; systemctl restart "$SERVICE_NAME"; sleep 2; set +e
+    if systemctl is-active --quiet "$SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
 }
 
@@ -284,16 +268,16 @@ setup_reverse_proxy() {
 
 manage_menu() {
     while true; do
-        clear; echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.0) ---${NC}\n"
+        clear; echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.1) ---${NC}\n"
         if systemctl is-active --quiet "$SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo ""; echo "2. 停止服务"; echo ""; echo "3. 重启服务"; echo ""; echo "4. 查看状态"; echo ""; echo "5. 查看日志"
         echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo ""; echo "7. 重置端口"; echo ""; echo "8. 重置 API 密钥"
-        echo -e "\n9. ${YELLOW}设置/更新反向代理${NC}"; echo ""; echo "10. ${GREEN}更新脚本${NC}"; echo ""; echo "11. ${GREEN}更新 Sub-Store${NC}"; echo ""; echo "0. 退出脚本"; echo ""; read -p "请输入选项: " choice
+        echo -e "\n9. ${YELLOW}设置/更新反向代理${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 2) systemctl stop "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
             3) systemctl restart "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 4) clear; systemctl status "$SERVICE_NAME"; press_any_key;;
             5) clear; journalctl -u "$SERVICE_NAME" -f --no-pager;; 6) view_access_link; press_any_key;;
-            7) reset_ports; press_any_key;; 8) reset_api_key; press_any_key;; 9) setup_reverse_proxy;; 10) do_update_script;; 11) update_sub_store;; 0) break ;;
+            7) reset_ports; press_any_key;; 8) reset_api_key; press_any_key;; 9) setup_reverse_proxy;; 0) break ;;
             *) log_warn "无效选项！"; sleep 1 ;;
         esac
     done
@@ -301,12 +285,13 @@ manage_menu() {
 
 main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.0)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
+        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.1)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
         if is_installed; then
-            echo "1. 管理 Sub-Store"; echo ""; echo "2. 卸载 Sub-Store"; echo ""; echo "0. 退出脚本"; echo ""; read -p "请输入选项: " choice
-            case $choice in 1) manage_menu ;; 2) do_uninstall ;; 0) exit 0 ;; *) log_warn "无效选项！"; sleep 1 ;; esac
+            echo "1. 管理 Sub-Store"; echo ""; echo -e "2. ${GREEN}更新 Sub-Store${NC}"; echo""; echo -e "3. ${GREEN}更新脚本${NC}"
+            echo ""; echo -e "4. ${RED}卸载 Sub-Store${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
+            case $choice in 1) manage_menu ;; 2) update_sub_store ;; 3) do_update_script ;; 4) do_uninstall ;; 0) exit 0 ;; *) log_warn "无效选项！"; sleep 1 ;; esac
         else
-            echo "1. 安装 Sub-Store"; echo ""; echo "0. 退出脚本"; echo ""; read -p "请输入选项: " choice
+            echo "1. 安装 Sub-Store"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice
             case $choice in 1) do_install ;; 0) exit 0 ;; *) log_warn "无效选项！"; sleep 1 ;; esac
         fi
     done
