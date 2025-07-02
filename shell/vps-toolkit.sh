@@ -1045,7 +1045,18 @@ substore_setup_reverse_proxy() {
 
 substore_handle_nginx_proxy() {
     echo ""; read -p "请输入您要使用的域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
-    local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $2}' | tr -d '"')
+
+    # ==================== 关键修正点：在这里增加读取端口号的逻辑 ====================
+    log_info "正在从服务配置中读取 Sub-Store 端口..."
+    local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+
+    if [ -z "$FRONTEND_PORT" ]; then
+        log_error "无法读取到 Sub-Store 的端口号！请检查 Sub-Store 是否已正确安装。"
+        return
+    fi
+    log_info "读取到端口号为: ${FRONTEND_PORT}"
+    # ==============================================================================
+
     NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
 
     log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"
@@ -1067,13 +1078,18 @@ EOF
     if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
         log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/";
     fi
+
     log_info "正在测试 Nginx 配置...";
-    if ! nginx -t; then log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"; return; fi
+    if ! nginx -t; then
+        log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"
+        return
+    fi
     log_info "正在重载 Nginx..."; systemctl reload nginx;
 
     log_info "正在为 ${DOMAIN} 申请 HTTPS 证书...";
+    # 使用 apply_ssl_certificate 函数，因为它更健壮
     if ! apply_ssl_certificate "${DOMAIN}"; then
-        log_error "证书申请失败，但HTTP反代可能已生效。"
+        log_error "证书申请失败，但HTTP反代可能已生效。请检查域名解析和防火墙设置。"
         return
     fi
 
@@ -1302,6 +1318,7 @@ substore_manage_menu() {
         echo ""
         echo "0. 返回主菜单"
         echo ""
+        echo -e "${WHITE}-------------------${NC}\n"
         read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
@@ -1331,6 +1348,7 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
+            echo -e "${WHITE}-------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_manage_menu ;;
