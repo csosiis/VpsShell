@@ -1293,7 +1293,7 @@ main_menu() {
         echo ""
         echo "3. Sub-Store 管理"
         echo ""
-        echo "-------------------------------------"
+        echo -e "${WHITE}-------------------------------------${NC}"
         echo ""
         echo -e "8. ${GREEN}更新此脚本${NC}"
         echo ""
