@@ -155,6 +155,7 @@ show_system_info() {
     # 当前时间
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
 
+    clear
     # 输出所有信息
     echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
     echo -e "${GREEN}主机名:       ${WHITE}$hostname_info${NC}"
