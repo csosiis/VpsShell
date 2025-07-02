@@ -1482,13 +1482,9 @@ sys_manage_menu() {
         echo ""
         echo "---------------------------"
         echo ""
-        echo "8. 安装 S-ui (面板)"
-        echo ""
-        echo "9. 安装 3X-ui (面板)"
+        echo "0. 返回主菜单"
         echo ""
         echo "---------------------------"
-        echo ""
-        echo "0. 返回主菜单"
         echo ""
         read -p "请输入选项: " choice
 
@@ -1500,8 +1496,6 @@ sys_manage_menu() {
             5) set_network_priority ;;
             6) setup_ssh_key ;;
             7) set_timezone ;;
-            8) install_sui ;;
-            9) install_3xui ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -1696,6 +1690,12 @@ main_menu() {
         echo "2. Sing-Box 管理"
         echo ""
         echo "3. Sub-Store 管理"
+         echo ""
+        echo "-------------- 面板安装 --------------"
+        echo "4. 安装 S-ui (Warp-Go)"
+        echo "5. 安装 3X-ui (x-ui)"
+        echo ""
+        echo "-------------------------------------"
         echo ""
         echo -e "${WHITE}-------------------------------------${NC}"
         echo ""
@@ -1713,6 +1713,8 @@ main_menu() {
             1) sys_manage_menu ;;
             2) singbox_main_menu ;;
             3) substore_main_menu ;;
+            4) install_sui ;;
+            5) install_3xui ;;
             8) do_update_script ;;
             9) setup_shortcut ;;
             0) exit 0 ;;
