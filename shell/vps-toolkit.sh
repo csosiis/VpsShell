@@ -1418,32 +1418,39 @@ EOF
 
 # 脚本更新
 do_update_script() {
+    echo ""
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/vps_tool_new.sh"
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
+        echo ""
         log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
         press_any_key
         return
     fi
     if cmp -s "$SCRIPT_PATH" "$temp_script"; then
+        echo ""
         log_info "脚本已经是最新版本，无需更新。"
         rm "$temp_script"
         press_any_key
         return
     fi
+    echo ""
     log_info "下载成功，正在应用更新...";
     chmod +x "$temp_script"
     mv "$temp_script" "$SCRIPT_PATH"
     log_info "✅ 脚本已成功更新！"
+    echo ""
     log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vs')..."
     exit 0
 }
 
 # 设置快捷命令
 setup_shortcut() {
+    echo ""
     log_info "正在设置 '${SHORTCUT_PATH##*/}' 快捷命令...";
     ln -sf "$SCRIPT_PATH" "$SHORTCUT_PATH"
     chmod +x "$SHORTCUT_PATH"
+    echo ""
     log_info "✅ 快捷命令设置成功！现在您可以随时随地输入 '${SHORTCUT_PATH##*/}' 来运行此脚本。"
     press_any_key
 }
