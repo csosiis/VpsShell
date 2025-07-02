@@ -1578,8 +1578,6 @@ singbox_main_menu() {
         else
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
-            log_warn "Sing-Box 尚未安装。"
-            echo ""
             echo -e "${WHITE}-------------------------${NC}\n"
             echo "1. 安装 Sing-Box"
             echo ""
