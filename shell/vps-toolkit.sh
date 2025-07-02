@@ -939,29 +939,50 @@ push_nodes() {
     press_any_key
 }
 
-# 卸载 Sing-Box
+# 卸载 Sing-Box (更彻底的版本)
 singbox_do_uninstall() {
     if ! is_singbox_installed; then
         log_warn "Sing-Box 未安装，无需卸载。"
         press_any_key
         return
     fi
+
     read -p "你确定要完全卸载 Sing-Box 吗？所有配置文件和节点信息都将被删除！(y/N): " confirm_uninstall
     if [[ ! "$confirm_uninstall" =~ ^[Yy]$ ]]; then
         log_info "卸载操作已取消。"
         press_any_key
         return
     fi
+
     log_info "正在停止并禁用 Sing-Box 服务..."
     systemctl stop sing-box &>/dev/null
     systemctl disable sing-box &>/dev/null
-    log_info "正在删除 Sing-Box 相关文件..."
+
+    log_info "正在删除 Sing-Box 服务文件..."
     rm -f /etc/systemd/system/sing-box.service
+
+    log_info "正在从所有常见路径删除 Sing-Box 可执行文件..."
     rm -f /usr/local/bin/sing-box
+    rm -f /usr/bin/sing-box
+    rm -f /bin/sing-box
+    rm -f /usr/local/sbin/sing-box
+    rm -f /sbin/sing-box
+
+    log_info "正在删除 Sing-Box 配置文件和日志..."
     rm -rf /etc/sing-box
     rm -rf /var/log/sing-box
+
+    log_info "正在重载 systemd 配置..."
     systemctl daemon-reload
-    log_info "✅ Sing-Box 已成功卸载。"
+
+    # ==================== 关键修正点：最终验证 ====================
+    if command -v sing-box &> /dev/null; then
+        log_error "卸载失败！系统中仍能找到 'sing-box' 命令。"
+        log_warn "请手动执行 'whereis sing-box' 查找并删除残留文件。"
+    else
+        log_info "✅ Sing-Box 已成功卸载。"
+    fi
+    # =============================================================
     press_any_key
 }
 
