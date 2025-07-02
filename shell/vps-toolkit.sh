@@ -1460,6 +1460,83 @@ setup_shortcut() {
     press_any_key
 }
 
+# BBR 管理
+manage_bbr() {
+    clear
+    log_info "开始检查并管理 BBR..."
+
+    # 检查内核版本
+    local kernel_version=$(uname -r | cut -d- -f1)
+    if ! dpkg --compare-versions "$kernel_version" "ge" "4.9"; then
+        log_error "您的内核版本 (${kernel_version}) 过低，无法开启 BBR。请升级内核至 4.9 或更高版本。"
+        press_any_key
+        return
+    fi
+    log_info "内核版本 ${kernel_version} 符合要求。"
+
+    # 获取当前拥塞控制算法
+    local current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
+    log_info "当前 TCP 拥塞控制算法为: ${YELLOW}${current_congestion_control}${NC}"
+
+    # 获取当前队列管理算法
+    local current_queue_discipline=$(sysctl -n net.core.default_qdisc)
+    log_info "当前网络队列管理算法为: ${YELLOW}${current_queue_discipline}${NC}"
+
+    echo ""
+    echo "请选择要执行的操作:"
+    echo "1. 启用 BBR (原始版本)"
+    echo "2. 启用 BBR + FQ"
+    echo "0. 返回"
+    read -p "请输入选项: " choice
+
+    local sysctl_conf="/etc/sysctl.conf"
+
+    # 先移除旧的配置，避免重复
+    sed -i '/net.core.default_qdisc/d' "$sysctl_conf"
+    sed -i '/net.ipv4.tcp_congestion_control/d' "$sysctl_conf"
+
+    case $choice in
+        1)
+            log_info "正在启用 BBR..."
+            echo "net.ipv4.tcp_congestion_control = bbr" >> "$sysctl_conf"
+            ;;
+        2)
+            log_info "正在启用 BBR + FQ..."
+            echo "net.core.default_qdisc = fq" >> "$sysctl_conf"
+            echo "net.ipv4.tcp_congestion_control = bbr" >> "$sysctl_conf"
+            ;;
+        0)
+            log_info "操作已取消。"
+            return
+            ;;
+        *)
+            log_error "无效选项！"
+            press_any_key
+            return
+            ;;
+    esac
+
+    log_info "正在应用配置..."
+    sysctl -p
+
+    log_info "✅ 配置已应用！请检查上面的新算法是否已生效。"
+    press_any_key
+}
+
+# 安装 WARP
+install_warp() {
+    clear
+    log_info "开始安装 WARP..."
+    log_warn "本功能将使用 fscarmen 的多功能 WARP 脚本。"
+    log_warn "脚本将引导您完成安装，请根据其提示进行选择。"
+    press_any_key
+
+    # 执行 fscarmen 的 WARP 脚本
+    bash <(curl -sSL https://raw.githubusercontent.com/fscarmen/warp/main/menu.sh)
+
+    log_info "WARP 脚本执行完毕。按任意键返回主菜单。"
+    press_any_key
+}
 
 sys_manage_menu() {
     while true; do
@@ -1479,6 +1556,11 @@ sys_manage_menu() {
         echo "6. 设置 SSH 密钥登录"
         echo ""
         echo "7. 设置系统时区"
+        echo "-------- 网络优化 ---------"
+        echo ""
+        echo "8. BBR 拥塞控制管理"
+        echo ""
+        echo "9. 安装 WARP 网络接口"
         echo ""
         echo "---------------------------"
         echo ""
@@ -1496,6 +1578,8 @@ sys_manage_menu() {
             5) set_network_priority ;;
             6) setup_ssh_key ;;
             7) set_timezone ;;
+            8) manage_bbr ;;      # 新增的 case
+            9) install_warp ;;    # 新增的 case
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
