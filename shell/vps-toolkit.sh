@@ -120,69 +120,74 @@ show_system_info() {
     clear
     log_info "正在查询系统信息，请稍候..."
 
-    # 主机名
+    # 检查核心命令是否存在，以防万一
+    if ! command -v lsb_release &> /dev/null || ! command -v lscpu &> /dev/null; then
+        log_error "缺少核心查询命令 (如 lsb_release, lscpu)，请先执行依赖安装。"
+        press_any_key
+        return
+    fi
+
+    # --- 数据获取部分 (与之前相同) ---
     hostname_info=$(hostname)
-    # 操作系统和版本
     os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
-    # Linux内核版本
     kernel_info=$(uname -r)
-    # CPU架构和型号
     cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
     cpu_model=$(lscpu | grep "Model name" | awk -F: '{print $2}' | sed 's/^ *//')
-    cpu_cores=$(lscpu | grep "CPU(s):" | awk -F: '{print $2}' | sed 's/^ *//')
+    cpu_cores=$(lscpu | grep "^CPU(s):" | awk -F: '{print $2}' | sed 's/^ *//')
     cpu_freq=$(lscpu | grep "CPU MHz" | awk -F: '{print $2}' | sed 's/^ *//')
-    # 系统负载
     load_info=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^ *//')
-    # 内存使用情况
     memory_info=$(free -h | grep Mem | awk '{printf "%s/%s (%.2f%%)", $3, $2, $3/$2*100}')
-    # 硬盘使用情况
     disk_info=$(df -h | grep '/$' | awk '{print $3 "/" $2 " (" $5 ")"}')
-    # 网络接收和发送量
-    net_info=$(vnstat --oneline | awk -F\; '{print "接收: " $4 " / 发送: " $5}')
-    # 网络算法
+    net_info_rx=$(vnstat --oneline | awk -F';' '{print $4}')
+    net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
     net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
-    # 运营商信息
     ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
-    # IP 地址
     ip_addr=$(hostname -I)
-    # DNS 地址
     dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
-    # 地理位置和时区
     geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
     timezone=$(timedatectl show --property=Timezone --value)
-    # 系统运行时间
     uptime_info=$(uptime -p)
-    # 当前时间
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
+    cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
 
-    clear
-    # 输出所有信息
+
+    # ==================== 关键修正点：使用 printf 格式化输出 ====================
+    # "%-14s" 的意思是：输出一个字符串，左对齐(-)，占据14个字符的宽度(14)，不足则补空格。
+    # 这样可以确保所有的冒号都能完美对齐。
+
     echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
-    echo -e "${GREEN}主机名:       ${WHITE}$hostname_info${NC}"
-    echo -e "${GREEN}系统版本:     ${WHITE}$os_info${NC}"
-    echo -e "${GREEN}Linux版本:    ${WHITE}$kernel_info${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "主机名" "$hostname_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统版本" "$os_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "Linux版本" "$kernel_info"
+
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    echo -e "${GREEN}CPU架构:      ${WHITE}$cpu_arch${NC}"
-    echo -e "${GREEN}CPU型号:      ${WHITE}$cpu_model${NC}"
-    echo -e "${GREEN}CPU核心数:    ${WHITE}$cpu_cores${NC}"
-    echo -e "${GREEN}CPU频率:      ${WHITE}$cpu_freq MHz${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU架构" "$cpu_arch"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU型号" "$cpu_model"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU核心数" "$cpu_cores"
+    printf "${GREEN}%-14s: ${WHITE}%s MHz${NC}\n" "CPU频率" "$cpu_freq"
+
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    echo -e "${GREEN}CPU占用:      ${WHITE}$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')${NC}"
-    echo -e "${GREEN}系统负载:     ${WHITE}$load_info${NC}"
-    echo -e "${GREEN}物理内存:     ${WHITE}$memory_info${NC}"
-    echo -e "${GREEN}硬盘占用:     ${WHITE}$disk_info${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "CPU占用" "$cpu_usage"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统负载" "$load_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "物理内存" "$memory_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "硬盘占用" "$disk_info"
+
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    echo -e "${GREEN}网络流量:     ${WHITE}$net_info${NC}"
-    echo -e "${GREEN}网络算法:     ${WHITE}$net_algo${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "总接收" "$net_info_rx"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "总发送" "$net_info_tx"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "网络算法" "$net_algo"
+
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    echo -e "${GREEN}运营商:       ${WHITE}$ip_info${NC}"
-    echo -e "${GREEN}IPv4地址:     ${WHITE}$ip_addr${NC}"
-    echo -e "${GREEN}DNS地址:      ${WHITE}$dns_info${NC}"
-    echo -e "${GREEN}地理位置:     ${WHITE}$geo_info${NC}"
-    echo -e "${GREEN}系统时间:     ${WHITE}$timezone $current_time${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "运营商" "$ip_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "IPv4地址" "$ip_addr"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "DNS地址" "$dns_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "地理位置" "$geo_info"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "系统时间" "$timezone $current_time"
+
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    echo -e "${GREEN}运行时长:     ${WHITE}$uptime_info${NC}"
+    printf "${GREEN}%-14s: ${WHITE}%s${NC}\n" "运行时长" "$uptime_info"
     echo -e "${CYAN}-------------------------------------------------------${NC}"
+
     press_any_key
 }
 
@@ -1435,9 +1440,11 @@ do_update_script() {
     log_info "下载成功，正在应用更新...";
     chmod +x "$temp_script"
     mv "$temp_script" "$SCRIPT_PATH"
+    echo ""
     log_info "✅ 脚本已成功更新！"
     echo ""
     log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vs')..."
+    echo ""
     exit 0
 }
 
