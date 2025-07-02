@@ -1330,9 +1330,8 @@ substore_setup_reverse_proxy() {
 }
 
 substore_handle_nginx_proxy() {
-    echo ""; read -p "请输入您要使用的域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
+    echo ""; read -p "请输入您要使用的新域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
 
-    # ==================== 关键修正点：在这里增加读取端口号的逻辑 ====================
     log_info "正在从服务配置中读取 Sub-Store 端口..."
     local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
 
@@ -1341,45 +1340,22 @@ substore_handle_nginx_proxy() {
         return
     fi
     log_info "读取到端口号为: ${FRONTEND_PORT}"
-    # ==============================================================================
 
-    NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
-
-    log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"
-    cat <<EOF > "$NGINX_CONF_PATH"
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-
-    location / {
-        proxy_pass http://127.0.0.1:${FRONTEND_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-    }
-}
-EOF
-    if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
-        log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/";
+    # 清理旧的 Nginx 配置（如果存在）
+    local OLD_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
+    if [ -n "$OLD_DOMAIN" ] && [ "$OLD_DOMAIN" != "$DOMAIN" ]; then
+        log_warn "正在清理旧域名 ${OLD_DOMAIN} 的 Nginx 配置..."
+        rm -f "/etc/nginx/sites-available/${OLD_DOMAIN}.conf"
+        rm -f "/etc/nginx/sites-enabled/${OLD_DOMAIN}.conf"
     fi
 
-    log_info "正在测试 Nginx 配置...";
-    if ! nginx -t; then
-        log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"
-        return
-    fi
-    log_info "正在重载 Nginx..."; systemctl reload nginx;
-
-    log_info "正在为 ${DOMAIN} 申请 HTTPS 证书...";
-    # 使用 apply_ssl_certificate 函数，因为它更健壮
     if ! apply_ssl_certificate "${DOMAIN}"; then
-        log_error "证书申请失败，但HTTP反代可能已生效。请检查域名解析和防火墙设置。"
+        log_error "证书处理失败，操作已中止。"
         return
     fi
 
-    log_info "证书申请成功，正在更新 Nginx 配置以启用 HTTPS..."
+    log_info "正在为新域名 ${DOMAIN} 写入 Nginx 配置..."
+    NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
     cat <<EOF > "$NGINX_CONF_PATH"
 server {
     listen 80;
@@ -1407,15 +1383,30 @@ server {
     }
 }
 EOF
-    log_info "正在重载 Nginx 以应用HTTPS配置..."
+    if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
+        ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/";
+    fi
+
+    log_info "正在重载 Nginx 以应用新域名配置..."
+    if ! nginx -t; then log_error "Nginx 新配置测试失败！请检查。"; return; fi
     systemctl reload nginx
 
-    log_info "✅ Nginx 反向代理和 HTTPS 证书已自动配置成功！"
-    # 保存域名信息
+    log_info "✅ Nginx 反向代理已更新为新域名！"
+
+    log_info "正在更新服务文件中的域名环境变量..."
     sed -i '/SUB_STORE_REVERSE_PROXY_DOMAIN/d' "$SUBSTORE_SERVICE_FILE"
     sed -i "/\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=${DOMAIN}\"" "$SUBSTORE_SERVICE_FILE"
+
+    # ==================== 关键修正点：重启 Sub-Store 服务 ====================
+    log_info "正在重载 systemd 并重启 Sub-Store 服务以应用新环境..."
     systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    # =======================================================================
+
+    # 最后，显示最新的访问链接
+    sleep 2 # 等待服务重启
     substore_view_access_link
+    press_any_key
 }
 
 
