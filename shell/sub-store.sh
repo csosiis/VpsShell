@@ -26,9 +26,9 @@ SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/s
 
 
 # 日志函数
-log_info() { echo -e "${GREEN}[INFO] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_warn() { echo -e "${YELLOW}[WARN] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
-log_error() { echo -e "${RED}[ERROR] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_info() { echo -e "${GREEN}[信息] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_warn() { echo -e "${YELLOW}[注意] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
+log_error() { echo -e "${RED}[错误] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"; }
 press_any_key() { echo ""; read -n 1 -s -r -p "按任意键返回..."; }
 
 # 检查是否以 root 身份运行
@@ -283,12 +283,12 @@ manage_menu() {
         if systemctl is-active --quiet "$SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo ""; echo "2. 停止服务"; echo ""; echo "3. 重启服务"; echo ""; echo "4. 查看状态"; echo ""; echo "5. 查看日志"
         echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo ""; echo "7. 重置端口"; echo ""; echo "8. 重置 API 密钥"
-        echo -e "\n9. ${YELLOW}${rp_menu_text}${NC}"; echo ""; echo "10. ${GREEN}更新脚本${NC}"; echo ""; echo "11. ${GREEN}更新 Sub-Store${NC}"; echo ""; echo "0. 返回主菜单"; echo ""; read -p "请输入选项: " choice
+        echo -e "\n9. ${YELLOW}${rp_menu_text}${NC}"; echo ""; echo "0. 返回主菜单"; echo ""; read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 2) systemctl stop "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
             3) systemctl restart "$SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 4) clear; systemctl status "$SERVICE_NAME"; press_any_key;;
             5) clear; journalctl -u "$SERVICE_NAME" -f --no-pager;; 6) view_access_link; press_any_key;;
-            7) reset_ports; press_any_key;; 8) reset_api_key; press_any_key;; 9) setup_reverse_proxy;; 10) do_update_script;; 11) update_sub_store;; 0) break ;;
+            7) reset_ports; press_any_key;; 8) reset_api_key; press_any_key;; 9) setup_reverse_proxy;;  0) break ;;
             *) log_warn "无效选项！"; sleep 1 ;;
         esac
     done
