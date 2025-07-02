@@ -860,6 +860,7 @@ add_trojan_node() {
 
 # 显示/管理节点信息
 view_node_info() {
+    echo ""
     while true; do
         clear
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
@@ -867,7 +868,6 @@ view_node_info() {
             press_any_key
             return
         fi
-        echo “”
         log_info "当前已配置的节点链接信息："
         echo -e "${CYAN}--------------------------------------------------------------${NC}"
 
@@ -927,15 +927,10 @@ delete_nodes() {
 
     mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
 
-    # 提取所有节点的标签用于后续的 JSON 文件操作
     declare -A node_tags_map
     for i in "${!node_lines[@]}"; do
         line="${node_lines[$i]}"
         tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-        if [[ "$line" =~ ^vmess:// ]]; then
-            # 对于 Vmess, #后面的内容就是tag，无需特殊解码
-            :
-        fi
         node_tags_map[$i]=$tag
     done
 
@@ -963,25 +958,33 @@ delete_nodes() {
         fi
     else
         indices_to_delete=()
+        tags_to_delete=()
         for node_num in "${nodes_to_delete[@]}"; do
             if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
-                log_error "无效的编号: $node_num"
-                continue
+                log_error "无效的编号: $node_num"; continue;
             fi
             indices_to_delete+=($((node_num - 1)))
+            tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
         done
 
-        # 从 config.json 中删除
-        tags_to_delete=()
-        for index in "${indices_to_delete[@]}"; do
-            tags_to_delete+=("${node_tags_map[$index]}")
-        done
-        # 使用 jq 一次性删除所有选中的 tag
+        # ==================== 关键修正点：改用更稳定、更简单的循环删除方法 ====================
         if [ ${#tags_to_delete[@]} -gt 0 ]; then
             log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
-            jq_filter='del(.inbounds[] | select(.tag as $tag | ($ARGS.positional | index($tag))))'
-            jq --argjson tags_to_delete "$(printf '%s\n' "${tags_to_delete[@]}" | jq -R . | jq -s .)" "$jq_filter" --args "${tags_to_delete[@]}" "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+
+            # 创建一个临时文件用于操作
+            cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
+
+            # 循环遍历要删除的 tag，逐个进行删除
+            for tag in "${tags_to_delete[@]}"; do
+                # 每次都从临时文件中读取，删除一个 tag，然后写回到一个新的临时文件，再覆盖回去
+                # 这样可以确保每次操作都是基于上一次成功删除后的结果
+                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+            done
+
+            # 所有循环删除操作完成后，用最终的临时文件覆盖原始配置文件
+            mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
         fi
+        # ======================================================================================
 
         # 从 nodes_links.txt 中删除 (通过重建文件)
         remaining_lines=()
@@ -989,8 +992,7 @@ delete_nodes() {
             should_keep=true
             for del_idx in "${indices_to_delete[@]}"; do
                 if [[ $i -eq $del_idx ]]; then
-                    should_keep=false
-                    break
+                    should_keep=false; break;
                 fi
             done
             if $should_keep; then
@@ -998,16 +1000,12 @@ delete_nodes() {
             fi
         done
 
-        # ==================== 关键修正点 ====================
         if [ ${#remaining_lines[@]} -eq 0 ]; then
-            # 如果没有剩余节点，则直接删除文件
             log_info "所有节点均已删除，正在移除节点链接文件..."
             rm -f "$SINGBOX_NODE_LINKS_FILE"
         else
-            # 如果还有剩余节点，则将它们写回文件
             printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
         fi
-        # ===================================================
         log_info "✅ 所选节点已删除。"
     fi
 
