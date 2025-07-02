@@ -279,6 +279,7 @@ set_network_priority() {
 }
 
 # 设置SSH密钥登录
+# 设置SSH密钥登录
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -286,16 +287,34 @@ setup_ssh_key() {
     chmod 700 ~/.ssh
     chmod 600 ~/.ssh/authorized_keys
     echo ""
-    log_warn "请粘贴您的公钥 (例如 id_rsa.pub 的内容)，然后按两次 Enter 结束输入:"
-    public_key=$(cat)
+    log_warn "请粘贴您的公公钥 (例如 id_rsa.pub 的内容)，粘贴完成后，按 Enter 换行，再按一次 Enter 即可结束输入:"
+
+    local public_key=""
+    local line
+    while IFS= read -r line; do
+        # 如果读到空行，则停止
+        if [[ -z "$line" ]]; then
+            break
+        fi
+        # 将读到的行拼接到变量中，并加上换行符
+        public_key+="$line"$'\n'
+    done
+
+    # 移除可能存在的最后一个多余的换行符
+    public_key=$(echo -e "$public_key" | sed '/^$/d')
+
     if [ -z "$public_key" ]; then
         log_error "没有输入公钥，操作已取消。"
         press_any_key
         return
     fi
-    echo "$public_key" >> ~/.ssh/authorized_keys
-    # 去重
+
+    # 使用 printf 更安全地写入文件
+    printf "%s\n" "$public_key" >> ~/.ssh/authorized_keys
+
+    # 去重，防止重复添加同一个密钥
     sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
+
     log_info "公钥已成功添加到 authorized_keys 文件中。"
     echo ""
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
