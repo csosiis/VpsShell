@@ -520,42 +520,61 @@ _handle_nginx_cert() {
     local domain_name="$1"
     log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
 
+    # 确保 Nginx 正在运行
     if ! systemctl is-active --quiet nginx; then
         log_info "Nginx 服务未运行，正在启动..."
         systemctl start nginx
     fi
 
     local NGINX_CONF_PATH="/etc/nginx/sites-available/${domain_name}.conf"
+
+    # ==================== 关键修正点：分步操作，先创建临时HTTP配置 ====================
+    # 步骤 1: 仅当配置文件不存在时，创建一个临时的、只包含 HTTP 的 server 块。
+    # 这是为了让 Certbot --nginx 插件有一个可以识别和操作的目标。
     if [ ! -f "$NGINX_CONF_PATH" ]; then
-        log_info "为域名验证创建临时的 Nginx 配置文件..."
+        log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."
         cat <<EOF > "$NGINX_CONF_PATH"
 server {
     listen 80;
     listen [::]:80;
     server_name ${domain_name};
-    root /var/www/html;
+    root /var/www/html; # 指向一个存在的目录
     index index.html index.htm;
 }
 EOF
+        # 启用这个临时的站点
         if [ ! -L "/etc/nginx/sites-enabled/${domain_name}.conf" ]; then
             ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
         fi
+
+        # 重载 Nginx 以便 Certbot 可以找到它
+        log_info "正在重载 Nginx 以应用临时配置..."
+        if ! nginx -t; then
+            log_error "Nginx 临时配置测试失败！请检查 Nginx 状态。"
+            # 清理错误的配置
+            rm -f "$NGINX_CONF_PATH"
+            rm -f "/etc/nginx/sites-enabled/${domain_name}.conf"
+            return 1
+        fi
+        systemctl reload nginx
+    else
+        log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
     fi
 
-    log_info "正在重载 Nginx 以应用配置..."
-    if ! nginx -t; then log_error "Nginx 配置测试失败！"; return 1; fi
-    systemctl reload nginx
-
+    # 步骤 2: 现在，运行 Certbot。它会自动修改上面的临时配置，或已存在的配置。
     log_info "正在使用 'certbot --nginx' 模式为 ${domain_name} 申请证书..."
     certbot --nginx -d "${domain_name}" --non-interactive --agree-tos --email "temp@${domain_name}" --redirect
 
+    # 步骤 3: 检查证书是否成功生成
     if [ -f "/etc/letsencrypt/live/${domain_name}/fullchain.pem" ]; then
         log_info "✅ Nginx 模式证书申请成功！"
+        # Certbot 已经自动重载了 Nginx，这里无需再操作
         return 0
     else
         log_error "Nginx 模式证书申请失败！"
         return 1
     fi
+    # ====================================================================================
 }
 
 # 内部函数：处理 Apache
