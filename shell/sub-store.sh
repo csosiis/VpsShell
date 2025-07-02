@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# Sub-Store 管理脚本 (v6.4)
+# Sub-Store 管理脚本 (v6.6)
 #
-# 基于 v6.3 版本修改：
-# 1. [BUG修复] 修正了子菜单中选项 0 的颜色代码显示问题。
-# 2. [优化] 将子菜单中选项 0 的功能描述修正为“返回主菜单”。
+# 基于 v6.5 版本修改：
+# 1. [重构] Nginx 反代流程：不再显示指南，直接自动化。
+# 2. [重构] Nginx 配置改用用户指定的、基于现有证书的HTTPS模板。
+# 3. [重构] Nginx 流程不再依赖 Certbot，改为检查证书文件是否存在。
 # ==============================================================================
 
 # --- 全局变量和辅助函数 ---
@@ -58,7 +59,7 @@ do_install() {
     log_info "正在下载并设置 Sub-Store 项目文件..."; mkdir -p "$INSTALL_DIR"; cd "$INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    unzip -q dist.zip && mv dist frontend && rm dist.zip
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
     log_info "开始配置系统服务..."; echo ""; while true; do read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT; FRONTEND_PORT=${FRONTEND_PORT:-3000}; check_port "$FRONTEND_PORT" && break; done
     echo ""; read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}
@@ -160,7 +161,7 @@ reset_ports() {
         if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
             NGINX_CONF_PATH="/etc/nginx/sites-available/${REVERSE_PROXY_DOMAIN}.conf"
             if [ -f "$NGINX_CONF_PATH" ]; then
-                log_info "检测到 Nginx 反代配置，正在自动更新端口..."; sed -i "s|proxy_pass http://localhost:.*|proxy_pass http://localhost:${NEW_FRONTEND_PORT};|g" "$NGINX_CONF_PATH"
+                log_info "检测到 Nginx 反代配置，正在自动更新端口..."; sed -i "s|proxy_pass http://127.0.0.1:.*|proxy_pass http://127.0.0.1:${NEW_FRONTEND_PORT};|g" "$NGINX_CONF_PATH"
                 if nginx -t >/dev/null 2>&1; then systemctl reload nginx; log_info "Nginx 配置已更新并重载。"; else log_error "更新 Nginx 端口后配置测试失败！"; fi
             fi
             if [ -f "/etc/caddy/Caddyfile" ] && grep -q "# Sub-Store config start" /etc/caddy/Caddyfile; then
@@ -207,30 +208,58 @@ handle_caddy_proxy() {
 
 handle_nginx_proxy() {
     echo ""; read -p "请输入您要使用的域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
-    local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    local NGINX_CONFIG_BLOCK="server {\n    listen 80;\n    listen [::]:80;\n    server_name ${DOMAIN};\n\n    location / {\n        proxy_pass http://localhost:${FRONTEND_PORT};\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade \$http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n    }\n}";
-    clear; echo -e "${YELLOW}--- Nginx 配置指南 ---${NC}"; echo "请手动完成以下步骤，或选择让脚本自动执行。"; echo "1. 创建或编辑 Nginx 配置文件:"; echo -e "   ${GREEN}sudo vim /etc/nginx/sites-available/${DOMAIN}.conf${NC}"
-    echo "2. 将以下代码块完整复制并粘贴到文件中："; echo -e "${WHITE}--------------------------------------------------${NC}"
-    echo -e "${NGINX_CONFIG_BLOCK}"; echo -e "${WHITE}--------------------------------------------------${NC}"
-    echo "3. 启用该站点:"; echo -e "   ${GREEN}sudo ln -s /etc/nginx/sites-available/${DOMAIN}.conf /etc/nginx/sites-enabled/${NC}"; echo "4. 测试 Nginx 配置是否有语法错误:"; echo -e "   ${GREEN}sudo nginx -t${NC}"; echo "5. 重载 Nginx 服务以应用配置:"; echo -e "   ${GREEN}sudo systemctl reload nginx${NC}"; echo "6. (推荐) 申请 HTTPS 证书 (需提前安装 certbot):"; echo -e "   ${GREEN}sudo certbot --nginx -d ${DOMAIN}${NC}"
-    echo ""; read -p "是否要让脚本尝试自动执行以上所有步骤? (Y/n): " auto_choice
-    if [[ "$auto_choice" == "y" || "$auto_choice" == "Y" ]]; then
-        log_info "开始为 Nginx 自动配置..."; log_info "正在检查并安装 Certbot 及其 Nginx 插件..."
-        set -e; apt-get update -y >/dev/null; apt-get install -y certbot python3-certbot-nginx >/dev/null; set +e
-        log_info "Certbot 依赖检查/安装完毕。"
-        local OLD_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
-        if [ -n "$OLD_DOMAIN" ]; then
-            local OLD_NGINX_CONF="/etc/nginx/sites-available/${OLD_DOMAIN}.conf"; local OLD_NGINX_LINK="/etc/nginx/sites-enabled/${OLD_DOMAIN}.conf"
-            log_warn "正在清理旧域名 ${OLD_DOMAIN} 的配置..."; [ -f "$OLD_NGINX_LINK" ] && rm -f "$OLD_NGINX_LINK"; [ -f "$OLD_NGINX_CONF" ] && rm -f "$OLD_NGINX_CONF"
-        fi
-        NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"; log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"; echo -e "${NGINX_CONFIG_BLOCK}" > "$NGINX_CONF_PATH"
-        if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"; else log_warn "站点似乎已被启用，跳过创建软链接。"; fi
-        log_info "正在测试 Nginx 配置..."; if ! nginx -t; then log_error "Nginx 配置测试失败！请检查您的 Nginx 配置。"; return; fi
-        log_info "正在重载 Nginx..."; systemctl reload nginx; RANDOM_EMAIL=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 6)@gmail.com
-        log_warn "将使用随机生成的邮箱 ${RANDOM_EMAIL} 为 Certbot 注册。"; log_warn "为保证续期通知，建议之后手动执行 'sudo certbot register --update-registration --email 您的真实邮箱' 来更新邮箱。"
-        log_info "正在为 ${DOMAIN} 申请 HTTPS 证书..."; certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos --email "${RANDOM_EMAIL}" --no-eff-email --redirect
-        if [ $? -eq 0 ]; then log_info "✅ Nginx 反向代理和 HTTPS 证书已自动配置成功！"; save_reverse_proxy_domain "$DOMAIN"; view_access_link; else log_error "Certbot 证书申请失败！请检查域名解析和防火墙设置。"; fi
+
+    # v6.6 新增: 证书前提检查
+    local CERT_PATH="/root/certs/${DOMAIN}/fullchain.pem"
+    local KEY_PATH="/root/certs/${DOMAIN}/privkey.pem"
+    log_info "正在检查证书文件是否存在..."
+    if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+        log_error "错误：找不到所需的 SSL 证书文件！"
+        log_warn "脚本期望在此路径找到证书: ${CERT_PATH}"
+        log_warn "和私钥: ${KEY_PATH}"
+        log_warn "请确保您已通过其他方式 (如 acme.sh) 正确申请并放置了证书。"
+        return
     fi
+    log_info "证书文件检查通过。"
+
+    local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+
+    # v6.6 新增: 使用新的 Nginx 配置模板
+    local NGINX_CONFIG_BLOCK="server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN};
+    ssl_certificate ${CERT_PATH};
+    ssl_certificate_key ${KEY_PATH};
+
+    location / {
+        proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+}"
+
+    log_info "开始为 Nginx 自动配置..."
+    local OLD_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
+    if [ -n "$OLD_DOMAIN" ]; then
+        local OLD_NGINX_CONF="/etc/nginx/sites-available/${OLD_DOMAIN}.conf"; local OLD_NGINX_LINK="/etc/nginx/sites-enabled/${OLD_DOMAIN}.conf"
+        log_warn "正在清理旧域名 ${OLD_DOMAIN} 的配置..."; [ -f "$OLD_NGINX_LINK" ] && rm -f "$OLD_NGINX_LINK"; [ -f "$OLD_NGINX_CONF" ] && rm -f "$OLD_NGINX_CONF"
+    fi
+
+    NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
+    log_info "正在写入 Nginx 配置文件: ${NGINX_CONF_PATH}"; echo -e "${NGINX_CONFIG_BLOCK}" > "$NGINX_CONF_PATH"
+
+    if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
+        log_info "正在启用站点..."; ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
+    else
+        log_warn "站点似乎已被启用，跳过创建软链接。"
+    fi
+
+    log_info "正在测试 Nginx 配置..."; if ! nginx -t; then log_error "Nginx 配置测试失败！请手动检查 ${NGINX_CONF_PATH}。"; return; fi
+
+    log_info "正在重载 Nginx..."; systemctl reload nginx
+    log_info "✅ Nginx 反向代理已配置成功！"; save_reverse_proxy_domain "$DOMAIN"; view_access_link
 }
 
 do_update_script() {
@@ -247,7 +276,7 @@ update_sub_store() {
     set -e; cd "$INSTALL_DIR"
     log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     log_info "正在下载最新的前端文件 (dist.zip)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    log_info "正在部署新版前端..."; rm -rf frontend; unzip -q dist.zip && mv dist frontend && rm dist.zip
+    log_info "正在部署新版前端..."; rm -rf frontend; unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "正在重启 Sub-Store 服务以应用更新..."; systemctl restart "$SERVICE_NAME"; sleep 2; set +e
     if systemctl is-active --quiet "$SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
@@ -261,7 +290,7 @@ setup_reverse_proxy() {
         log_warn "接下来的操作将使用新域名替换旧的配置。"
     fi
     if command -v caddy &> /dev/null; then log_info "检测到 Caddy，将为您进行全自动配置。"; handle_caddy_proxy
-    elif command -v nginx &> /dev/null; then log_info "检测到 Nginx，将为您生成配置代码和操作指南。"; handle_nginx_proxy
+    elif command -v nginx &> /dev/null; then log_info "检测到 Nginx，将根据您的证书进行自动化配置。"; handle_nginx_proxy
     elif command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then log_warn "检测到 Apache，但本脚本暂未支持自动生成其配置。";
     else
         log_warn "未检测到任何 Web 服务器 (Caddy, Nginx, Apache)。"; echo ""; read -p "是否要自动安装 Caddy 以进行全自动配置? (y/N): " choice
@@ -274,7 +303,7 @@ manage_menu() {
     while true; do
         clear; local rp_domain_check=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
         if [ -n "$rp_domain_check" ]; then local rp_menu_text="更换反代域名"; else local rp_menu_text="设置反向代理 (推荐)"; fi
-        echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.4) ---${NC}\n"
+        echo -e "${WHITE}--- Sub-Store 管理菜单 (v6.6) ---${NC}\n"
         if systemctl is-active --quiet "$SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo ""; echo "2. 停止服务"; echo ""; echo "3. 重启服务"; echo ""; echo "4. 查看状态"; echo ""; echo "5. 查看日志"
         echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo ""; echo "7. 重置端口"; echo ""; echo "8. 重置 API 密钥"
@@ -291,7 +320,7 @@ manage_menu() {
 
 main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.4)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
+        clear; echo -e "${WHITE}=====================================${NC}"; echo -e "${WHITE}     Sub-Store 管理脚本 (v6.6)       ${NC}"; echo -e "${WHITE}=====================================${NC}\n"
         if is_installed; then
             echo "1. 管理 Sub-Store"; echo ""; echo -e "2. ${GREEN}更新 Sub-Store${NC}"; echo ""; echo -e "3. ${GREEN}更新脚本${NC}"
             echo ""; echo -e "4. ${RED}卸载 Sub-Store${NC}"; echo ""; echo -e "0. ${RED}退出脚本${NC}"; echo ""; read -p "请输入选项: " choice

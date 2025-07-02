@@ -18,8 +18,6 @@ curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell
 #### 一键搭建Sub-Store — 订阅节点管理
 
 ```
-wget https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store.sh && chmod +x sub-store.sh && ./sub-store.sh
-
 curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sub-store.sh && chmod +x sub-store.sh && ./sub-store.sh
 ```
 
