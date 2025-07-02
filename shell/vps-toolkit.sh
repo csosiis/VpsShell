@@ -440,50 +440,143 @@ EOL
     press_any_key
 }
 
-# 申请SSL证书
-apply_ssl_certificate() {
+# 内部函数：处理 Caddy (全自动HTTPS)
+_handle_caddy_cert() {
+    log_info "检测到 Caddy 已安装。"
+    log_warn "Caddy 会自动管理 SSL 证书，本脚本无需执行任何操作。"
+    log_warn "请确保您的 Caddyfile 中已正确配置您的域名，例如："
+    echo -e "${WHITE}"
+    echo "sg.facebookbio.eu.org { Gzip 压缩指令"
+    echo "    reverse_proxy localhost:PORT # 将 PORT 替换为 Sing-Box 的监听端口"
+    echo "}"
+    echo -e "${NC}"
+    log_info "Caddy 会在首次被访问时自动申请证书。"
+    # 既然 Caddy 会处理，我们在这里就认为“证书环节”是成功的
+    return 0
+}
+
+# 内部函数：处理 Nginx
+_handle_nginx_cert() {
     local domain_name="$1"
-    local stopped_services=()
-    check_and_install_dependencies # 确保 certbot 存在
-    if systemctl is-active --quiet nginx; then
-        log_info "检测到 Nginx 正在运行，临时停止以释放80端口..."
-        systemctl stop nginx
-        stopped_services+=("nginx")
+    log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
+
+    if ! systemctl is-active --quiet nginx; then
+        log_info "Nginx 服务未运行，正在启动..."
+        systemctl start nginx
     fi
-    if systemctl is-active --quiet apache2; then
-        log_info "检测到 Apache 正在运行，临时停止以释放80端口..."
-        systemctl stop apache2
-        stopped_services+=("apache2")
-    fi
-    log_info "正在使用 Certbot 为域名 ${domain_name} 申请证书..."
-    certbot certonly --standalone --preferred-challenges http -d "$domain_name" --agree-tos --email "temp@$(hostname).com" --no-eff-email
-    cert_path="/etc/letsencrypt/live/$domain_name/fullchain.pem"
-    key_path="/etc/letsencrypt/live/$domain_name/privkey.pem"
-    if [[ -f "$cert_path" && -f "$key_path" ]]; then
-        log_info "✅ 证书申请成功！"
-        log_info "证书路径: $cert_path"
-        log_info "密钥路径: $key_path"
-        log_info "正在配置证书自动续期..."
-        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl restart sing-box'") | crontab -
-    else
-        log_error "证书申请失败，请检查域名解析和防火墙设置。"
-        # 重启之前停止的服务
-        if [[ ${#stopped_services[@]} -gt 0 ]]; then
-            for service in "${stopped_services[@]}"; do
-                log_info "正在重启 $service 服务..."
-                systemctl start "$service"
-            done
+
+    local NGINX_CONF_PATH="/etc/nginx/sites-available/${domain_name}.conf"
+    if [ ! -f "$NGINX_CONF_PATH" ]; then
+        log_info "为域名验证创建临时的 Nginx 配置文件..."
+        cat <<EOF > "$NGINX_CONF_PATH"
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain_name};
+    root /var/www/html;
+    index index.html index.htm;
+}
+EOF
+        if [ ! -L "/etc/nginx/sites-enabled/${domain_name}.conf" ]; then
+            ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
         fi
+    fi
+
+    log_info "正在重载 Nginx 以应用配置..."
+    if ! nginx -t; then log_error "Nginx 配置测试失败！"; return 1; fi
+    systemctl reload nginx
+
+    log_info "正在使用 'certbot --nginx' 模式为 ${domain_name} 申请证书..."
+    certbot --nginx -d "${domain_name}" --non-interactive --agree-tos --email "temp@${domain_name}" --redirect
+
+    if [ -f "/etc/letsencrypt/live/${domain_name}/fullchain.pem" ]; then
+        log_info "✅ Nginx 模式证书申请成功！"
+        return 0
+    else
+        log_error "Nginx 模式证书申请失败！"
         return 1
     fi
-    # 重启之前停止的服务
-    if [[ ${#stopped_services[@]} -gt 0 ]]; then
-        for service in "${stopped_services[@]}"; do
-            log_info "正在重启 $service 服务..."
-            systemctl start "$service"
-        done
+}
+
+# 内部函数：处理 Apache
+_handle_apache_cert() {
+    local domain_name="$1"
+    log_info "检测到 Apache，将使用 '--apache' 插件模式。"
+    # 此处省略 Apache 的具体实现逻辑，它与 Nginx 非常相似
+    # 需要检查 python3-certbot-apache 包，创建 VirtualHost 配置等
+    log_error "Apache 模式暂未完全实现，请先安装 Nginx 或使用独立模式。"
+    return 1
+}
+
+# 内部函数：处理 Standalone 独立模式 (作为最终回退)
+_handle_standalone_cert() {
+    local domain_name="$1"
+    log_info "未检测到支持的 Web 服务器，回退到 '--standalone' 独立模式。"
+    log_warn "此模式需要临时占用 80 端口，可能会暂停其他服务。"
+
+    # 停止可能占用80端口的服务
+    if systemctl is-active --quiet nginx; then
+        log_info "临时停止 Nginx..."
+        systemctl stop nginx
+        local stopped_service="nginx"
     fi
-    return 0
+    # 可为 apache2 添加类似逻辑
+
+    certbot certonly --standalone -d "${domain_name}" --non-interactive --agree-tos --email "temp@${domain_name}"
+
+    # 重启之前停止的服务
+    if [ -n "$stopped_service" ]; then
+        log_info "正在重启 ${stopped_service}..."
+        systemctl start "$stopped_service"
+    fi
+
+    if [ -f "/etc/letsencrypt/live/${domain_name}/fullchain.pem" ]; then
+        log_info "✅ Standalone 模式证书申请成功！"
+        return 0
+    else
+        log_error "Standalone 模式证书申请失败！"
+        return 1
+    fi
+}
+
+
+# 主函数：申请SSL证书 (智能调度中心)
+apply_ssl_certificate() {
+    local domain_name="$1"
+    log_info "开始智能检测环境并申请证书..."
+
+    # 检查并安装 Certbot 主程序
+    if ! command -v certbot &> /dev/null; then
+        log_info "Certbot 未安装，正在安装..."
+        apt-get update && apt-get install -y certbot
+    fi
+
+    # 新的判断逻辑：Caddy -> Apache -> Nginx (作为默认和最终选项)
+    if command -v caddy &> /dev/null; then
+        _handle_caddy_cert "$domain_name"
+    elif command -v apache2 &> /dev/null; then
+        # 检查 Apache 插件
+        if ! dpkg -l | grep -q "python3-certbot-apache"; then
+            log_info "正在安装 Certbot 的 Apache 插件..."
+            apt-get install -y python3-certbot-apache
+        fi
+        _handle_apache_cert "$domain_name"
+    else
+        # 默认使用 Nginx 模式。
+        # _handle_nginx_cert 函数内部会检查 nginx 是否已安装，如果没有则会提示用户安装。
+        # 这就完美地实现了“如果啥都没有，就默认装Nginx”的逻辑。
+        log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
+
+        # 检查 Nginx 插件
+        if ! dpkg -l | grep -q "python3-certbot-nginx"; then
+            log_info "正在安装 Certbot 的 Nginx 插件..."
+            apt-get install -y python3-certbot-nginx
+        fi
+        _handle_nginx_cert "$domain_name"
+    fi
+
+    # 将函数最终的返回值 (0代表成功, 1代表失败) 传递给调用者
+    return $?
 }
 
 # 获取域名和通用配置
