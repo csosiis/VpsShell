@@ -492,11 +492,13 @@ singbox_delete_nodes() {
 # 推送节点 (子菜单)
 singbox_push_nodes_menu() {
     clear
-    log_info "--- Sing-Box 节点推送 ---"
+    echo -e "${WHITE}--- Sing-Box 节点推送 ---${NC}\n"
     log_warn "此功能已被 Sub-Store 的订阅管理功能取代，推荐使用 Sub-Store 生成订阅链接。"
-    log_info "如果您仍需要旧的推送功能，可以从原始脚本中恢复代码。"
-    log_info "1. 使用 Sub-Store 管理订阅 (推荐)"
-    log_info "0. 返回上一级菜单"
+    echo ""
+    echo "1. 使用 Sub-Store 管理订阅 (推荐)"
+    echo ""
+    echo "0. 返回上一级菜单"
+    echo ""
     echo "---------------------------------"
     read -p "请输入选项: " choice
     case $choice in
@@ -538,13 +540,18 @@ singbox_uninstall() {
 # 添加节点菜单
 singbox_add_node_menu() {
     clear
-    log_info "--- Sing-Box 新增节点 ---"
+    echo -e "${WHITE}--- Sing-Box 新增节点 ---${NC}\n"
     echo "1. VLESS + WS + TLS"
+    echo ""
     echo "2. Hysteria2"
+    echo ""
     echo "3. VMess + WS + TLS"
+    echo ""
     echo "4. Trojan + WS + TLS"
+    echo ""
     echo "---------------------------------"
     echo "0. 返回上一级菜单"
+    echo ""
     read -p "请选择要添加的协议类型: " choice
 
     # 在添加节点前，检查并安装依赖
@@ -565,12 +572,16 @@ singbox_add_node_menu() {
 # 管理节点菜单
 singbox_manage_node_menu() {
     clear
-    log_info "--- Sing-Box 管理节点 ---"
+    echo -e "${WHITE}--- Sing-Box 管理节点 ---${NC}\n"
     echo "1. 查看已有节点"
+    echo ""
     echo "2. 删除节点"
+    echo ""
     echo "3. 推送节点 (生成订阅)"
+    echo ""
     echo "---------------------------------"
     echo "0. 返回 Sing-Box 主菜单"
+    echo ""
     read -p "请选择操作: " choice
     case $choice in
         1) singbox_view_nodes ;;
@@ -588,10 +599,11 @@ singbox_main_menu() {
     echo -e "${WHITE}          Sing-Box 管理菜单          ${NC}"
     echo -e "${WHITE}=====================================${NC}\n"
     if ! singbox_check_installed; then
-        log_warn "Sing-Box 未安装"
         echo "1. 安装 Sing-Box"
+        echo ""
         echo "---------------------------------"
         echo "0. 返回主菜单"
+        echo ""
         read -p "请输入选项: " choice
         case $choice in
             1) singbox_install ;;
@@ -599,12 +611,15 @@ singbox_main_menu() {
             *) log_warn "无效选项!"; sleep 1 ;;
         esac
     else
-        log_info "Sing-Box 已安装"
         echo "1. 新增节点"
+        echo ""
         echo "2. 管理已有节点"
+        echo ""
         echo "---------------------------------"
         echo "8. 卸载 Sing-Box"
+        echo ""
         echo "0. 返回主菜单"
+        echo ""
         read -p "请输入选项: " choice
         case $choice in
             1) singbox_add_node_menu ;;
@@ -853,18 +868,47 @@ substore_setup_reverse_proxy() {
 
 substore_manage_menu() {
     while true; do
-        clear; local rp_domain_check=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $2}' | tr -d '"')
+        clear
+        local rp_domain_check=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $2}' | tr -d '"')
         if [ -n "$rp_domain_check" ]; then local rp_menu_text="更换反代域名"; else local rp_menu_text="设置反向代理 (推荐)"; fi
+
         echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
-        echo -e "当前状态: ${STATUS_COLOR}\n"; echo "1. 启动服务"; echo "2. 停止服务"; echo "3. 重启服务"; echo "4. 查看状态"; echo "5. 查看日志"
-        echo -e "\n---------------------------------\n"; echo "6. 查看访问链接"; echo "7. 重置端口"; echo "8. 重置 API 密钥"
-        echo "9. ${YELLOW}${rp_menu_text}${NC}"; echo "0. 返回 Sub-Store 主菜单"; echo ""; read -p "请输入选项: " choice
+        echo -e "当前状态: ${STATUS_COLOR}\n"
+
+        echo "1. 启动服务"
+        echo ""
+        echo "2. 停止服务"
+        echo ""
+        echo "3. 重启服务"
+        echo ""
+        echo "4. 查看状态"
+        echo ""
+        echo "5. 查看日志"
+        echo ""
+        echo -e "---------------------------------\n"
+        echo "6. 查看访问链接"
+        echo ""
+        echo "7. 重置端口"
+        echo ""
+        echo "8. 重置 API 密钥"
+        echo ""
+        echo "9. ${YELLOW}${rp_menu_text}${NC}"
+        echo ""
+        echo "0. 返回 Sub-Store 主菜单"
+        echo ""
+        read -p "请输入选项: " choice
         case $choice in
-            1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-            3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;; 4) clear; systemctl status "$SUBSTORE_SERVICE_NAME"; press_any_key;;
-            5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager;; 6) substore_view_access_link; press_any_key;;
-            7) substore_reset_ports; press_any_key;; 8) substore_reset_api_key; press_any_key;; 9) substore_setup_reverse_proxy;;  0) break ;;
+            1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+            4) clear; systemctl status "$SUBSTORE_SERVICE_NAME"; press_any_key;;
+            5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager;;
+            6) substore_view_access_link; press_any_key;;
+            7) substore_reset_ports; press_any_key;;
+            8) substore_reset_api_key; press_any_key;;
+            9) substore_setup_reverse_proxy;;
+            0) break ;;
             *) log_warn "无效选项！"; sleep 1 ;;
         esac
     done
@@ -878,17 +922,21 @@ substore_main_menu() {
         echo -e "${WHITE}=====================================${NC}\n"
         if substore_is_installed; then
             echo "1. 管理 Sub-Store"
-            echo "2. ${GREEN}更新 Sub-Store 应用${NC}"
+            echo ""
+            echo -e "2. ${GREEN}更新 Sub-Store 应用${NC}"
+            echo ""
             echo "--------------------------"
-            echo "8. ${RED}卸载 Sub-Store${NC}"
-            echo "0. ${RED}返回主菜单${NC}"
+            echo -e "8. ${RED}卸载 Sub-Store${NC}"
+            echo ""
+            echo -e "0. ${RED}返回主菜单${NC}"
             echo ""
             read -p "请输入选项: " choice
             case $choice in 1) substore_manage_menu ;; 2) substore_update_app ;; 8) substore_do_uninstall ;; 0) return ;; *) log_warn "无效选项！"; sleep 1 ;; esac
         else
             echo "1. 安装 Sub-Store"
+            echo ""
             echo "--------------------------"
-            echo "0. ${RED}返回主菜单${NC}"
+            echo -e "0. ${RED}返回主菜单${NC}"
             echo ""
             read -p "请输入选项: " choice
             case $choice in 1) substore_do_install ;; 0) return ;; *) log_warn "无效选项！"; sleep 1 ;; esac
@@ -903,7 +951,7 @@ substore_main_menu() {
 
 sys_show_info() {
     clear
-    log_info "--- 系统信息查询 ---"
+    echo -e "${WHITE}--- 系统信息查询 ---${NC}\n"
     local hostname_info=$(hostname)
     local os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
     local kernel_info=$(uname -r)
@@ -929,6 +977,7 @@ sys_show_info() {
     echo "内存使用     : ${YELLOW}${memory_info}${NC}"
     echo "硬盘占用     : ${YELLOW}${disk_info}${NC}"
     echo "运行时长     : ${YELLOW}${uptime_info}${NC}"
+    echo ""
     echo "-----------------------------------"
     press_any_key
 }
@@ -1005,13 +1054,21 @@ sys_tools_main_menu() {
         echo -e "${WHITE}        系统工具 & 优化菜单        ${NC}"
         echo -e "${WHITE}=====================================${NC}\n"
         echo "1. 系统信息查询"
+        echo ""
         echo "2. 系统垃圾清理"
+        echo ""
         echo "3. 修改主机名"
+        echo ""
         echo "4. 优化 DNS"
+        echo ""
         echo "5. 设置时区 (上海 UTC+8)"
+        echo ""
         echo "--------------------------"
+        echo ""
         echo "6. 安装 3x-ui (第三方脚本)"
+        echo ""
         echo "7. 安装 s-ui (第三方脚本)"
+        echo ""
         echo "--------------------------"
         echo "0. 返回主菜单"
         echo ""
@@ -1066,11 +1123,16 @@ main_menu() {
         echo -e "${WHITE}       全功能 VPS 管理工具           ${NC}"
         echo -e "${WHITE}=====================================${NC}\n"
         echo "1. Sing-Box 管理"
+        echo ""
         echo "2. Sub-Store 管理"
+        echo ""
         echo "3. 系统工具 & 优化"
         echo ""
-        echo "8. ${GREEN}更新脚本${NC}"
-        echo "0. ${RED}退出脚本${NC}"
+        echo "-------------------------------------"
+        echo ""
+        echo -e "8. ${GREEN}更新脚本${NC}"
+        echo ""
+        echo -e "0. ${RED}退出脚本${NC}"
         echo ""
         read -p "请输入选项: " choice
         case $choice in
