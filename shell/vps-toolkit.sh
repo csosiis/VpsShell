@@ -1464,11 +1464,12 @@ singbox_main_menu() {
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
+            echo -e "${WHITE}-------------------------${NC}\n"
             echo "1. 查看 / 管理节点"
             echo ""
             echo "2. 新增节点"
             echo ""
-            echo "-----------------------------"
+            echo "-------------------------"
             echo ""
             echo "3. 启动 Sing-Box"
             echo ""
@@ -1478,12 +1479,13 @@ singbox_main_menu() {
             echo ""
             echo "6. 查看日志"
             echo ""
-            echo "-----------------------------"
+            echo "-------------------------"
             echo ""
             echo -e "7. ${RED}卸载 Sing-Box${NC}"
             echo ""
             echo "0. 返回主菜单"
             echo ""
+            echo -e "${WHITE}-------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) view_node_info ;;
