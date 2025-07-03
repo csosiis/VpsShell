@@ -1776,7 +1776,7 @@ do_update_script() {
     echo ""
     log_info "✅ 脚本已成功更新！"
     echo ""
-    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'vs')..."
+    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'sv')..."
     echo ""
     exit 0
 }
@@ -2053,7 +2053,7 @@ substore_manage_menu() {
         echo -e "${WHITE}=============================${NC}\n"
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"
-        echo "--------------------------"
+        echo "-----------------------------"
         echo ""
         echo "1. 启动服务"
         echo ""
@@ -2065,7 +2065,7 @@ substore_manage_menu() {
         echo ""
         echo "5. 查看日志"
         echo ""
-        echo "--------------------------"
+        echo "-----------------------------"
         echo ""
         echo "6. 查看访问链接"
         echo ""
@@ -2077,7 +2077,7 @@ substore_manage_menu() {
         echo ""
         echo "0. 返回主菜单"
         echo ""
-        echo -e "${WHITE}--------------------------${NC}\n"
+        echo -e "${WHITE}-----------------------------${NC}\n"
         read -p "请输入选项: " choice
         case $choice in
             1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
@@ -2098,7 +2098,9 @@ substore_manage_menu() {
 substore_main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
+        echo -e "${WHITE}      Sub-Store 管理菜单      ${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
         if is_substore_installed; then
             echo "1. 管理 Sub-Store"
             echo ""
@@ -2107,7 +2109,7 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
-            echo -e "${WHITE}--------------------------${NC}\n"
+            echo "-----------------------------"
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_manage_menu ;;
@@ -2121,7 +2123,7 @@ substore_main_menu() {
             echo ""
             echo "0. 返回主菜单"
             echo ""
-            echo "-------------------------"
+            echo "-----------------------------"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
