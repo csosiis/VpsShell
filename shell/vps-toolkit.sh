@@ -127,15 +127,25 @@ show_system_info() {
         return
     fi
 
-    # --- 1. 更精确的数据获取 ---
+    # ==================== 关键修正点 1：使用 curl 获取公网 IP ====================
+    log_info "正在获取网络信息..."
+    # 使用 curl 并设置5秒超时来获取公网IP
+    ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+    ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
+
+    # 如果获取失败（例如超时或网络问题），则给一个提示
+    if [ -z "$ipv4_addr" ]; then ipv4_addr="获取失败"; fi
+    if [ -z "$ipv6_addr" ]; then ipv6_addr="无或获取失败"; fi
+    # ========================================================================
+
+    # --- 数据获取部分 ---
     hostname_info=$(hostname)
     os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
     kernel_info=$(uname -r)
     cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
-    # 将 CPU 型号和频率分开提取
     cpu_model_full=$(lscpu | grep "^Model name:" | sed -e 's/Model name:[[:space:]]*//')
-    cpu_model=$(echo "$cpu_model_full" | sed 's/ @.*//') # 只取 '@' 前面的部分
-    cpu_freq_from_model=$(echo "$cpu_model_full" | sed -n 's/.*@ *//p') # 只取 '@' 后面的部分
+    cpu_model=$(echo "$cpu_model_full" | sed 's/ @.*//')
+    cpu_freq_from_model=$(echo "$cpu_model_full" | sed -n 's/.*@ *//p')
     cpu_cores=$(lscpu | grep "^CPU(s):" | awk -F: '{print $2}' | sed 's/^ *//')
     load_info=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^ *//')
     memory_info=$(free -h | grep Mem | awk '{printf "%s/%s (%.2f%%)", $3, $2, $3/$2*100}')
@@ -144,7 +154,6 @@ show_system_info() {
     net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
     net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
     ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
-    ip_addr=$(hostname -I)
     dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
     geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
     timezone=$(timedatectl show --property=Timezone --value)
@@ -152,11 +161,12 @@ show_system_info() {
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
 
-    # --- 2. 使用 printf 和全形空格进行手动视觉对齐 ---
+    # --- 使用 printf 格式化输出 ---
+    clear
+    echo ""
     echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
-    # 使用全形空格“　”进行补位，确保视觉对齐
-    printf "${GREEN}主机名　　　: ${WHITE}%s${NC}\n" "$hostname_info"
-    printf "${GREEN}系统版本　　: ${WHITE}%s${NC}\n" "$os_info"
+    printf "${GREEN}主机名　　　   : ${WHITE}%s${NC}\n" "$hostname_info"
+    printf "${GREEN}系统版本　　   : ${WHITE}%s${NC}\n" "$os_info"
     printf "${GREEN}Linux版本　 　: ${WHITE}%s${NC}\n" "$kernel_info"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
@@ -167,24 +177,28 @@ show_system_info() {
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
     printf "${GREEN}CPU占用　　 　: ${WHITE}%s${NC}\n" "$cpu_usage"
-    printf "${GREEN}系统负载　　: ${WHITE}%s${NC}\n" "$load_info"
-    printf "${GREEN}物理内存　　: ${WHITE}%s${NC}\n" "$memory_info"
-    printf "${GREEN}硬盘占用　　: ${WHITE}%s${NC}\n" "$disk_info"
+    printf "${GREEN}系统负载　　  : ${WHITE}%s${NC}\n" "$load_info"
+    printf "${GREEN}物理内存　　  : ${WHITE}%s${NC}\n" "$memory_info"
+    printf "${GREEN}硬盘占用　　  : ${WHITE}%s${NC}\n" "$disk_info"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}总接收　　　: ${WHITE}%s${NC}\n" "$net_info_rx"
-    printf "${GREEN}总发送　　　: ${WHITE}%s${NC}\n" "$net_info_tx"
-    printf "${GREEN}网络算法　　: ${WHITE}%s${NC}\n" "$net_algo"
+    printf "${GREEN}总接收　　　  : ${WHITE}%s${NC}\n" "$net_info_rx"
+    printf "${GREEN}总发送　　　  : ${WHITE}%s${NC}\n" "$net_info_tx"
+    printf "${GREEN}网络算法　　  : ${WHITE}%s${NC}\n" "$net_algo"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}运营商　　　: ${WHITE}%s${NC}\n" "$ip_info"
-    printf "${GREEN}IPv4地址　  　: ${WHITE}%s${NC}\n" "$ip_addr"
+    printf "${GREEN}运营商　　　  : ${WHITE}%s${NC}\n" "$ip_info"
+    # ==================== 关键修正点 2：分开显示公网 IPv4 和 IPv6 ====================
+    printf "${GREEN}公网IPv4地址　: ${WHITE}%s${NC}\n" "$ipv4_addr"
+    printf "${GREEN}公网IPv6地址　: ${WHITE}%s${NC}\n" "$ipv6_addr"
+    # ===========================================================================
+
     printf "${GREEN}DNS地址　　 　: ${WHITE}%s${NC}\n" "$dns_info"
-    printf "${GREEN}地理位置　　: ${WHITE}%s${NC}\n" "$geo_info"
-    printf "${GREEN}系统时间　　: ${WHITE}%s${NC}\n" "$timezone $current_time"
+    printf "${GREEN}地理位置　　  : ${WHITE}%s${NC}\n" "$geo_info"
+    printf "${GREEN}系统时间　　  : ${WHITE}%s${NC}\n" "$timezone $current_time"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
-    printf "${GREEN}运行时长　　: ${WHITE}%s${NC}\n" "$uptime_info"
+    printf "${GREEN}运行时长　　  : ${WHITE}%s${NC}\n" "$uptime_info"
     echo -e "${CYAN}-------------------------------------------------------${NC}"
 
     press_any_key
@@ -1897,7 +1911,6 @@ install_warp() {
 sys_manage_menu() {
     while true; do
         clear
-        echo ""
         echo -e "${WHITE}===========================${NC}\n"
         echo -e "${WHITE}       系统综合管理      ${NC}\n"
         echo -e "${WHITE}===========================${NC}\n"
