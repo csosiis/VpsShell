@@ -1328,13 +1328,17 @@ delete_nodes() {
 # 推送主菜单
 push_nodes() {
     clear
-    echo -e "${WHITE}--- 推送节点 ---${NC}\n"
+    echo -e "${WHITE}------- 推送节点 -------${NC}\n"
     echo ""
     echo "1. 推送到 Sub-Store"
     echo ""
     echo "2. 推送到 Telegram Bot"
     echo ""
+    cho -e "${WHITE}--------------------${NC}\n"
+    echo ""
     echo "0. 返回上一级菜单"
+    echo ""
+    cho -e "${WHITE}--------------------${NC}\n"
     echo ""
     read -p "请选择推送方式: " push_choice
 
