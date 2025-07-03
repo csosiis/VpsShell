@@ -1946,16 +1946,22 @@ sys_manage_menu() {
 singbox_add_node_menu() {
      while true; do
         clear
-        echo -e "${WHITE}--- 新增 Sing-Box 节点 ---${NC}\n"
-        echo "1. 新增 VLESS 节点"
+        echo -e "${WHITE}=============================${NC}\n"
+        echo -e "${WHITE}      新增 Sing-Box 节点      ${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
+        echo "1. Vless+WS+TLS"
         echo ""
-        echo "2. 新增 Hysteria2 节点"
+        echo "2. Hysteria2+TLS"
         echo ""
-        echo "3. 新增 VMess 节点"
+        echo "3. Vmess+WS+TLS"
         echo ""
-        echo "4. 新增 Trojan 节点"
+        echo "4. Trojan+WS+TLS"
+        echo ""
+        echo "---------------------------"
         echo ""
         echo "0. 返回上级菜单"
+        echo ""
+        echo "---------------------------"
         echo ""
         read -p "请选择协议类型: " choice
         case $choice in
@@ -1973,9 +1979,9 @@ singbox_add_node_menu() {
 singbox_main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}===========================${NC}\n"
-        echo -e "${WHITE}     Sing-Box 管理菜单      ${NC}\n"
-        echo -e "${WHITE}===========================${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
+        echo -e "${WHITE}      Sing-Box 管理菜单      ${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
@@ -2042,9 +2048,13 @@ substore_manage_menu() {
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
             rp_menu_text="更换反代域名"
         fi
-        echo -e "${WHITE}--- Sub-Store 管理菜单 ---${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
+        echo -e "${WHITE}      Sub-Store 管理菜单      ${NC}\n"
+        echo -e "${WHITE}=============================${NC}\n"
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
         echo -e "当前状态: ${STATUS_COLOR}\n"
+        echo "--------------------------"
+        echo ""
         echo "1. 启动服务"
         echo ""
         echo "2. 停止服务";
