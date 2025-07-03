@@ -1024,7 +1024,7 @@ push_to_sub_store() {
     press_any_key
 }
 
-# 推送到 Telegram
+# 推送到 Telegram (优化版：合并为单条消息)
 push_to_telegram() {
     if ! select_nodes_for_push; then
         press_any_key
@@ -1045,27 +1045,34 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    log_info "正在推送到 Telegram..."
-    for link in "${selected_links[@]}"; do
-        response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
-             -d chat_id="$tg_chat_id" \
-             -d text="$link")
+    # ==================== 关键优化点：将所有链接合并为一个字符串 ====================
+    # 使用 printf 和换行符 \n 来格式化所有链接
+    local message_text
+    message_text=$(printf "节点推送成功，详情如下：\n\n%s\n" "${selected_links[@]}")
+    # ============================================================================
 
-        if ! echo "$response" | jq -e '.ok' > /dev/null; then
-            log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq '.description')"
-            read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
-            if [[ "$choice" =~ ^[Yy]$ ]]; then
-                rm -f "$tg_config_file"
-            fi
-            press_any_key
-            return
+    log_info "正在将节点合并为单条消息推送到 Telegram..."
+
+    # ==================== 关键优化点：只发送一次 curl 请求 ====================
+    response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
+         -d chat_id="$tg_chat_id" \
+         -d text="$message_text")
+    # ======================================================================
+
+    if ! echo "$response" | jq -e '.ok' > /dev/null; then
+        log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
+        read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            rm -f "$tg_config_file"
         fi
-    done
+        press_any_key
+        return
+    fi
 
     # 成功后保存配置
     echo "tg_api_token=$tg_api_token" > "$tg_config_file"
     echo "tg_chat_id=$tg_chat_id" >> "$tg_config_file"
-    log_info "✅ 所有选定节点已成功推送到 Telegram！"
+    log_info "✅ 节点信息已成功推送到 Telegram！"
     press_any_key
 }
 
@@ -1318,10 +1325,25 @@ delete_nodes() {
     press_any_key
 }
 
-# 推送节点
+# 推送主菜单
 push_nodes() {
-    log_info "该功能正在开发中，敬请期待！"
-    press_any_key
+    clear
+    echo -e "${WHITE}--- 推送节点 ---${NC}\n"
+    echo ""
+    echo "1. 推送到 Sub-Store"
+    echo ""
+    echo "2. 推送到 Telegram Bot"
+    echo ""
+    echo "0. 返回上一级菜单"
+    echo ""
+    read -p "请选择推送方式: " push_choice
+
+    case $push_choice in
+        1) push_to_sub_store ;;
+        2) push_to_telegram ;;
+        0) return ;;
+        *) log_error "无效选项！"; press_any_key ;;
+    esac
 }
 
 # 卸载 Sing-Box (更彻底的版本)
