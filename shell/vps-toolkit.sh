@@ -915,7 +915,7 @@ add_trojan_node() {
 
 # --- 推送功能模块 ---
 
-# 选择要推送的节点 (修正版：通过 stdout 输出结果)
+# 选择要推送的节点
 select_nodes_for_push() {
     mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
     if [ ${#node_lines[@]} -eq 0 ]; then
@@ -923,24 +923,31 @@ select_nodes_for_push() {
         return 1
     fi
 
-    echo -e "\n请选择要推送的节点："
+    echo -e "\n请选择要推送的节点：\n"
     echo "1. 推送所有节点"
+    echo ""
     echo "2. 推送单个/多个节点"
+    echo ""
     echo "0. 返回"
+    echo ""
     read -p "请输入选项: " push_choice
 
-    local links_to_push=()
+    selected_links=()
     case $push_choice in
         1)
+            # 推送所有节点
+            echo ""
             log_info "已选择推送所有节点。"
             for line in "${node_lines[@]}"; do
-                links_to_push+=("$line")
+                selected_links+=("$line")
             done
             ;;
         2)
+            # 推送单个或多个节点
+            echo ""
             log_info "请选择要推送的节点 (可多选，用空格分隔):"
+            echo ""
             for i in "${!node_lines[@]}"; do
-                # ... (此处省略打印菜单的代码，以保持简洁) ...
                 line="${node_lines[$i]}"
                 node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
                 if [[ "$line" =~ ^vmess:// ]]; then
@@ -956,7 +963,7 @@ select_nodes_for_push() {
                     log_error "包含无效编号: $index"
                     return 1
                 fi
-                links_to_push+=("${node_lines[$((index - 1))]}")
+                selected_links+=("${node_lines[$((index - 1))]}")
             done
             ;;
         0)
@@ -966,14 +973,13 @@ select_nodes_for_push() {
             return 1 ;;
     esac
 
-    if [ ${#links_to_push[@]} -eq 0 ]; then
+    # 检查是否选择了任何链接
+    if [ ${#selected_links[@]} -eq 0 ]; then
         log_warn "未选择任何有效节点。"
         return 1
     fi
 
-    # ==================== 关键修正点：不再设置全局变量，而是直接打印到标准输出 ====================
-    printf "%s\n" "${links_to_push[@]}"
-    return 0
+    return 0 # 返回成功
 }
 
 # 推送到 Sub-Store
@@ -1020,29 +1026,25 @@ push_to_sub_store() {
         echo "sub_store_subs=$sub_store_subs" > "$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
     else
-        log_error "\n推送到 Sub-Store 失败，服务器响应: $response"
+        log_error "推送到 Sub-Store 失败，服务器响应: $response"
     fi
     press_any_key
 }
 
-# 推送到 Telegram (最终修正版：捕获输出并正确处理)
+# 推送到 Telegram (优化版：增加节点间距)
 push_to_telegram() {
-    # ==================== 关键修正点：捕获 select_nodes_for_push 的输出 ====================
-    local selected_links_output
-    selected_links_output=$(select_nodes_for_push)
-
-    # 通过检查函数的退出状态码来判断用户是否取消或出错
-    if [ $? -ne 0 ]; then
+    if ! select_nodes_for_push; then
         press_any_key
         return
     fi
-    # =================================================================================
 
     local tg_config_file="/etc/sing-box/telegram-bot-config.txt"
     local tg_api_token
     local tg_chat_id
 
-    if [ -f "$tg_config_file" ]; then source "$tg_config_file"; fi
+    if [ -f "$tg_config_file" ]; then
+        source "$tg_config_file"
+    fi
 
     if [ -z "$tg_api_token" ] || [ -z "$tg_chat_id" ]; then
         log_info "首次推送到 Telegram，请输入您的 Bot 信息。"
@@ -1050,20 +1052,24 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    # ==================== 关键修正点：将捕获到的字符串读入数组 ====================
-    local selected_links
-    mapfile -t selected_links < <(echo -n "$selected_links_output")
-    # ============================================================================
-
+    # ==================== 关键修正点：使用循环为每个节点后增加一个空行 ====================
+    # 1. 创建一个数组，先放头部信息
     local message_lines=("节点推送成功，详情如下：" "")
-    for link in "${selected_links[@]}"; do
-        message_lines+=("$link"); message_lines+=("");
+
+    # 2. 循环遍历选择的链接
+    for link in "${selected_lines[@]}"; do
+        # 每次向数组中添加一个链接
+        message_lines+=("$link")
+        # 然后再添加一个空字符串元素，这在最后会转换为空行
+        message_lines+=("")
     done
 
+    # 3. 像以前一样，用 IFS 连接数组
     local IFS=$'\n'
     local message_text="${message_lines[*]}"
     unset IFS
-
+    # ====================================================================================
+    echo ""
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
@@ -1072,11 +1078,15 @@ push_to_telegram() {
 
     if ! echo "$response" | jq -e '.ok' > /dev/null; then
         log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
-        # ... (后续错误处理代码不变)
+        read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            rm -f "$tg_config_file"
+        fi
         press_any_key
         return
     fi
 
+    # 成功后保存配置
     echo "tg_api_token=$tg_api_token" > "$tg_config_file"
     echo "tg_chat_id=$tg_chat_id" >> "$tg_config_file"
     log_info "✅ 节点信息已成功推送到 Telegram！"
