@@ -1898,7 +1898,9 @@ sys_manage_menu() {
     while true; do
         clear
         echo ""
-        echo -e "${WHITE}------ 系统综合管理 -------${NC}\n"
+        echo -e "${WHITE}=====================================${NC}\n"
+        echo -e "${WHITE}             系统综合管理      ${NC}\n"
+        echo -e "${WHITE}=====================================${NC}\n"
         echo "1. 系统信息查询"
         echo ""
         echo "2. 清理系统垃圾"
@@ -1912,8 +1914,6 @@ sys_manage_menu() {
         echo "6. 设置 SSH 密钥登录"
         echo ""
         echo "7. 设置系统时区"
-        echo ""
-        echo "-------- 网络优化 ---------"
         echo ""
         echo "8. BBR 拥塞控制管理"
         echo ""
@@ -2133,7 +2133,7 @@ main_menu() {
         echo ""
         echo "3. Sub-Store 管理"
         echo ""
-        echo -e "${WHITE}------------- 面板安装 --------------${NC}"
+        echo -e "${WHITE}-------------------------------------${NC}"
         echo ""
         echo "4. 安装 S-ui 面板"
         echo ""
