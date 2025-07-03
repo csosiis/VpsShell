@@ -913,6 +913,231 @@ add_trojan_node() {
     add_protocol_node "Trojan" "$config"
 }
 
+# --- 推送功能模块 ---
+
+# 选择要推送的节点
+select_nodes_for_push() {
+    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    if [ ${#node_lines[@]} -eq 0 ]; then
+        log_warn "没有可推送的节点。"
+        return 1
+    fi
+
+    echo -e "\n请选择要推送的节点："
+    echo "1. 推送所有节点"
+    echo "2. 推送单个/多个节点"
+    echo "0. 返回"
+    read -p "请输入选项: " push_choice
+
+    selected_links=()
+    case $push_choice in
+        1)
+            # 推送所有节点
+            log_info "已选择推送所有节点。"
+            for line in "${node_lines[@]}"; do
+                selected_links+=("$line")
+            done
+            ;;
+        2)
+            # 推送单个或多个节点
+            log_info "请选择要推送的节点 (可多选，用空格分隔):"
+            for i in "${!node_lines[@]}"; do
+                line="${node_lines[$i]}"
+                node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+                if [[ "$line" =~ ^vmess:// ]]; then
+                    node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
+                fi
+                echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n"
+            done
+            read -p "请输入编号 (输入 0 返回): " -a selected_indices
+
+            for index in "${selected_indices[@]}"; do
+                if [[ "$index" == "0" ]]; then return 1; fi
+                if ! [[ "$index" =~ ^[0-9]+$ ]] || [[ $index -lt 1 || $index -gt ${#node_lines[@]} ]]; then
+                    log_error "包含无效编号: $index"
+                    return 1
+                fi
+                selected_links+=("${node_lines[$((index - 1))]}")
+            done
+            ;;
+        0)
+            return 1 ;;
+        *)
+            log_error "无效选项！"
+            return 1 ;;
+    esac
+
+    # 检查是否选择了任何链接
+    if [ ${#selected_links[@]} -eq 0 ]; then
+        log_warn "未选择任何有效节点。"
+        return 1
+    fi
+
+    return 0 # 返回成功
+}
+
+# 推送到 Sub-Store
+push_to_sub_store() {
+    if ! select_nodes_for_push; then
+        press_any_key
+        return
+    fi
+
+    local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
+    local sub_store_subs
+
+    if [ -f "$sub_store_config_file" ]; then
+        sub_store_subs=$(grep "sub_store_subs=" "$sub_store_config_file" | cut -d'=' -f2)
+    fi
+
+    read -p "请输入 Sub-Store 的订阅标识 (name) [默认: ${sub_store_subs}]: " input_subs
+    sub_store_subs=${input_subs:-$sub_store_subs}
+
+    if [ -z "$sub_store_subs" ]; then
+        log_error "Sub-Store 订阅标识不能为空！"
+        press_any_key
+        return
+    fi
+
+    # 将选择的链接合并成一个由换行符分隔的字符串
+    local links_str
+    links_str=$(printf "%s\n" "${selected_links[@]}")
+
+    local node_json
+    node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" '{
+        "token": "csosiis5",
+        "name": $name,
+        "link": $link
+    }')
+
+    log_info "正在推送到 Sub-Store API..."
+    response=$(curl -s -X POST "https://oregen.wiitwo.eu.org/data" \
+        -H "Content-Type: application/json" \
+        -d "$node_json")
+
+    if [[ "$response" == "节点更新成功!" ]]; then
+        echo "sub_store_subs=$sub_store_subs" > "$sub_store_config_file"
+        log_info "✅ 节点信息已成功推送到 Sub-Store！"
+    else
+        log_error "推送到 Sub-Store 失败，服务器响应: $response"
+    fi
+    press_any_key
+}
+
+# 推送到 Telegram
+push_to_telegram() {
+    if ! select_nodes_for_push; then
+        press_any_key
+        return
+    fi
+
+    local tg_config_file="/etc/sing-box/telegram-bot-config.txt"
+    local tg_api_token
+    local tg_chat_id
+
+    if [ -f "$tg_config_file" ]; then
+        source "$tg_config_file"
+    fi
+
+    if [ -z "$tg_api_token" ] || [ -z "$tg_chat_id" ]; then
+        log_info "首次推送到 Telegram，请输入您的 Bot 信息。"
+        read -p "请输入 Telegram Bot API Token: " tg_api_token
+        read -p "请输入 Telegram Chat ID: " tg_chat_id
+    fi
+
+    log_info "正在推送到 Telegram..."
+    for link in "${selected_links[@]}"; do
+        response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
+             -d chat_id="$tg_chat_id" \
+             -d text="$link")
+
+        if ! echo "$response" | jq -e '.ok' > /dev/null; then
+            log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq '.description')"
+            read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
+            if [[ "$choice" =~ ^[Yy]$ ]]; then
+                rm -f "$tg_config_file"
+            fi
+            press_any_key
+            return
+        fi
+    done
+
+    # 成功后保存配置
+    echo "tg_api_token=$tg_api_token" > "$tg_config_file"
+    echo "tg_chat_id=$tg_chat_id" >> "$tg_config_file"
+    log_info "✅ 所有选定节点已成功推送到 Telegram！"
+    press_any_key
+}
+
+# 推送主菜单
+push_nodes() {
+    clear
+    echo -e "${WHITE}--- 推送节点 ---${NC}\n"
+    echo "1. 推送到 Sub-Store"
+    echo "2. 推送到 Telegram Bot"
+    echo ""
+    echo "0. 返回"
+    read -p "请选择推送方式: " push_choice
+
+    case $push_choice in
+        1) push_to_sub_store ;;
+        2) push_to_telegram ;;
+        0) return ;;
+        *) log_error "无效选项！"; press_any_key ;;
+    esac
+}
+
+# 显示/管理节点信息
+view_node_info() {
+    while true; do
+        clear
+        if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+            log_warn "暂无配置的节点！"
+            press_any_key
+            return
+        fi
+
+        log_info "当前已配置的节点链接信息："
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+        all_links=""
+        for i in "${!node_lines[@]}"; do
+            line="${node_lines[$i]}"
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
+            fi
+            echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+            echo -e "${line}"
+            echo "" # 增加空行
+            echo -e "${CYAN}--------------------------------------------------------------${NC}"
+            all_links+="$line"$'\n'
+        done
+
+        aggregated_link=$(echo -n "$all_links" | base64 -w0)
+        echo -e "${GREEN}聚合订阅链接 (Base64):${NC}"
+        echo -e "${YELLOW}${aggregated_link}${NC}"
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        echo ""
+        echo "1. 新增节点"
+        echo "2. 删除节点"
+        # ==================== 关键修正点：激活推送功能 ====================
+        echo "3. 推送节点到 Sub-Store / Telegram"
+        echo "0. 返回上级菜单"
+        read -p "请输入选项: " choice
+        case $choice in
+            1) singbox_add_node_menu; break ;;
+            2) delete_nodes; break ;;
+            3) push_nodes; break ;; # 调用我们新加的推送主菜单函数
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+        # =================================================================
+    done
+}
+
 # 显示/管理节点信息
 view_node_info() {
     while true; do
@@ -990,9 +1215,9 @@ delete_nodes() {
             tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
             node_tags_map[$i]=$tag
         done
-
+        echo ""
         log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
-
+        echo ""
         for i in "${!node_lines[@]}"; do
             line="${node_lines[$i]}"
             node_name=${node_tags_map[$i]}
