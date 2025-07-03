@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================================
-#               全功能 VPS & 应用管理脚本 (v1.0)
+#               Jcole VPS & 应用管理脚本 (v1.0)
 #
 #   整合来源: sys.sh, singbox.sh, sub-store.sh
 #   主导风格: sub-store.sh
@@ -2156,7 +2156,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${WHITE}=====================================${NC}\n"
-        echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}\n"
+        echo -e "${WHITE}    Jcole VPS & 应用管理脚本      ${NC}\n"
         echo -e "${WHITE}=====================================${NC}\n"
         echo "1. 系统综合管理"
         echo ""
