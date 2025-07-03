@@ -988,10 +988,10 @@ delete_nodes() {
         tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
         node_tags_map[$i]=$tag
     done
-
+    echo ""
     log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+    echo ""
 
-    # ==================== 关键修正点 1：手动循环打印菜单并增加空行 ====================
     for i in "${!node_lines[@]}"; do
         line="${node_lines[$i]}"
         node_name=${node_tags_map[$i]}
@@ -999,22 +999,18 @@ delete_nodes() {
             node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
         fi
         echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
-        echo "" # 在每个选项后增加一个空行
+        echo ""
     done
-    # ==============================================================================
 
-    # ==================== 关键修正点 2：修改提示并增加取消逻辑 ====================
     read -p "请输入编号 (输入 0 返回): " -a nodes_to_delete
 
-    # 检查用户输入中是否包含 0
     for choice in "${nodes_to_delete[@]}"; do
         if [[ "$choice" == "0" ]]; then
             log_info "操作已取消，返回上一级菜单。"
             press_any_key
-            return # 直接退出函数，实现返回
+            return
         fi
     done
-    # ==========================================================================
 
     if [[ "${nodes_to_delete[0]}" == "all" ]]; then
         read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
@@ -1031,20 +1027,28 @@ delete_nodes() {
         tags_to_delete=()
         for node_num in "${nodes_to_delete[@]}"; do
             if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
-                log_error "无效的编号: $node_num"; continue;
+                log_error "无效的编号: $node_num"
+                continue
             fi
             indices_to_delete+=($((node_num - 1)))
             tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
         done
 
-        if [ ${#tags_to_delete[@]} -gt 0 ]; then
-            log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
-            cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
-            for tag in "${tags_to_delete[@]}"; do
-                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
-            done
-            mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+        # ==================== 关键修正点：增加“刹车”机制 ====================
+        # 检查是否收集到了任何有效的待删除节点，如果没有，则直接退出。
+        if [ ${#indices_to_delete[@]} -eq 0 ]; then
+            log_warn "未输入任何有效节点编号，未执行任何删除操作。"
+            press_any_key
+            return
         fi
+        # ====================================================================
+
+        log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
+        cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
+        for tag in "${tags_to_delete[@]}"; do
+            jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+        done
+        mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
 
         remaining_lines=()
         for i in "${!node_lines[@]}"; do
