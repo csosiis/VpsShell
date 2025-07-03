@@ -936,6 +936,7 @@ select_nodes_for_push() {
     case $push_choice in
         1)
             # 推送所有节点
+            echo ""
             log_info "已选择推送所有节点。"
             for line in "${node_lines[@]}"; do
                 selected_links+=("$line")
@@ -1029,7 +1030,7 @@ push_to_sub_store() {
     press_any_key
 }
 
-# 推送到 Telegram (最终修正版：正确合并多行消息)
+# 推送到 Telegram (再次修正版：使用 --data-urlencode 确保多行发送)
 push_to_telegram() {
     if ! select_nodes_for_push; then
         press_any_key
@@ -1050,22 +1051,21 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    # ==================== 关键修正点：使用循环构建消息主体 ====================
     local links_body=""
-    # 1. 先用循环把所有链接拼接起来，每个链接占一行
     for link in "${selected_links[@]}"; do
         links_body+="${link}\n"
     done
 
-    # 2. 最后，在拼接好的链接主体前面加上固定的头部信息
     local message_text="节点推送成功，详情如下：\n\n${links_body}"
-    # ============================================================================
 
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
+    # ==================== 关键修正点：使用 --data-urlencode 发送消息 ====================
+    # 这样可以确保包含换行符的多行文本被正确编码和发送
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
-         -d chat_id="$tg_chat_id" \
-         -d text="$message_text")
+         --data-urlencode "chat_id=${tg_chat_id}" \
+         --data-urlencode "text=${message_text}")
+    # =================================================================================
 
     if ! echo "$response" | jq -e '.ok' > /dev/null; then
         log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
@@ -1336,18 +1336,16 @@ delete_nodes() {
 # 推送主菜单
 push_nodes() {
     clear
-    echo -e "${WHITE}------- 推送节点 -------${NC}\n"
     echo ""
+    echo -e "${WHITE}------- 推送节点 -------${NC}\n"
     echo "1. 推送到 Sub-Store"
     echo ""
     echo "2. 推送到 Telegram Bot"
     echo ""
-    echo -e "${WHITE}--------------------${NC}\n"
-    echo ""
+    echo -e "${WHITE}------------------------${NC}\n"
     echo "0. 返回上一级菜单"
     echo ""
-    echo -e "${WHITE}--------------------${NC}\n"
-    echo ""
+    echo -e "${WHITE}------------------------${NC}\n"
     read -p "请选择推送方式: " push_choice
 
     case $push_choice in
