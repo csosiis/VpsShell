@@ -989,7 +989,9 @@ delete_nodes() {
         node_tags_map[$i]=$tag
     done
 
-    echo "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+    log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+
+    # ==================== 关键修正点：手动循环打印菜单并增加空行 ====================
     for i in "${!node_lines[@]}"; do
         line="${node_lines[$i]}"
         node_name=${node_tags_map[$i]}
@@ -997,8 +999,10 @@ delete_nodes() {
             node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
         fi
         echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+        echo "" # 在每个选项后增加一个空行
     done
-    echo ""
+    # ==============================================================================
+
     read -p "请输入编号: " -a nodes_to_delete
 
     if [[ "${nodes_to_delete[0]}" == "all" ]]; then
@@ -1022,26 +1026,15 @@ delete_nodes() {
             tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
         done
 
-        # ==================== 关键修正点：改用更稳定、更简单的循环删除方法 ====================
         if [ ${#tags_to_delete[@]} -gt 0 ]; then
             log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
-
-            # 创建一个临时文件用于操作
             cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
-
-            # 循环遍历要删除的 tag，逐个进行删除
             for tag in "${tags_to_delete[@]}"; do
-                # 每次都从临时文件中读取，删除一个 tag，然后写回到一个新的临时文件，再覆盖回去
-                # 这样可以确保每次操作都是基于上一次成功删除后的结果
                 jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
             done
-
-            # 所有循环删除操作完成后，用最终的临时文件覆盖原始配置文件
             mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
         fi
-        # ======================================================================================
 
-        # 从 nodes_links.txt 中删除 (通过重建文件)
         remaining_lines=()
         for i in "${!node_lines[@]}"; do
             should_keep=true
