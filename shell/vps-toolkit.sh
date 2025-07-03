@@ -1090,15 +1090,18 @@ push_nodes() {
     echo "1. 推送到 Sub-Store"
     echo "2. 推送到 Telegram Bot"
     echo ""
-    echo "0. 返回"
+    echo "0. 返回上一级菜单"
+    echo ""
     read -p "请选择推送方式: " push_choice
 
+    # ==================== 关键修正点：使用正确的变量名 push_choice ====================
     case $push_choice in
         1) push_to_sub_store ;;
         2) push_to_telegram ;;
         0) return ;;
         *) log_error "无效选项！"; press_any_key ;;
     esac
+    # ==============================================================================
 }
 
 # 显示/管理节点信息
