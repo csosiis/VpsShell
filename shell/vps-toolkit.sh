@@ -923,10 +923,13 @@ select_nodes_for_push() {
         return 1
     fi
 
-    echo -e "\n请选择要推送的节点："
+    echo -e "\n请选择要推送的节点：\n"
     echo "1. 推送所有节点"
+    echo ""
     echo "2. 推送单个/多个节点"
+    echo ""
     echo "0. 返回"
+    echo ""
     read -p "请输入选项: " push_choice
 
     selected_links=()
@@ -940,7 +943,9 @@ select_nodes_for_push() {
             ;;
         2)
             # 推送单个或多个节点
+            echo ""
             log_info "请选择要推送的节点 (可多选，用空格分隔):"
+            echo ""
             for i in "${!node_lines[@]}"; do
                 line="${node_lines[$i]}"
                 node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
@@ -1024,7 +1029,7 @@ push_to_sub_store() {
     press_any_key
 }
 
-# 推送到 Telegram (优化版：合并为单条消息)
+# 推送到 Telegram (最终修正版：正确合并多行消息)
 push_to_telegram() {
     if ! select_nodes_for_push; then
         press_any_key
@@ -1045,19 +1050,22 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    # ==================== 关键优化点：将所有链接合并为一个字符串 ====================
-    # 使用 printf 和换行符 \n 来格式化所有链接
-    local message_text
-    message_text=$(printf "节点推送成功，详情如下：\n\n%s\n" "${selected_links[@]}")
+    # ==================== 关键修正点：使用循环构建消息主体 ====================
+    local links_body=""
+    # 1. 先用循环把所有链接拼接起来，每个链接占一行
+    for link in "${selected_links[@]}"; do
+        links_body+="${link}\n"
+    done
+
+    # 2. 最后，在拼接好的链接主体前面加上固定的头部信息
+    local message_text="节点推送成功，详情如下：\n\n${links_body}"
     # ============================================================================
 
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
-    # ==================== 关键优化点：只发送一次 curl 请求 ====================
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
          -d chat_id="$tg_chat_id" \
          -d text="$message_text")
-    # ======================================================================
 
     if ! echo "$response" | jq -e '.ok' > /dev/null; then
         log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
@@ -1334,11 +1342,11 @@ push_nodes() {
     echo ""
     echo "2. 推送到 Telegram Bot"
     echo ""
-    cho -e "${WHITE}--------------------${NC}\n"
+    echo -e "${WHITE}--------------------${NC}\n"
     echo ""
     echo "0. 返回上一级菜单"
     echo ""
-    cho -e "${WHITE}--------------------${NC}\n"
+    echo -e "${WHITE}--------------------${NC}\n"
     echo ""
     read -p "请选择推送方式: " push_choice
 
