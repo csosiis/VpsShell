@@ -1030,7 +1030,7 @@ push_to_sub_store() {
     press_any_key
 }
 
-# 推送到 Telegram (再次修正版：使用 --data-urlencode 确保多行发送)
+# 推送到 Telegram (最终修正版：使用 IFS 和数组确保真实换行)
 push_to_telegram() {
     if ! select_nodes_for_push; then
         press_any_key
@@ -1051,21 +1051,26 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    local links_body=""
-    for link in "${selected_links[@]}"; do
-        links_body+="${link}\n"
-    done
+    # ==================== 关键修正点：使用数组和 IFS 构建包含真实换行的消息 ====================
+    # 1. 创建一个数组，包含消息的每一行
+    local message_lines=("节点推送成功，详情如下：" "") # 头部信息和紧跟的一个空行
+    message_lines+=("${selected_links[@]}") # 将所有选择的链接追加到数组中
 
-    local message_text="节点推送成功，详情如下：\n\n${links_body}"
+    # 2. 临时将 Bash 的内部字段分隔符(IFS)设置为换行符
+    local IFS=$'\n'
+
+    # 3. 通过 "${message_lines[*]}" 将数组的所有元素用 IFS (即换行符) 连接成一个单一的字符串
+    local message_text="${message_lines[*]}"
+
+    # 恢复 IFS 到默认值，这是一个好习惯
+    unset IFS
+    # ======================================================================================
 
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
-    # ==================== 关键修正点：使用 --data-urlencode 发送消息 ====================
-    # 这样可以确保包含换行符的多行文本被正确编码和发送
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
          --data-urlencode "chat_id=${tg_chat_id}" \
          --data-urlencode "text=${message_text}")
-    # =================================================================================
 
     if ! echo "$response" | jq -e '.ok' > /dev/null; then
         log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
