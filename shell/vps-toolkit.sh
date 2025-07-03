@@ -1898,9 +1898,9 @@ sys_manage_menu() {
     while true; do
         clear
         echo ""
-        echo -e "${WHITE}=====================================${NC}\n"
-        echo -e "${WHITE}             系统综合管理      ${NC}\n"
-        echo -e "${WHITE}=====================================${NC}\n"
+        echo -e "${WHITE}===========================${NC}\n"
+        echo -e "${WHITE}       系统综合管理      ${NC}\n"
+        echo -e "${WHITE}===========================${NC}\n"
         echo "1. 系统信息查询"
         echo ""
         echo "2. 清理系统垃圾"
@@ -1973,7 +1973,9 @@ singbox_add_node_menu() {
 singbox_main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}----- Sing-Box 管理菜单 -----${NC}\n"
+        echo -e "${WHITE}===========================${NC}\n"
+        echo -e "${WHITE}     Sing-Box 管理菜单      ${NC}\n"
+        echo -e "${WHITE}===========================${NC}\n"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
