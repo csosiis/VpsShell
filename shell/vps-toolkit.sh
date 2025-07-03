@@ -29,7 +29,7 @@ SUBSTORE_INSTALL_DIR="/root/sub-store"
 SINGBOX_CONFIG_FILE="/etc/sing-box/config.json"
 SINGBOX_NODE_LINKS_FILE="/etc/sing-box/nodes_links.txt"
 SCRIPT_PATH=$(realpath "$0")
-SHORTCUT_PATH="/usr/local/bin/vs"
+SHORTCUT_PATH="/usr/local/bin/sv"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 FLAG_FILE="/root/.vps_toolkit.initialized"
 
@@ -1065,7 +1065,7 @@ push_to_telegram() {
     # 恢复 IFS 到默认值，这是一个好习惯
     unset IFS
     # ======================================================================================
-
+    echo ""
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
@@ -1780,15 +1780,39 @@ do_update_script() {
     echo ""
     exit 0
 }
+# 内部辅助函数，负责创建快捷方式的核心逻辑
+_create_shortcut() {
+    local shortcut_name=$1
+    local full_path="/usr/local/bin/${shortcut_name}"
 
-# 设置快捷命令
+    if [ -z "$shortcut_name" ]; then
+        log_error "快捷命令名称不能为空！"
+        return 1
+    fi
+
+    # 验证输入，防止恶意命令
+    if ! [[ "$shortcut_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "无效的命令名称！只能包含字母、数字、下划线和连字符。"
+        return 1
+    fi
+
+    echo ""
+    log_info "正在为脚本创建快捷命令: ${shortcut_name}"
+    ln -sf "$SCRIPT_PATH" "$full_path"
+    chmod +x "$full_path"
+    log_info "✅ 快捷命令 '${shortcut_name}' 已设置！"
+    log_info "现在您可以随时随地输入 '${shortcut_name}' 来运行此脚本。"
+}
+
+# 设置快捷命令 (交互式)
 setup_shortcut() {
     echo ""
-    log_info "正在设置 '${SHORTCUT_PATH##*/}' 快捷命令...";
-    ln -sf "$SCRIPT_PATH" "$SHORTCUT_PATH"
-    chmod +x "$SHORTCUT_PATH"
-    echo ""
-    log_info "✅ 快捷命令设置成功！现在您可以随时随地输入 '${SHORTCUT_PATH##*/}' 来运行此脚本。"
+    local default_shortcut="sv"
+    read -p "请输入您想要的快捷命令名称 [默认: ${default_shortcut}]: " input_name
+    local shortcut_name=${input_name:-$default_shortcut}
+
+    # 调用核心函数来创建快捷方式
+    _create_shortcut "$shortcut_name"
     press_any_key
 }
 
@@ -2119,7 +2143,7 @@ main_menu() {
         echo ""
         echo -e "8. ${GREEN}更新此脚本${NC}"
         echo ""
-        echo -e "9. ${YELLOW}设置快捷命令 (vs)${NC}"
+        echo -e "9. ${YELLOW}设置快捷命令 (默认: sv)${NC}"
         echo ""
         echo -e "0. ${RED}退出脚本${NC}"
         echo ""
@@ -2140,6 +2164,7 @@ main_menu() {
         esac
     done
 }
+
 # 首次运行检查函数
 initial_setup_check() {
     if [ ! -f "$FLAG_FILE" ]; then
@@ -2147,7 +2172,13 @@ initial_setup_check() {
         log_warn "这个过程可能需要一些时间，请耐心等待..."
         check_and_install_dependencies
         if [ $? -eq 0 ]; then
-            log_info "依赖项初始化完成，创建标记文件以跳过下次检查。"
+            log_info "依赖项初始化完成。"
+
+            # ==================== 关键修正点：自动创建默认快捷命令 ====================
+            _create_shortcut "sv"
+            # ======================================================================
+
+            log_info "创建标记文件以跳过下次检查。"
             touch "$FLAG_FILE"
             log_info "按任意键继续进入主菜单..."
             press_any_key
@@ -2157,6 +2188,7 @@ initial_setup_check() {
         fi
     fi
 }
+
 # --- 脚本入口 ---
 check_root
 initial_setup_check # 新增这一行调用
