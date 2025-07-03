@@ -140,7 +140,7 @@ show_system_info() {
 
     # --- 数据获取部分 ---
     hostname_info=$(hostname)
-    os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^ *//')
+    os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^[[:space:]]*//')
     kernel_info=$(uname -r)
     cpu_arch=$(lscpu | grep "Architecture" | awk -F: '{print $2}' | sed 's/^ *//')
     cpu_model_full=$(lscpu | grep "^Model name:" | sed -e 's/Model name:[[:space:]]*//')
@@ -164,9 +164,9 @@ show_system_info() {
     # --- 使用 printf 格式化输出 ---
     clear
     echo ""
-    echo -e "${CYAN}-------------------- 系统信息查询 ----------------------${NC}"
-    printf "${GREEN}主机名　　　   : ${WHITE}%s${NC}\n" "$hostname_info"
-    printf "${GREEN}系统版本　　   : ${WHITE}%s${NC}\n" "$os_info"
+    echo -e "${CYAN}-------------------- 系统信息查询 ---------------------${NC}"
+    printf "${GREEN}主机名　　　  : ${WHITE}%s${NC}\n" "$hostname_info"
+    printf "${GREEN}系统版本　　  : ${WHITE}%s${NC}\n" "$os_info"
     printf "${GREEN}Linux版本　 　: ${WHITE}%s${NC}\n" "$kernel_info"
 
     echo -e "${CYAN}-------------------------------------------------------${NC}"
@@ -1854,9 +1854,13 @@ manage_bbr() {
 
     echo ""
     echo "请选择要执行的操作:"
+    echo ""
     echo "1. 启用 BBR (原始版本)"
+    echo ""
     echo "2. 启用 BBR + FQ"
+    echo ""
     echo "0. 返回"
+    echo ""
     read -p "请输入选项: " choice
 
     local sysctl_conf="/etc/sysctl.conf"
