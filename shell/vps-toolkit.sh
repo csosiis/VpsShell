@@ -1016,7 +1016,6 @@ push_to_sub_store() {
         "link": $link
     }')
 
-    echo ""
     log_info "正在推送到 Sub-Store API..."
     response=$(curl -s -X POST "https://oregen.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
@@ -1031,7 +1030,7 @@ push_to_sub_store() {
     press_any_key
 }
 
-# 推送到 Telegram (优化版：增加节点间距)
+# 推送到 Telegram (最终修正版：使用 IFS 和数组确保真实换行)
 push_to_telegram() {
     if ! select_nodes_for_push; then
         press_any_key
@@ -1052,24 +1051,21 @@ push_to_telegram() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
     fi
 
-    # ==================== 关键修正点：使用循环为每个节点后增加一个空行 ====================
-    # 1. 创建一个数组，先放头部信息
-    local message_lines=("节点推送成功，详情如下：" "")
+    # ==================== 关键修正点：使用数组和 IFS 构建包含真实换行的消息 ====================
+    # 1. 创建一个数组，包含消息的每一行
+    local message_lines=("节点推送成功，详情如下：" "") # 头部信息和紧跟的一个空行
+    message_lines+=("${selected_links[@]}") # 将所有选择的链接追加到数组中
 
-    # 2. 循环遍历选择的链接
-    for link in "${selected_lines[@]}"; do
-        # 每次向数组中添加一个链接
-        message_lines+=("$link")
-        # 然后再添加一个空字符串元素，这在最后会转换为空行
-        message_lines+=("")
-    done
-
-    # 3. 像以前一样，用 IFS 连接数组
+    # 2. 临时将 Bash 的内部字段分隔符(IFS)设置为换行符
     local IFS=$'\n'
+
+    # 3. 通过 "${message_lines[*]}" 将数组的所有元素用 IFS (即换行符) 连接成一个单一的字符串
     local message_text="${message_lines[*]}"
+
+    # 恢复 IFS 到默认值，这是一个好习惯
     unset IFS
-    # ====================================================================================
-    echo ""
+    # ======================================================================================
+
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
