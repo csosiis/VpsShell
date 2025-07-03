@@ -973,107 +973,123 @@ view_node_info() {
 
 # 删除节点
 delete_nodes() {
-    clear
-    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
-        log_warn "没有节点可以删除。"
-        press_any_key
-        return
-    fi
-
-    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
-
-    declare -A node_tags_map
-    for i in "${!node_lines[@]}"; do
-        line="${node_lines[$i]}"
-        tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-        node_tags_map[$i]=$tag
-    done
-    echo ""
-    log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
-    echo ""
-
-    for i in "${!node_lines[@]}"; do
-        line="${node_lines[$i]}"
-        node_name=${node_tags_map[$i]}
-        if [[ "$line" =~ ^vmess:// ]]; then
-            node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
-        fi
-        echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
-        echo ""
-    done
-
-    read -p "请输入编号 (输入 0 返回): " -a nodes_to_delete
-
-    for choice in "${nodes_to_delete[@]}"; do
-        if [[ "$choice" == "0" ]]; then
-            log_info "操作已取消，返回上一级菜单。"
+    # 使用一个无限循环，让用户可以反复操作或在出错后重新输入
+    while true; do
+        clear
+        if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+            log_warn "没有节点可以删除。"
             press_any_key
-            return
+            return # 如果没有节点文件，直接退出函数
         fi
-    done
 
-    if [[ "${nodes_to_delete[0]}" == "all" ]]; then
-        read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
-        if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
-            log_info "正在删除所有节点..."
-            jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-            rm -f "$SINGBOX_NODE_LINKS_FILE"
-            log_info "✅ 所有节点已删除。"
-        else
-            log_info "操作已取消。"
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+
+        declare -A node_tags_map
+        for i in "${!node_lines[@]}"; do
+            line="${node_lines[$i]}"
+            tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            node_tags_map[$i]=$tag
+        done
+
+        log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+
+        for i in "${!node_lines[@]}"; do
+            line="${node_lines[$i]}"
+            node_name=${node_tags_map[$i]}
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
+            fi
+            echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
+            echo ""
+        done
+
+        read -p "请输入编号 (输入 0 返回上一级菜单): " -a nodes_to_delete
+
+        # ==================== 关键修正点：重构循环和退出逻辑 ====================
+        # 检查是否输入了 0，如果是，则跳出 while 循环，结束本次删除操作
+        is_cancel=false
+        for choice in "${nodes_to_delete[@]}"; do
+            if [[ "$choice" == "0" ]]; then
+                is_cancel=true
+                break
+            fi
+        done
+        if $is_cancel; then
+            log_info "操作已取消，返回上一级菜单。"
+            break # 跳出 while true 循环
         fi
-    else
-        indices_to_delete=()
-        tags_to_delete=()
-        for node_num in "${nodes_to_delete[@]}"; do
-            if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
-                log_error "无效的编号: $node_num"
+
+        if [[ "${nodes_to_delete[0]}" == "all" ]]; then
+            # ... all 删除逻辑 (保持不变)
+            read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
+            if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
+                log_info "正在删除所有节点..."
+                jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+                rm -f "$SINGBOX_NODE_LINKS_FILE"
+                log_info "✅ 所有节点已删除。"
+            else
+                log_info "操作已取消。"
+            fi
+            systemctl restart sing-box
+            # 删除 'all' 后，直接跳出循环返回
+            break
+
+        else # 删除单个/多个节点的逻辑
+            indices_to_delete=()
+            tags_to_delete=()
+            has_invalid_input=false
+            for node_num in "${nodes_to_delete[@]}"; do
+                if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
+                    log_error "包含无效的编号: $node_num"
+                    has_invalid_input=true
+                    break # 一旦有错误输入，就中断处理
+                fi
+                indices_to_delete+=($((node_num - 1)))
+                tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
+            done
+
+            # 如果检测到无效输入，则用 continue 回到 while 循环的开头，让用户重新输入
+            if $has_invalid_input; then
+                press_any_key
                 continue
             fi
-            indices_to_delete+=($((node_num - 1)))
-            tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
-        done
 
-        # ==================== 关键修正点：增加“刹车”机制 ====================
-        # 检查是否收集到了任何有效的待删除节点，如果没有，则直接退出。
-        if [ ${#indices_to_delete[@]} -eq 0 ]; then
-            log_warn "未输入任何有效节点编号，未执行任何删除操作。"
-            press_any_key
-            return
-        fi
-        # ====================================================================
-
-        log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
-        cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
-        for tag in "${tags_to_delete[@]}"; do
-            jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
-        done
-        mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-
-        remaining_lines=()
-        for i in "${!node_lines[@]}"; do
-            should_keep=true
-            for del_idx in "${indices_to_delete[@]}"; do
-                if [[ $i -eq $del_idx ]]; then
-                    should_keep=false; break;
-                fi
-            done
-            if $should_keep; then
-                remaining_lines+=("${node_lines[$i]}")
+            # 如果没有任何有效输入（比如只输入了回车）
+            if [ ${#indices_to_delete[@]} -eq 0 ]; then
+                log_warn "未输入任何有效节点编号。"
+                press_any_key
+                continue # 回到循环开头重新输入
             fi
-        done
 
-        if [ ${#remaining_lines[@]} -eq 0 ]; then
-            log_info "所有节点均已删除，正在移除节点链接文件..."
-            rm -f "$SINGBOX_NODE_LINKS_FILE"
-        else
-            printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+            # --- 执行实际的删除操作 ---
+            log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
+            cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
+            for tag in "${tags_to_delete[@]}"; do
+                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+            done
+            mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+
+            remaining_lines=()
+            for i in "${!node_lines[@]}"; do
+                should_keep=true
+                for del_idx in "${indices_to_delete[@]}"; do if [[ $i -eq $del_idx ]]; then should_keep=false; break; fi; done
+                if $should_keep; then remaining_lines+=("${node_lines[$i]}"); fi
+            done
+
+            if [ ${#remaining_lines[@]} -eq 0 ]; then
+                rm -f "$SINGBOX_NODE_LINKS_FILE"
+            else
+                printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+            fi
+            log_info "✅ 所选节点已删除。"
+            systemctl restart sing-box
+            # 成功删除后，也跳出循环，因为列表已更新
+            break
         fi
-        log_info "✅ 所选节点已删除。"
-    fi
+        # ==============================================================================
+    done
 
-    log_info "正在重启 Sing-Box..."
-    systemctl restart sing-box
+    # 只有在跳出 while 循环后，才执行按键返回
     press_any_key
 }
 
@@ -1713,6 +1729,7 @@ singbox_main_menu() {
             # ==================== 关键修正点 ====================
             # 当 sing-box 未安装时，显示这个菜单
             echo -e "${WHITE}-------------------------${NC}\n"
+            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n"
             echo "1. 安装 Sing-Box"
             echo ""
             echo "0. 返回主菜单"
