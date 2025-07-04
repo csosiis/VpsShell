@@ -1055,11 +1055,19 @@ push_nodes() {
 # 显示/管理节点信息
 view_node_info() {
     while true; do
-        clear
+        clear; echo "";
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
-            press_any_key
-            return
+            # 在没有节点时，提供一个直接新增的选项
+            echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
+            read -p "请输入选项: " choice
+            if [[ "$choice" == "1" ]]; then
+                singbox_add_node_orchestrator
+                # 添加后继续循环，以显示新节点
+                continue
+            else
+                return
+            fi
         fi
 
         log_info "当前已配置的节点链接信息："
@@ -1073,31 +1081,40 @@ view_node_info() {
             if [[ "$line" =~ ^vmess:// ]]; then
                 node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
             fi
-            echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}"
-            echo -e "${line}"
-            echo "" # 增加空行
-            echo -e "${CYAN}--------------------------------------------------------------${NC}"
+            echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
+            echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
             all_links+="$line"$'\n'
         done
 
         aggregated_link=$(echo -n "$all_links" | base64 -w0)
-        echo -e "${GREEN}聚合订阅链接 (Base64):${NC}"
-        echo -e "${YELLOW}${aggregated_link}${NC}"
-        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+        echo -e "\n${GREEN}聚合订阅链接 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
 
-        echo ""
-        echo "1. 新增节点"
-        echo "2. 删除节点"
-        # ==================== 关键修正点：激活推送功能 ====================
-        echo "3. 推送节点到 Sub-Store / Telegram"
-        echo "0. 返回上级菜单"
+        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
+
+        # ==================== 关键修正点：修正 case 逻辑 ====================
         case $choice in
-            1) singbox_add_node_menu; break ;;
-            2) delete_nodes; break ;;
-            3) push_nodes; break ;; # 调用我们新加的推送主菜单函数
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
+            1)
+                singbox_add_node_orchestrator
+                # 调用后不 break，让 while 循环自然继续，从而刷新列表
+                continue
+                ;;
+            2)
+                delete_nodes
+                # 调用后不 break，让 while 循环自然继续，从而刷新列表
+                continue
+                ;;
+            3)
+                push_nodes
+                # 调用后不 break，让 while 循环自然继续
+                continue
+                ;;
+            0)
+                break
+                ;;
+            *)
+                log_error "无效选项！"; sleep 1
+                ;;
         esac
         # =================================================================
     done
