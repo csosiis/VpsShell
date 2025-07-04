@@ -54,10 +54,24 @@ check_port() {
 generate_random_port() {
     echo $((RANDOM % 64512 + 1024))
 }
+# 检查端口是否可用 (增强版)
+_is_port_available() {
+    local port_to_check=$1
+    local used_ports_array_name=$2
+    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
-# 随机生成密码函数
-generate_random_password() {
-    < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
+    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
+        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
+        return 1
+    fi
+
+    for used_port in "${used_ports[@]}"; do
+        if [ "$port_to_check" == "$used_port" ]; then
+            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
+            return 1
+        fi
+    done
+    return 0
 }
 # 检查端口是否可用 (增强版)
 _is_port_available() {
@@ -2059,6 +2073,7 @@ main_menu() {
     done
 }
 # 新的统一创建函数 (v2.9 - 增加唯一Tag和输入校验)
+# 新的统一创建函数 (v2.9 - 增加唯一Tag和输入校验)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -2087,59 +2102,45 @@ singbox_add_node_orchestrator() {
         *) log_error "无效选择，操作中止。"; press_any_key; return;;
     esac
 
-    clear
-    log_info "您选择了 [${protocols_to_create[*]}] 协议。"
+    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"
     echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
-        # --- 域名输入与校验 ---
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
-            if [[ -z "$domain" ]]; then
-                log_error "域名不能为空！"
+            if [[ -z "$domain" ]]; then log_error "域名不能为空！"
             elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then
                 log_error "域名格式不正确，请重新输入。"
-            else
-                break
-            fi
+            else break; fi
         done
-
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
         connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        # (自签名证书的 IP 选择和 SNI 输入逻辑保持不变)
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then log_info "仅检测到 IPv4 地址。"; connect_addr="$ipv4_addr"
-        elif [ -n "$ipv6_addr" ]; then log_info "仅检测到 IPv6 地址。"; connect_addr="[${ipv6_addr}]"
+        elif [ -n "$ipv4_addr" ]; then log_info "仅检测到 IPv4 地址，将自动使用。"; connect_addr="$ipv4_addr"
+        elif [ -n "$ipv6_addr" ]; then log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="[${ipv6_addr}]"
         else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
-        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
+        read -p "请输入要用于 SNI 伪装的域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
         log_error "无效证书选择。"; press_any_key; return
     fi
 
-    # --- 端口输入与校验 ---
     local used_ports_for_this_run=()
     if ! $is_one_click; then
         local protocol_name=${protocols_to_create[0]}
         while true; do
             read -p "请输入 [${protocol_name}] 的端口 [回车则随机]: " port_input
-            if [ -z "$port_input" ]; then
-                port_input=$(generate_random_port)
-                log_info "已生成随机端口: ${port_input}"
-            fi
-            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                log_error "端口号必须是 1-65535 之间的数字。"
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
             elif _is_port_available "$port_input" "used_ports_for_this_run"; then
-                ports[$protocol_name]=$port_input
-                used_ports_for_this_run+=("$port_input")
-                break
+                ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break
             fi
         done
         read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
@@ -2147,36 +2148,25 @@ singbox_add_node_orchestrator() {
         for p in "${protocols_to_create[@]}"; do
             while true; do
                 local random_port=$(generate_random_port)
-                if _is_port_available "$random_port" "used_ports_for_this_run"; then
-                    ports[$p]=$random_port
-                    used_ports_for_this_run+=("$random_port")
-                    break
-                fi
+                if _is_port_available "$random_port" "used_ports_for_this_run"; then ports[$p]=$random_port; used_ports_for_this_run+=("$random_port"); break; fi
             done
         done
         if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi
     fi
 
-    # --- 循环创建 (增加唯一 Tag) ---
     location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/'); if [ -z "$location" ]; then location="N/A"; fi
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
         echo ""; local tag_base="${location}"; if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
-
-        # ==================== 核心修正：增加随机后缀，保证 Tag 唯一 ====================
         local random_suffix=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 4)
         local tag="${tag_base}-${protocol}-${random_suffix}"
-        # ===========================================================================
-
         local uuid=$(uuidgen); local password=$(generate_random_password)
         local config=""; local node_link=""; local current_port=${ports[$protocol]}
         case $protocol in
             "VLESS")
-                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F#${tag}";;
+                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"; node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F#${tag}";;
             "VMess")
-                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${connect_addr}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${sni_domain}\",\"path\":\"/\",\"tls\":\"tls\"}"; node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)";;
+                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"; local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${connect_addr}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${sni_domain}\",\"path\":\"/\",\"tls\":\"tls\"}"; node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)";;
             "Trojan")
                 config="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
                 node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/#${tag}";;
@@ -2187,7 +2177,6 @@ singbox_add_node_orchestrator() {
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then ((success_count++)); final_node_link="$node_link"; fi
     done
 
-    # 完成报告
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."; systemctl restart sing-box; sleep 2
         if systemctl is-active --quiet sing-box; then
