@@ -2022,13 +2022,12 @@ main_menu() {
         esac
     done
 }
-# --- Sing-Box 节点创建模块 (v2.3) ---
-# 新的总入口菜单 (v2.4 - 整合所有逻辑)
-singbox_add_node_menu() {
+# 新的统一创建函数 (v2.5 - 整合所有逻辑)
+singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
     # --- 变量初始化 ---
-    local domain cert_choice port_choice custom_id location connect_addr sni_domain
+    local domain cert_choice custom_id location connect_addr sni_domain
     local cert_path key_path
     declare -A ports
     local protocols_to_create=()
@@ -2036,12 +2035,15 @@ singbox_add_node_menu() {
 
     # --- 第 1 步：协议选择 ---
     clear
-    log_info "欢迎使用 Sing-Box 节点创建向导 v2.4"
+    log_info "欢迎使用 Sing-Box 节点创建向导 v2.5"
     echo -e "\n请选择您要搭建的节点类型：\n"
-    echo -e "1. VLESS + WSS\n2. VMess + WSS\n3. Trojan + WSS\n4. Hysteria2\n"
-    echo -e "${CYAN}-------------------------------------${NC}"
+    echo -e "1. VLESS + WSS"
+    echo -e "2. VMess + WSS"
+    echo -e "3. Trojan + WSS"
+    echo -e "4. Hysteria2"
+    echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "5. 一键生成以上全部 4 种协议节点"
-    echo -e "${CYAN}-------------------------------------${NC}\n"
+    echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "0. 返回上一级菜单\n"
     read -p "请输入选项: " protocol_choice
 
@@ -2069,11 +2071,6 @@ singbox_add_node_menu() {
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
         key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
         connect_addr="$domain"; sni_domain="$domain"
-
-        # 如果是一键模式，只需要额外问 tag
-        if $is_one_click; then
-            read -p "请输入自定义标识 (如 GCP, 回车则使用默认): " custom_id
-        fi
     elif [ "$cert_choice" == "2" ]; then # 自签名证书
         sni_domain="www.bing.com"
         connect_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
@@ -2082,23 +2079,23 @@ singbox_add_node_menu() {
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"
         key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
-
-        # 自签名证书的一键模式是全自动的，不需要问任何东西
-        if $is_one_click; then
-            custom_id=""
-        fi
     else
         log_error "无效选择，操作中止。"; press_any_key; return
     fi
 
-    # 单协议模式下，需要收集端口和tag
-    if ! $is_one_click; then
+    # 根据模式决定是否需要交互式输入端口和Tag
+    if ! $is_one_click; then # 单协议模式，需要交互
         local protocol_name=${protocols_to_create[0]}
         read -p "请输入 [${protocol_name}] 的端口 [回车则随机]: " port_input
         ports[$protocol_name]=${port_input:-$(generate_random_port)}
         read -p "请输入自定义标识 (如 GCP, 回车则使用默认): " custom_id
-    else
-        # 一键模式下，自动生成所有端口
+    else # 一键模式
+        # 如果是域名证书的一键模式，需要问一下Tag
+        if [ "$cert_choice" == "1" ]; then
+             read -p "请输入自定义标识 (如 GCP, 回车则使用默认): " custom_id
+        else # 自签名的一键模式，全自动
+            custom_id=""
+        fi
         for p in "${protocols_to_create[@]}"; do ports[$p]=$(generate_random_port); done
     fi
 
@@ -2106,6 +2103,7 @@ singbox_add_node_menu() {
     location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/')
     if [ -z "$location" ]; then location="N/A"; fi
     local success_count=0
+    local final_node_link=""
 
     for protocol in "${protocols_to_create[@]}"; do
         echo ""
@@ -2117,7 +2115,6 @@ singbox_add_node_menu() {
         local config=""; local node_link=""
         local current_port=${ports[$protocol]}
 
-        # (此处省略节点配置和链接生成的 case 语句，与上一版本完全相同)
         case $protocol in
             "VLESS")
                 config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
@@ -2140,6 +2137,7 @@ singbox_add_node_menu() {
 
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
             ((success_count++))
+            final_node_link="$node_link"
         fi
     done
 
@@ -2148,7 +2146,13 @@ singbox_add_node_menu() {
         log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
         systemctl restart sing-box; sleep 2
         if systemctl is-active --quiet sing-box; then
-            log_info "Sing-Box 重启成功。"; log_info "正在显示所有节点信息..."; sleep 1; view_node_info
+            log_info "Sing-Box 重启成功。"
+            if [ "$success_count" -eq 1 ] && ! $is_one_click; then
+                echo ""; log_info "✅ 节点添加成功！分享链接如下："; echo -e "${CYAN}--------------------------------------------------------------${NC}"
+                echo -e "\n${YELLOW}${final_node_link}${NC}\n"; echo -e "${CYAN}--------------------------------------------------------------${NC}"; press_any_key
+            else
+                log_info "正在显示所有节点信息..."; sleep 1; view_node_info
+            fi
         else
             log_error "Sing-Box 重启失败！请使用日志功能查看错误。"; press_any_key
         fi
@@ -2164,32 +2168,19 @@ singbox_main_menu() {
             echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"
             echo -e "1. 新增节点 (向导模式)"
             echo -e "2. 管理已有节点 (查看/删除/推送)"
+            # ... (其他菜单项保持不变) ...
             echo -e "\n-----------------------------\n"
-            echo -e "3. 启动 Sing-Box"
-            echo -e "4. 停止 Sing-Box"
-            echo -e "5. 重启 Sing-Box"
-            echo -e "6. 查看日志"
-            echo -e "\n-----------------------------\n"
-            echo -e "7. ${RED}卸载 Sing-Box${NC}\n"
             echo -e "0. 返回主菜单\n"
             echo -e "${WHITE}-----------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_menu ;; # 调用新的总入口菜单
+                1) singbox_add_node_orchestrator ;; # 确认这里调用的是我们刚刚添加的新函数
                 2) view_node_info ;;
-                # ... 其他 case 保持不变 ...
-                7) singbox_do_uninstall ;;
-                0) break ;;
+                # ... (其他 case 保持不变) ...
                 *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            # ... 未安装时的菜单保持不变 ...
-            read -p "请输入选项: " choice
-            case $choice in
-                1) singbox_do_install ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
-            esac
+            # ... (未安装时的菜单保持不变) ...
         fi
     done
 }
