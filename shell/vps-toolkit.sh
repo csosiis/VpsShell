@@ -2201,7 +2201,7 @@ singbox_add_node_orchestrator() {
 }
 singbox_main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=============================${NC}\n${WHITE}      Sing-Box 管理菜单      ${NC}\n${WHITE}=============================${NC}"
+        clear; echo -e "${WHITE}=============================${NC}\n\n${WHITE}      Sing-Box 管理菜单      ${NC}\n\n${WHITE}=============================${NC}"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"
