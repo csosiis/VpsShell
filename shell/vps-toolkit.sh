@@ -510,8 +510,10 @@ EOL
     # ===============================================================================
     echo ""
     log_info "正在启用并重启 Sing-Box 服务..."
+    echo ""
     systemctl enable sing-box.service
     systemctl restart sing-box
+    echo ""
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
     echo ""
     press_any_key
@@ -1428,6 +1430,7 @@ is_substore_installed() {
 
 # 安装 Sub-Store
 substore_do_install() {
+    echo ""
     log_info "开始执行 Sub-Store 安装流程..."; set -e
     # 注意：这里的依赖检查现在是全局自动的，保留日志作为流程说明
     log_info "开始检查并安装必需的依赖项..."
@@ -1512,6 +1515,7 @@ EOF
 # 卸载 Sub-Store
 substore_do_uninstall() {
     if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
+    echo ""
     log_warn "你确定要卸载 Sub-Store 吗？此操作不可逆！"; echo ""; read -p "请输入 Y 确认: " choice
     if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "取消卸载。"; press_any_key; return; fi
     log_info "正在停止并禁用服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME" || true; systemctl disable "$SUBSTORE_SERVICE_NAME" || true
@@ -1522,6 +1526,7 @@ substore_do_uninstall() {
 
 # 更新 Sub-Store
 update_sub_store_app() {
+    echo ""
     log_info "开始更新 Sub-Store 应用..."; if ! is_substore_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
     set -e; cd "$SUBSTORE_INSTALL_DIR"
     log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
