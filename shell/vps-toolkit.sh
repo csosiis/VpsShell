@@ -64,19 +64,13 @@ generate_random_password() {
 ensure_dependencies() {
     local dependencies=("$@") # 接收所有传入的参数作为依赖列表
     local missing_dependencies=()
-
-    # 检查是否有待处理的依赖项
-    if [ ${#dependencies[@]} -eq 0 ]; then
-        return 0
-    fi
-
+    if [ ${#dependencies[@]} -eq 0 ]; then return 0; fi
     log_info "正在按需检查依赖: ${dependencies[*]}..."
     for pkg in "${dependencies[@]}"; do
         if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
             missing_dependencies+=("$pkg")
         fi
     done
-
     if [ ${#missing_dependencies[@]} -gt 0 ]; then
         log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
         log_info "正在更新软件包列表并开始安装..."
@@ -2001,43 +1995,26 @@ substore_main_menu() {
         fi
     done
 }
-
 main_menu() {
     while true; do
         clear
         echo -e "${WHITE}=====================================${NC}\n"
         echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}\n"
         echo -e "${WHITE}=====================================${NC}\n"
-        echo "1. 系统综合管理"
-        echo ""
-        echo "2. Sing-Box 管理"
-        echo ""
-        echo "3. Sub-Store 管理"
-        echo ""
-        echo -e "${WHITE}-------------------------------------${NC}"
-        echo ""
-        echo "4. 安装 S-ui 面板"
-        echo ""
-        echo "5. 安装 3X-ui 面板"
-        echo ""
-        echo -e "${WHITE}-------------------------------------${NC}"
-        echo ""
-        echo -e "8. ${GREEN}更新此脚本${NC}"
-        echo ""
-        echo -e "9. ${YELLOW}设置快捷命令 (默认: sv)${NC}"
-        echo ""
-        echo -e "0. ${RED}退出脚本${NC}"
-        echo ""
-        echo -e "${WHITE}=====================================${NC}"
-        echo ""
+        echo -e "1. 系统综合管理\n\n2. Sing-Box 管理\n\n3. Sub-Store 管理\n"
+        echo -e "${WHITE}------------- 面板安装 --------------${NC}\n"
+        echo -e "4. 安装 S-ui 面板\n\n5. 安装 3X-ui 面板\n"
+        echo -e "${WHITE}-------------------------------------${NC}\n"
+        echo -e "8. ${GREEN}更新此脚本${NC}\n\n9. ${YELLOW}设置快捷命令 (默认: sv)${NC}\n\n0. ${RED}退出脚本${NC}\n"
+        echo -e "${WHITE}=====================================${NC}\n"
         read -p "请输入选项: " choice
 
         case $choice in
             1) sys_manage_menu ;;
             2) singbox_main_menu ;;
             3) substore_main_menu ;;
-            4) install_sui ;;
-            5) install_3xui ;;
+            4) ensure_dependencies "curl"; install_sui ;; # 将依赖检查移到这里更符合按需逻辑
+            5) ensure_dependencies "curl"; install_3xui ;; # 将依赖检查移到这里
             8) do_update_script ;;
             9) setup_shortcut ;;
             0) exit 0 ;;
@@ -2045,8 +2022,6 @@ main_menu() {
         esac
     done
 }
-
-# --- Sing-Box 节点创建模块 (v2.1 按新流程重构) ---
 # --- Sing-Box 节点创建模块 (v2.3) ---
 
 # 内部辅助函数：处理“一键四合一”全自动流程
