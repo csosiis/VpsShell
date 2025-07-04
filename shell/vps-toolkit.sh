@@ -109,6 +109,7 @@ check_and_install_dependencies() {
         log_info "所有必需的依赖项已安装完毕。"
     else
         log_info "所有必需的依赖项均已安装。"
+        echo ""
     fi
 }
 
@@ -450,6 +451,7 @@ singbox_do_install() {
         log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
         exit 1
     fi
+    echo ""
     log_info "✅ Sing-Box 安装成功！"
 
     log_info "正在自动定位服务文件并修改运行权限..."
@@ -506,11 +508,12 @@ singbox_do_install() {
 EOL
     fi
     # ===============================================================================
-
+    echo ""
     log_info "正在启用并重启 Sing-Box 服务..."
     systemctl enable sing-box.service
     systemctl restart sing-box
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
+    echo ""
     press_any_key
 }
 
