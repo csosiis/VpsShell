@@ -61,35 +61,16 @@ generate_random_password() {
 }
 
 # --- 核心功能：依赖项管理 ---
-
-check_and_install_dependencies() {
-    log_info "开始检查并安装必需的依赖项..."
-    # 修正后的列表，只包含真实的、可安装的软件包名称
-    local dependencies=(
-        "lsb-release"
-        "curl"
-        "wget"
-        "unzip"
-        "git"
-        "sudo"
-        "iproute2"
-        "dnsutils"
-        "apt-transport-https"
-        "debian-keyring"
-        "debian-archive-keyring"
-        "util-linux" # 包含 lscpu, df 等
-        "procps"     # 包含 free, uptime 等
-        "net-tools"  # 包含 ifconfig
-        "vnstat"
-        "jq"
-        "uuid-runtime"
-        "certbot"
-        "python3-certbot-nginx"
-    )
+ensure_dependencies() {
+    local dependencies=("$@") # 接收所有传入的参数作为依赖列表
     local missing_dependencies=()
 
-    # 使用 dpkg-query 检查软件包状态，这比 grep 更准确
-    log_info "正在检查已安装的软件包..."
+    # 检查是否有待处理的依赖项
+    if [ ${#dependencies[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    log_info "正在按需检查依赖: ${dependencies[*]}..."
     for pkg in "${dependencies[@]}"; do
         if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
             missing_dependencies+=("$pkg")
@@ -106,18 +87,51 @@ check_and_install_dependencies() {
             apt-get install -y "$pkg"
         done
         set +e
-        log_info "所有必需的依赖项已安装完毕。"
+        log_info "按需依赖已安装完毕。"
     else
-        log_info "所有必需的依赖项均已安装。"
-        echo ""
+        log_info "所需依赖均已安装。"
     fi
+    echo ""
 }
+# --- 核心功能：依赖项管理 ---
+ensure_dependencies() {
+    local dependencies=("$@") # 接收所有传入的参数作为依赖列表
+    local missing_dependencies=()
 
+    # 检查是否有待处理的依赖项
+    if [ ${#dependencies[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    log_info "正在按需检查依赖: ${dependencies[*]}..."
+    for pkg in "${dependencies[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+            missing_dependencies+=("$pkg")
+        fi
+    done
+
+    if [ ${#missing_dependencies[@]} -gt 0 ]; then
+        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
+        log_info "正在更新软件包列表并开始安装..."
+        set -e
+        apt-get update -y
+        for pkg in "${missing_dependencies[@]}"; do
+            log_info "正在安装 ${pkg}..."
+            apt-get install -y "$pkg"
+        done
+        set +e
+        log_info "按需依赖已安装完毕。"
+    else
+        log_info "所需依赖均已安装。"
+    fi
+    echo ""
+}
 
 # --- 功能模块：系统综合管理 (来自 sys.sh) ---
 
 # 显示系统信息
 show_system_info() {
+    ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
     log_info "正在查询系统信息，请稍候..."
 
@@ -243,6 +257,7 @@ change_hostname() {
 
 # 优化 DNS
 optimize_dns() {
+    ensure_dependencies "net-tools"
     log_info "开始优化DNS地址..."
     log_info "正在检查IPv6支持..."
     if ping6 -c 1 google.com > /dev/null 2>&1; then
@@ -396,6 +411,7 @@ set_timezone() {
 
 # 安装 S-ui
 install_sui(){
+    ensure_dependencies "curl"
     log_info "正在准备安装 S-ui..."
     bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
     log_info "S-ui 安装脚本执行完毕。"
@@ -404,6 +420,7 @@ install_sui(){
 
 # 安装 3X-ui
 install_3xui(){
+    ensure_dependencies "curl"
     log_info "正在准备安装 3X-ui..."
     bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
     log_info "3X-ui 安装脚本执行完毕。"
@@ -435,6 +452,7 @@ check_and_prompt_install_singbox() {
 
 # 安装 Sing-Box
 singbox_do_install() {
+    ensure_dependencies "curl"
     if is_singbox_installed; then
         echo ""
         log_info "Sing-Box 已经安装，跳过安装过程。"
@@ -640,47 +658,29 @@ _handle_standalone_cert() {
 # 主函数：申请SSL证书 (智能调度中心)
 apply_ssl_certificate() {
     local domain_name="$1"
-
-    # ==================== 关键修正点：在函数入口处统一检查证书是否存在 ====================
     local cert_dir="/etc/letsencrypt/live/${domain_name}"
     if [ -d "$cert_dir" ]; then
         log_info "检测到域名 ${domain_name} 的证书已存在，跳过申请流程。"
-        return 0 # 返回 0 代表成功，因为我们已经有证书了
+        return 0
     fi
-    # ======================================================================================
-
     log_info "证书不存在，开始智能检测环境并为 ${domain_name} 申请新证书..."
-
-    # 检查并安装 Certbot 主程序
-    if ! command -v certbot &> /dev/null; then
-        log_info "Certbot 未安装，正在安装..."
-        apt-get update && apt-get install -y certbot
-    fi
-
-    # 新的判断逻辑：Caddy -> Apache -> Nginx (作为默认和最终选项)
+    ensure_dependencies "certbot"
     if command -v caddy &> /dev/null; then
         _handle_caddy_cert "$domain_name"
     elif command -v apache2 &> /dev/null; then
-        if ! dpkg -l | grep -q "python3-certbot-apache"; then
-            log_info "正在安装 Certbot 的 Apache 插件..."
-            apt-get install -y python3-certbot-apache
-        fi
+        ensure_dependencies "python3-certbot-apache"
         _handle_apache_cert "$domain_name"
     else
         log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
-        if ! dpkg -l | grep -q "python3-certbot-nginx"; then
-            log_info "正在安装 Certbot 的 Nginx 插件..."
-            apt-get install -y python3-certbot-nginx
-        fi
+        ensure_dependencies "nginx" "python3-certbot-nginx"
         _handle_nginx_cert "$domain_name"
     fi
-
-    # 将函数最终的返回值 (0代表成功, 1代表失败) 传递给调用者
     return $?
 }
 
 # 获取域名和通用配置
 get_domain_and_common_config() {
+    ensure_dependencies "curl" "jq" "uuid-runtime"
     local type_flag=$1
     echo
     while true; do
@@ -1102,6 +1102,7 @@ push_to_telegram() {
 
 # 推送主菜单
 push_nodes() {
+    ensure_dependencies "jq" "curl"
     clear
     echo -e "${WHITE}--- 推送节点 ---${NC}\n"
     echo "1. 推送到 Sub-Store"
@@ -1430,6 +1431,7 @@ is_substore_installed() {
 
 # 安装 Sub-Store
 substore_do_install() {
+    ensure_dependencies "curl" "unzip" "git"
     echo ""
     log_info "开始执行 Sub-Store 安装流程..."; set -e
     # 注意：这里的依赖检查现在是全局自动的，保留日志作为流程说明
@@ -1526,6 +1528,7 @@ substore_do_uninstall() {
 
 # 更新 Sub-Store
 update_sub_store_app() {
+    ensure_dependencies "curl" "unzip"
     echo ""
     log_info "开始更新 Sub-Store 应用..."; if ! is_substore_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
     set -e; cd "$SUBSTORE_INSTALL_DIR"
@@ -1673,6 +1676,7 @@ substore_reset_api_key() {
 
 # 设置反向代理
 substore_setup_reverse_proxy() {
+    ensure_dependencies "nginx"
     clear
     log_info "为保证安全和便捷，强烈建议使用域名和HTTPS访问Sub-Store。"
     if command -v nginx &> /dev/null; then
@@ -2201,24 +2205,14 @@ main_menu() {
 # 首次运行检查函数
 initial_setup_check() {
     if [ ! -f "$FLAG_FILE" ]; then
-        log_info "脚本首次运行，开始自动检查并安装所有依赖..."
-        log_warn "这个过程可能需要一些时间，请耐心等待..."
-        check_and_install_dependencies
-        if [ $? -eq 0 ]; then
-            log_info "依赖项初始化完成。"
-
-            # ==================== 关键修正点：自动创建默认快捷命令 ====================
-            _create_shortcut "sv"
-            # ======================================================================
-
-            log_info "创建标记文件以跳过下次检查。"
-            touch "$FLAG_FILE"
-            log_info "按任意键继续进入主菜单..."
-            press_any_key
-        else
-            log_error "依赖安装失败！请检查网络或错误输出。脚本将退出。"
-            exit 1
-        fi
+        echo ""
+        log_info "脚本首次运行，开始自动设置..."
+        _create_shortcut "sv"
+        log_info "创建标记文件以跳过下次检查。"
+        touch "$FLAG_FILE"
+        echo ""
+        log_info "首次设置完成！按任意键继续进入主菜单..."
+        press_any_key
     fi
 }
 
