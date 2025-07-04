@@ -1051,72 +1051,106 @@ push_nodes() {
         *) log_error "无效选项！"; press_any_key ;;
     esac
 }
+# 生成临时订阅链接
+generate_subscription_link() {
+    ensure_dependencies "nginx" "curl"
+    if ! command -v nginx &> /dev/null; then
+        log_error "Nginx 未安装，无法生成可访问的订阅链接。"
+        press_any_key
+        return
+    fi
 
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+        log_warn "没有可用的节点来生成订阅链接。"
+        press_any_key
+        return
+    fi
+
+    # 1. 智能判断主机地址 (域名或IP)
+    local host=""
+    # 优先检查 Sub-Store 是否配置了反代域名
+    if is_substore_installed && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+        host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        log_info "检测到 Sub-Store 已配置域名，将使用: ${host}"
+    fi
+
+    # 如果没有找到域名，则使用公网 IP
+    if [ -z "$host" ]; then
+        host=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+        log_info "未检测到配置的域名，将使用公网 IP: ${host}"
+    fi
+
+    if [ -z "$host" ]; then
+        log_error "无法确定主机地址 (域名或IP)，操作中止。"; press_any_key; return
+    fi
+
+    # 2. 在 Nginx 网站根目录创建随机命名的临时订阅文件
+    local sub_dir="/var/www/html"
+    mkdir -p "$sub_dir"
+    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filepath="${sub_dir}/${sub_filename}"
+
+    # 3. 将所有节点链接合并并进行 Base64 编码
+    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    local all_links_str
+    all_links_str=$(printf "%s\n" "${node_lines[@]}")
+    local base64_content
+    base64_content=$(echo -n "$all_links_str" | base64 -w0)
+
+    # 4. 将编码后的内容写入临时文件
+    echo "$base64_content" > "$sub_filepath"
+
+    # 5. 构建并显示 URL
+    local sub_url="http://${host}/${sub_filename}"
+
+    clear
+    log_info "已生成临时订阅链接，请立即复制使用！"
+    log_warn "此链接将在您按键返回后被自动删除。"
+    echo -e "${CYAN}--------------------------------------------------------------${NC}"
+    echo -e "\n${YELLOW}${sub_url}${NC}\n"
+    echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+    # 6. 等待用户操作，然后清理临时文件
+    press_any_key
+    rm -f "$sub_filepath"
+    log_info "临时订阅文件已删除。"
+}
 # 显示/管理节点信息
 view_node_info() {
     while true; do
         clear; echo "";
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
-            # 在没有节点时，提供一个直接新增的选项
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
             read -p "请输入选项: " choice
-            if [[ "$choice" == "1" ]]; then
-                singbox_add_node_orchestrator
-                # 添加后继续循环，以显示新节点
-                continue
-            else
-                return
-            fi
+            if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
         fi
 
         log_info "当前已配置的节点链接信息："
         echo -e "${CYAN}--------------------------------------------------------------${NC}"
-
-        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
-        all_links=""
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"; all_links=""
         for i in "${!node_lines[@]}"; do
-            line="${node_lines[$i]}"
-            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-            if [[ "$line" =~ ^vmess:// ]]; then
-                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
-            fi
+            line="${node_lines[$i]}"; node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"'); fi
             echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
             all_links+="$line"$'\n'
         done
 
         aggregated_link=$(echo -n "$all_links" | base64 -w0)
-        echo -e "\n${GREEN}聚合订阅链接 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
+        echo -e "\n${GREEN}聚合订阅内容 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
 
-        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}\n\n0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
-        # ==================== 关键修正点：修正 case 逻辑 ====================
         case $choice in
-            1)
-                singbox_add_node_orchestrator
-                # 调用后不 break，让 while 循环自然继续，从而刷新列表
-                continue
-                ;;
-            2)
-                delete_nodes
-                # 调用后不 break，让 while 循环自然继续，从而刷新列表
-                continue
-                ;;
-            3)
-                push_nodes
-                # 调用后不 break，让 while 循环自然继续
-                continue
-                ;;
-            0)
-                break
-                ;;
-            *)
-                log_error "无效选项！"; sleep 1
-                ;;
+            1) singbox_add_node_orchestrator; continue ;;
+            2) delete_nodes; continue ;;
+            3) push_nodes; continue ;;
+            4) generate_subscription_link; continue ;; # 新增的选项
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
-        # =================================================================
     done
 }
 # 显示/管理节点信息
