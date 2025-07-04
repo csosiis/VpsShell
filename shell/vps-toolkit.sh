@@ -59,7 +59,28 @@ generate_random_port() {
 generate_random_password() {
     < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
 }
+# 检查端口是否可用 (增强版)
+_is_port_available() {
+    local port_to_check=$1
+    local used_ports_array_name=$2
+    # 转换为本地数组引用
+    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
+    # 检查系统是否已占用
+    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
+        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
+        return 1
+    fi
+
+    # 检查是否在本次任务中已被预定
+    for used_port in "${used_ports[@]}"; do
+        if [ "$port_to_check" == "$used_port" ]; then
+            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
+            return 1
+        fi
+    done
+    return 0
+}
 # --- 核心功能：依赖项管理 ---
 ensure_dependencies() {
     local dependencies=("$@") # 接收所有传入的参数作为依赖列表
@@ -2037,7 +2058,7 @@ main_menu() {
         esac
     done
 }
-# 新的统一创建函数 (v2.8 - 增加IP选择和自定义SNI)
+# 新的统一创建函数 (v2.9 - 增加唯一Tag和输入校验)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -2047,7 +2068,7 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     clear
-    log_info "欢迎使用 Sing-Box 节点创建向导 v2.8"
+    log_info "欢迎使用 Sing-Box 节点创建向导 v2.9"
     echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "1. VLESS + WSS\n2. VMess + WSS\n3. Trojan + WSS\n4. Hysteria2\n"
     echo -e "${CYAN}-------------------------------------${NC}\n"
@@ -2072,58 +2093,82 @@ singbox_add_node_orchestrator() {
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
-        read -p "请输入您已解析到本机的域名: " domain
-        if [ -z "$domain" ]; then log_error "域名不能为空！"; press_any_key; return; fi
+        # --- 域名输入与校验 ---
+        while true; do
+            read -p "请输入您已解析到本机的域名: " domain
+            if [[ -z "$domain" ]]; then
+                log_error "域名不能为空！"
+            elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then
+                log_error "域名格式不正确，请重新输入。"
+            else
+                break
+            fi
+        done
+
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
         connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-        ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
-
+        # (自签名证书的 IP 选择和 SNI 输入逻辑保持不变)
+        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"
-            read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then
-            log_info "仅检测到 IPv4 地址，将自动使用。"; connect_addr="$ipv4_addr"
-        elif [ -n "$ipv6_addr" ]; then
-            log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="[${ipv6_addr}]"
-        else
-            log_error "无法获取任何公网 IP 地址！"; press_any_key; return
-        fi
-
-        read -p "请输入要用于 SNI 伪装的域名 [默认: www.bing.com]: " sni_input
-        sni_domain=${sni_input:-"www.bing.com"}
-
-        log_info "将使用 ${connect_addr} 作为连接地址，使用 ${sni_domain} 作为 SNI 伪装。"
+        elif [ -n "$ipv4_addr" ]; then log_info "仅检测到 IPv4 地址。"; connect_addr="$ipv4_addr"
+        elif [ -n "$ipv6_addr" ]; then log_info "仅检测到 IPv6 地址。"; connect_addr="[${ipv6_addr}]"
+        else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
+        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
         log_error "无效证书选择。"; press_any_key; return
     fi
 
-    # 端口和标签
+    # --- 端口输入与校验 ---
+    local used_ports_for_this_run=()
     if ! $is_one_click; then
         local protocol_name=${protocols_to_create[0]}
-        read -p "请输入 [${protocol_name}] 的端口 [回车则随机]: " port_input
-        ports[$protocol_name]=${port_input:-$(generate_random_port)}
+        while true; do
+            read -p "请输入 [${protocol_name}] 的端口 [回车则随机]: " port_input
+            if [ -z "$port_input" ]; then
+                port_input=$(generate_random_port)
+                log_info "已生成随机端口: ${port_input}"
+            fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                log_error "端口号必须是 1-65535 之间的数字。"
+            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                ports[$protocol_name]=$port_input
+                used_ports_for_this_run+=("$port_input")
+                break
+            fi
+        done
         read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
     else
-        for p in "${protocols_to_create[@]}"; do ports[$p]=$(generate_random_port); done
-        if [ "$cert_choice" == "1" ]; then
-             read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
-        else
-            custom_id=""
-        fi
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                local random_port=$(generate_random_port)
+                if _is_port_available "$random_port" "used_ports_for_this_run"; then
+                    ports[$p]=$random_port
+                    used_ports_for_this_run+=("$random_port")
+                    break
+                fi
+            done
+        done
+        if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi
     fi
 
-    # 循环创建
+    # --- 循环创建 (增加唯一 Tag) ---
     location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/'); if [ -z "$location" ]; then location="N/A"; fi
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
         echo ""; local tag_base="${location}"; if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
-        local tag="${tag_base}-${protocol}"; local uuid=$(uuidgen); local password=$(generate_random_password)
+
+        # ==================== 核心修正：增加随机后缀，保证 Tag 唯一 ====================
+        local random_suffix=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 4)
+        local tag="${tag_base}-${protocol}-${random_suffix}"
+        # ===========================================================================
+
+        local uuid=$(uuidgen); local password=$(generate_random_password)
         local config=""; local node_link=""; local current_port=${ports[$protocol]}
         case $protocol in
             "VLESS")
@@ -2147,7 +2192,7 @@ singbox_add_node_orchestrator() {
         log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."; systemctl restart sing-box; sleep 2
         if systemctl is-active --quiet sing-box; then
             log_info "Sing-Box 重启成功。"; if [ "$success_count" -eq 1 ] && ! $is_one_click; then echo ""; log_info "✅ 节点添加成功！分享链接如下："; echo -e "${CYAN}--------------------------------------------------------------${NC}"; echo -e "\n${YELLOW}${final_node_link}${NC}\n"; echo -e "${CYAN}--------------------------------------------------------------${NC}"; press_any_key; else log_info "正在显示所有节点信息..."; sleep 1; view_node_info; fi
-        else log_error "Sing-Box 重启失败！"; press_any_key; fi
+        else log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"; press_any_key; fi
     else log_error "没有任何节点被成功添加。"; press_any_key; fi
 }
 singbox_main_menu() {
