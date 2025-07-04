@@ -34,9 +34,9 @@ SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/s
 FLAG_FILE="/root/.vps_toolkit.initialized"
 
 # 日志与交互函数
-log_info() { echo -e "${GREEN}[信息]  - $1${NC}"; }
-log_warn() { echo -e "${YELLOW}[注意]  - $1${NC}"; }
-log_error() { echo -e "${RED}[错误]  - $1${NC}"; }
+log_info() { echo -e "${GREEN}[信息] - $1${NC}"; }
+log_warn() { echo -e "${YELLOW}[注意] - $1${NC}"; }
+log_error() { echo -e "${RED}[错误] - $1${NC}"; }
 press_any_key() { echo ""; read -n 1 -s -r -p "按任意键返回..."; }
 check_root() { if [ "$(id -u)" -ne 0 ]; then log_error "此脚本必须以 root 用户身份运行。"; exit 1; fi; }
 
@@ -1382,12 +1382,14 @@ singbox_do_uninstall() {
         return
     fi
 
+    echo ""
     log_info "正在停止并禁用 Sing-Box 服务..."
     systemctl stop sing-box &>/dev/null
     systemctl disable sing-box &>/dev/null
 
     log_info "正在删除 Sing-Box 服务文件..."
     rm -f /etc/systemd/system/sing-box.service
+    rm /etc/sing-box/config.json
 
     log_info "正在从所有常见路径删除 Sing-Box 可执行文件..."
     rm -f /usr/local/bin/sing-box
