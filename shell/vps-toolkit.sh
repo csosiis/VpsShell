@@ -150,7 +150,7 @@ singbox_main_menu() {
                 *) log_error "无效选项！"; sleep 1;;
             esac
         fi
-    done
+    done # <--- 补上这个缺失的 done
 }
 # (此处省略了 sub-store 和 main_menu 等函数，它们没有改动)
 initial_setup_check() {
