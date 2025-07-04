@@ -2258,15 +2258,18 @@ singbox_main_menu() {
             echo -e "${WHITE}-----------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_menu ;; # 调用新的总入口菜单
+                1) singbox_add_node_orchestrator ;; # 调用新的总入口函数
                 2) view_node_info ;;
-                # ... 其他 case 保持不变 ...
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+                6) clear; journalctl -u sing-box -f --no-pager ;;
                 7) singbox_do_uninstall ;;
                 0) break ;;
                 *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            # ... 未安装时的菜单保持不变 ...
+            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n${WHITE}-----------------------------${NC}\n\n1. 安装 Sing-Box\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
                 1) singbox_do_install ;;
