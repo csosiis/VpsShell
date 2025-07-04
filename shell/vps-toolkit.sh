@@ -2099,7 +2099,7 @@ singbox_add_node_orchestrator() {
     esac
 
     clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"
-    echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"
+    echo -e "\n请选择证书类型：\n\n1. 使用 Let's Encrypt 域名证书 (推荐)\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
