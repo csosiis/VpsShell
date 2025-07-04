@@ -373,6 +373,7 @@ set_timezone() {
 
     echo ""
     log_info "请选择新的时区："
+    echo ""
 
     # ==================== 关键修正点 1：在数组中增加 "Asia/Taipei" ====================
     options=("Asia/Shanghai" "Asia/Taipei" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
@@ -459,8 +460,7 @@ singbox_do_install() {
         press_any_key
         return
     fi
-    echo ""
-    log_info "Sing-Box 未安装，正在开始安装..."
+    log_info "正在安装Sing-Box ..."
     check_and_install_dependencies # 确保依赖就绪
     set -e
     bash <(curl -fsSL https://sing-box.app/deb-install.sh)
@@ -817,111 +817,6 @@ add_protocol_node() {
     sleep 1
     view_node_info
     # ===================================================
-}
-
-# 新增 VLESS 节点
-add_vless_node() {
-    if ! get_domain_and_common_config 1; then press_any_key; return; fi
-    log_info "正在生成 VLESS 节点配置..."
-
-    # ==================== 关键修正点：移除了与 ws 传输不兼容的 "flow" 设置 ====================
-    config="{
-      \"type\": \"vless\",
-      \"tag\": \"$tag\",
-      \"listen\": \"::\",
-      \"listen_port\": $port,
-      \"users\": [{\"uuid\": \"$uuid\"}],
-      \"tls\": {
-        \"enabled\": true,
-        \"server_name\": \"$domain_name\",
-        \"certificate_path\": \"$cert_path\",
-        \"key_path\": \"$key_path\"
-      },
-      \"transport\": {
-        \"type\": \"ws\",
-        \"path\": \"/\"
-      }
-    }"
-    # ======================================================================================
-
-    add_protocol_node "VLESS" "$config"
-}
-
-# 新增 Hysteria2 节点
-add_hysteria2_node() {
-    if ! get_domain_and_common_config 2; then press_any_key; return; fi
-    password=$(generate_random_password)
-    obfs_password=$(generate_random_password)
-    log_info "正在生成 Hysteria2 节点配置..."
-    config="{
-      \"type\": \"hysteria2\",
-      \"tag\": \"$tag\",
-      \"listen\": \"::\",
-      \"listen_port\": $port,
-      \"users\": [{\"password\": \"$password\"}],
-      \"tls\": {
-        \"enabled\": true,
-        \"server_name\": \"$domain_name\",
-        \"certificate_path\": \"$cert_path\",
-        \"key_path\": \"$key_path\"
-      },
-      \"up_mbps\": 100,
-      \"down_mbps\": 1000,
-      \"obfs\": {
-        \"type\": \"salamander\",
-        \"password\": \"$obfs_password\"
-      }
-    }"
-    add_protocol_node "Hysteria2" "$config"
-}
-
-# 新增 VMess 节点
-add_vmess_node() {
-    if ! get_domain_and_common_config 3; then press_any_key; return; fi
-    log_info "正在生成 VMess 节点配置..."
-    config="{
-      \"type\": \"vmess\",
-      \"tag\": \"$tag\",
-      \"listen\": \"::\",
-      \"listen_port\": $port,
-      \"users\": [{\"uuid\": \"$uuid\"}],
-      \"tls\": {
-        \"enabled\": true,
-        \"server_name\": \"$domain_name\",
-        \"certificate_path\": \"$cert_path\",
-        \"key_path\": \"$key_path\"
-      },
-      \"transport\": {
-        \"type\": \"ws\",
-        \"path\": \"/\"
-      }
-    }"
-    add_protocol_node "VMess" "$config"
-}
-
-# 新增 Trojan 节点
-add_trojan_node() {
-    if ! get_domain_and_common_config 4; then press_any_key; return; fi
-    password=$(generate_random_password)
-    log_info "正在生成 Trojan 节点配置..."
-    config="{
-      \"type\": \"trojan\",
-      \"tag\": \"$tag\",
-      \"listen\": \"::\",
-      \"listen_port\": $port,
-      \"users\": [{\"password\": \"$password\"}],
-      \"tls\": {
-        \"enabled\": true,
-        \"server_name\": \"$domain_name\",
-        \"certificate_path\": \"$cert_path\",
-        \"key_path\": \"$key_path\"
-      },
-      \"transport\": {
-        \"type\": \"ws\",
-        \"path\": \"/\"
-      }
-    }"
-    add_protocol_node "Trojan" "$config"
 }
 
 # --- 推送功能模块 ---
@@ -1966,105 +1861,173 @@ sys_manage_menu() {
         esac
     done
 }
+# --- Sing-Box 节点创建模块 (v2.0 向导式) ---
 
-singbox_add_node_menu() {
-     while true; do
-        clear
-        echo -e "${WHITE}=============================${NC}\n"
-        echo -e "${WHITE}      新增 Sing-Box 节点      ${NC}\n"
-        echo -e "${WHITE}=============================${NC}\n"
-        echo "1. Vless"
-        echo ""
-        echo "2. Hysteria2"
-        echo ""
-        echo "3. Vmess"
-        echo ""
-        echo "4. Trojan"
-        echo ""
-        echo "---------------------------"
-        echo ""
-        echo "0. 返回上级菜单"
-        echo ""
-        echo "---------------------------"
-        echo ""
-        read -p "请选择协议类型: " choice
-        case $choice in
-            1) add_vless_node; break ;;
-            2) add_hysteria2_node; break ;;
-            3) add_vmess_node; break ;;
-            4) add_trojan_node; break ;;
-            0) break;;
-            *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
+# 内部辅助函数：创建自签名证书
+_create_self_signed_cert() {
+    local domain_name="$1"
+    local cert_dir="/etc/sing-box/certs"
+    cert_path="${cert_dir}/${domain_name}.cert.pem"
+    key_path="${cert_dir}/${domain_name}.key.pem"
+
+    if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
+        log_info "检测到已存在的自签名证书，将直接使用。"
+        return 0
+    fi
+
+    log_info "正在为域名 ${domain_name} 生成自签名证书..."
+    mkdir -p "$cert_dir"
+    openssl ecparam -genkey -name prime256v1 -out "$key_path"
+    openssl req -new -x509 -days 3650 -key "$key_path" -out "$cert_path" -subj "/CN=${domain_name}"
+
+    if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
+        log_info "✅ 自签名证书创建成功！"
+        log_info "证书路径: ${cert_path}"
+        log_info "密钥路径: ${key_path}"
+        return 0
+    else
+        log_error "自签名证书创建失败！"
+        return 1
+    fi
 }
 
+# 内部辅助函数：将节点配置写入文件 (替换旧的 add_protocol_node)
+_add_protocol_inbound() {
+    local protocol=$1 config=$2 node_link=$3
+    log_info "正在为 [${protocol}] 协议添加入站配置..."
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp"; then
+        log_error "[${protocol}] 协议配置写入失败！请检查JSON格式。"
+        # 从失败中恢复，不破坏原始文件
+        rm -f "$SINGBOX_CONFIG_FILE.tmp"
+        return 1
+    fi
+    # 使用新配置覆盖旧配置
+    mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+    echo "$node_link" >> "$SINGBOX_NODE_LINKS_FILE"
+    log_info "✅ [${protocol}] 协议配置添加成功！"
+    return 0
+}
 
-singbox_main_menu() {
-    while true; do
-        clear
-        echo -e "${WHITE}=============================${NC}\n"
-        echo -e "${WHITE}      Sing-Box 管理菜单      ${NC}\n"
-        echo -e "${WHITE}=============================${NC}\n"
-        if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
-            echo -e "当前状态: ${STATUS_COLOR}\n"
-            echo -e "${WHITE}-----------------------------${NC}\n"
-            echo "1. 新增节点"
-            echo ""
-            echo "2. 管理节点"
-            echo ""
-            echo "-----------------------------"
-            echo ""
-            echo "3. 启动 Sing-Box"
-            echo ""
-            echo "4. 停止 Sing-Box"
-            echo ""
-            echo "5. 重启 Sing-Box"
-            echo ""
-            echo "6. 查看日志"
-            echo ""
-            echo "-----------------------------"
-            echo ""
-            echo -e "7. ${RED}卸载 Sing-Box${NC}"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo -e "${WHITE}-----------------------------${NC}\n"
-            read -p "请输入选项: " choice
-            case $choice in
-                1) singbox_add_node_menu ;;
-                2) view_node_info ;;
-                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-                6) clear; journalctl -u sing-box -f --no-pager ;;
-                7) singbox_do_uninstall ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
-            esac
-        else
-            # ==================== 关键修正点 ====================
-            # 当 sing-box 未安装时，显示这个菜单
-            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n"
-            echo -e "${WHITE}-----------------------------${NC}\n"
-            echo "1. 安装 Sing-Box"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo -e "${WHITE}-----------------------------${NC}\n"
-            read -p "请输入选项: " choice
-            case $choice in
-                1) singbox_do_install ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
-            esac
-            # ===================================================
+# 新的主流程函数：向导式节点创建套件
+singbox_add_node_suite() {
+    ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
+
+    # --- 变量初始化 ---
+    local domain cert_choice port_choice custom_id location
+    local cert_path key_path
+    declare -A ports # 使用关联数组存储端口
+
+    # --- 引导用户完成选择 ---
+    clear
+    echo ""
+    log_info "欢迎使用 Sing-Box 节点创建向导。"
+    echo ""
+    read -p "请输入您已解析到本机的域名: " domain
+    if [ -z "$domain" ]; then log_error "域名不能为空！"; press_any_key; return; fi
+
+    echo ""
+    log_info "第 1 步：请选择证书类型"
+    echo "1. 使用 Let's Encrypt 申请域名证书 (公网访问，推荐)"
+    echo "2. 使用自签名证书 (IP直连或特殊场景)"
+    read -p "请输入选项 (1-2): " cert_choice
+
+    case $cert_choice in
+        1)
+            if ! apply_ssl_certificate "$domain"; then
+                log_error "Let's Encrypt 证书处理失败，操作中止。"; press_any_key; return
+            fi
+            cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
+            key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
+            ;;
+        2)
+            if ! _create_self_signed_cert "$domain"; then
+                log_error "自签名证书处理失败，操作中止。"; press_any_key; return
+            fi
+            # 函数内部已设置了 cert_path 和 key_path 全局变量
+            ;;
+        *) log_error "无效选择，操作中止。"; press_any_key; return;;
+    esac
+
+    echo ""
+    log_info "第 2 步：请选择端口分配方式"
+    echo "1. 为所有协议自动生成随机端口"
+    echo "2. 手动为每个协议指定端口"
+    read -p "请输入选项 (1-2): " port_choice
+
+    local protocols=("VLESS" "VMess" "Trojan" "Hysteria2")
+    if [ "$port_choice" == "1" ]; then
+        log_info "正在生成随机端口..."
+        for p in "${protocols[@]}"; do ports[$p]=$(generate_random_port); done
+    elif [ "$port_choice" == "2" ]; then
+        for p in "${protocols[@]}"; do read -p "请输入 [${p}] 协议的端口: " ports[$p]; done
+    else
+        log_error "无效选择，操作中止。"; press_any_key; return
+    fi
+    log_info "端口分配完成: VLESS[${ports[VLESS]}], VMess[${ports[VMess]}], Trojan[${ports[Trojan]}], Hysteria2[${ports[Hysteria2]}]"
+
+    echo ""
+    log_info "第 3 步：请设置节点标签 (Tag)"
+    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/') # 首字母大写
+    if [ -z "$location" ]; then location="N/A"; fi
+    read -p "请输入自定义标识 (如 GCP, Ali, 回车则使用默认): " custom_id
+
+    # --- 开始批量创建节点 ---
+    local success_count=0
+    for protocol in "${protocols[@]}"; do
+        echo ""
+        local tag_base="${location}"
+        if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
+        local tag="${tag_base}-${protocol}"
+
+        local uuid=$(uuidgen)
+        local password=$(generate_random_password)
+        local config=""
+        local node_link=""
+
+        case $protocol in
+            "VLESS")
+                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[VLESS]},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="vless://${uuid}@${domain}:${ports[VLESS]}?type=ws&security=tls&sni=${domain}&host=${domain}&path=%2F#${tag}"
+                ;;
+            "VMess")
+                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[VMess]},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain}\",\"port\":\"${ports[VMess]}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain}\",\"path\":\"/\",\"tls\":\"tls\"}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+                ;;
+            "Trojan")
+                config="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[Trojan]},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="trojan://${password}@${domain}:${ports[Trojan]}?security=tls&sni=${domain}&type=ws&host=${domain}&path=/#${tag}"
+                ;;
+            "Hysteria2")
+                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[Hysteria2]},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"up_mbps\":100,\"down_mbps\":1000}"
+                node_link="hysteria2://${password}@${domain}:${ports[Hysteria2]}?sni=${domain}#${tag}"
+                ;;
+        esac
+
+        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
+            ((success_count++))
         fi
     done
+
+    # --- 最终处理 ---
+    if [ "$success_count" -gt 0 ]; then
+        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box
+        sleep 2
+        if systemctl is-active --quiet sing-box; then
+            log_info "Sing-Box 重启成功。"
+            log_info "正在显示所有节点信息..."
+            sleep 1
+            view_node_info
+        else
+            log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
+            press_any_key
+        fi
+    else
+        log_error "没有任何节点被成功添加。"
+        press_any_key
+    fi
 }
-
-
 substore_manage_menu() {
     while true; do
         clear;
@@ -2202,7 +2165,46 @@ main_menu() {
         esac
     done
 }
-
+singbox_main_menu() {
+    while true; do
+        clear; echo -e "${WHITE}=============================${NC}\n${WHITE}      Sing-Box 管理菜单      ${NC}\n${WHITE}=============================${NC}\n"
+        if is_singbox_installed; then
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
+            echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"
+            echo -e "1. 新增节点 (向导模式)"
+            echo -e "2. 管理已有节点 (查看/删除/推送)"
+            echo -e "\n-----------------------------\n"
+            echo -e "3. 启动 Sing-Box"
+            echo -e "4. 停止 Sing-Box"
+            echo -e "5. 重启 Sing-Box"
+            echo -e "6. 查看日志"
+            echo -e "\n-----------------------------\n"
+            echo -e "7. ${RED}卸载 Sing-Box${NC}\n"
+            echo -e "0. 返回主菜单\n"
+            echo -e "${WHITE}-----------------------------${NC}\n"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) singbox_add_node_suite ;; # 调用新的向导函数
+                2) view_node_info ;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+                6) clear; journalctl -u sing-box -f --no-pager ;;
+                7) singbox_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n${WHITE}-----------------------------${NC}\n\n1. 安装 Sing-Box\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) singbox_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
 # 首次运行检查函数
 initial_setup_check() {
     if [ ! -f "$FLAG_FILE" ]; then
