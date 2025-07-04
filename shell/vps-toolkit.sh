@@ -469,51 +469,43 @@ singbox_do_install() {
     config_dir="/etc/sing-box"
     mkdir -p "$config_dir"
 
-    # ==================== 最终修正点：采用正确的 DNS 配置结构 ====================
+    # ==================== 关键修正点：恢复为简单且兼容的 DNS 配置 ====================
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
-        log_info "正在创建最终修正版的 Sing-Box 默认配置文件..."
+        log_info "正在创建兼容性更强的 Sing-Box 默认配置文件..."
         cat > "$SINGBOX_CONFIG_FILE" <<EOL
 {
   "log": {
     "level": "info",
     "timestamp": true
   },
-  "dns": {
-    "servers": [
-      {
-        "tag": "dns-bootstrap",
-        "address": "8.8.8.8",
-        "detour": "direct"
-      },
-      {
-        "tag": "google-doh",
-        "address": "https://dns.google/dns-query",
-        "address_resolver": "dns-bootstrap",
-        "detour": "direct"
-      },
-      {
-        "tag": "cloudflare-doh",
-        "address": "https://1.1.1.1/dns-query",
-        "address_resolver": "dns-bootstrap",
-        "detour": "direct"
-      }
-    ]
-  },
+  "dns": {},
   "inbounds": [],
   "outbounds": [
-    {"type": "direct", "tag": "direct"},
-    {"type": "block", "tag": "block"},
-    {"type": "dns", "tag": "dns-out"}
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
+    }
   ],
   "route": {
     "rules": [
-      {"protocol": "dns", "outbound": "dns-out"}
+      {
+        "protocol": "dns",
+        "outbound": "dns-out"
+      }
     ]
   }
 }
 EOL
     fi
-    # ==============================================================================
+    # ===============================================================================
 
     log_info "正在启用并重启 Sing-Box 服务..."
     systemctl enable sing-box.service
@@ -2003,9 +1995,9 @@ singbox_main_menu() {
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
             echo -e "${WHITE}-----------------------------${NC}\n"
-            echo "1. 查看 / 管理节点"
+            echo "1.新增节点"
             echo ""
-            echo "2. 新增节点"
+            echo "2. 管理节点"
             echo ""
             echo "-----------------------------"
             echo ""
@@ -2026,8 +2018,8 @@ singbox_main_menu() {
             echo -e "${WHITE}-----------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
-                1) view_node_info ;;
-                2) singbox_add_node_menu ;;
+                1) singbox_add_node_menu ;;
+                2) view_node_info ;;
                 3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
                 4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
                 5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
