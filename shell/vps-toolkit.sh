@@ -1897,7 +1897,7 @@ _create_self_signed_cert() {
         return 0
     fi
 
-    log_info "正在为域名 ${domain_name} 生成自签名证书..."
+    log_info "\n正在为域名 ${domain_name} 生成自签名证书..."
     mkdir -p "$cert_dir"
     openssl ecparam -genkey -name prime256v1 -out "$key_path"
     openssl req -new -x509 -days 3650 -key "$key_path" -out "$cert_path" -subj "/CN=${domain_name}"
@@ -2116,12 +2116,12 @@ singbox_add_node_orchestrator() {
     elif [ "$cert_choice" == "2" ]; then
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n\n1. IPv4: ${ipv4_addr}\n\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
         elif [ -n "$ipv4_addr" ]; then log_info "仅检测到 IPv4 地址，将自动使用。"; connect_addr="$ipv4_addr"
         elif [ -n "$ipv6_addr" ]; then log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="[${ipv6_addr}]"
         else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
-        read -p "请输入要用于 SNI 伪装的域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
+        read -p "\n请输入要用于 SNI 伪装的域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
@@ -2132,16 +2132,16 @@ singbox_add_node_orchestrator() {
     # ==================== 核心修正点：修改四合一模式的端口输入逻辑 ====================
     if $is_one_click; then
         echo ""
-        log_info "您已选择一键四合一模式，请为每个协议指定端口。"
+        log_info "您已选择一键四合一模式，请为每个协议指定端口。\n"
         for p in "${protocols_to_create[@]}"; do
             while true; do
-                read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
+                read -p "\n请输入 [${p}] 的端口 [回车则随机]: " port_input
                 if [ -z "$port_input" ]; then
                     port_input=$(generate_random_port)
-                    log_info "已为 [${p}] 生成随机端口: ${port_input}"
+                    log_info "\n已为 [${p}] 生成随机端口: ${port_input}"
                 fi
                 if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                    log_error "端口号必须是 1-65535 之间的数字。"
+                    log_error "\n端口号必须是 1-65535 之间的数字。"
                 elif _is_port_available "$port_input" "used_ports_for_this_run"; then
                     ports[$p]=$port_input
                     used_ports_for_this_run+=("$port_input")
