@@ -1995,7 +1995,7 @@ singbox_main_menu() {
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "当前状态: ${STATUS_COLOR}\n"
             echo -e "${WHITE}-----------------------------${NC}\n"
-            echo "1.新增节点"
+            echo "1. 新增节点"
             echo ""
             echo "2. 管理节点"
             echo ""
