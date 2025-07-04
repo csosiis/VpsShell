@@ -2137,14 +2137,21 @@ singbox_add_node_orchestrator() {
     local used_ports_for_this_run=()
     # ==================== 核心修正点：修改四合一模式的端口输入逻辑 ====================
     if $is_one_click; then
+        echo ""
         log_info "您已选择一键四合一模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
                 read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
-                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
-                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
+                if [ -z "$port_input" ]; then
+                    port_input=$(generate_random_port)
+                    log_info "已为 [${p}] 生成随机端口: ${port_input}"
+                fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                    log_error "端口号必须是 1-65535 之间的数字。"
                 elif _is_port_available "$port_input" "used_ports_for_this_run"; then
-                    ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break
+                    ports[$p]=$port_input
+                    used_ports_for_this_run+=("$port_input")
+                    break
                 fi
             done
         done
