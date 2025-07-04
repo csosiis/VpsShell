@@ -54,6 +54,9 @@ check_port() {
 generate_random_port() {
     echo $((RANDOM % 64512 + 1024))
 }
+generate_random_password() {
+    < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
+}
 # 检查端口是否可用 (增强版)
 _is_port_available() {
     local port_to_check=$1
@@ -2072,8 +2075,7 @@ main_menu() {
         esac
     done
 }
-# 新的统一创建函数 (v2.9 - 增加唯一Tag和输入校验)
-# 新的统一创建函数 (v2.9 - 增加唯一Tag和输入校验)
+# 新的统一创建函数 (v3.0 - 增加四合一端口输入)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -2083,7 +2085,7 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     clear
-    log_info "欢迎使用 Sing-Box 节点创建向导 v2.9"
+    log_info "欢迎使用 Sing-Box 节点创建向导 v3.0"
     echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "1. VLESS + WSS\n2. VMess + WSS\n3. Trojan + WSS\n4. Hysteria2\n"
     echo -e "${CYAN}-------------------------------------${NC}\n"
@@ -2133,7 +2135,21 @@ singbox_add_node_orchestrator() {
     fi
 
     local used_ports_for_this_run=()
-    if ! $is_one_click; then
+    # ==================== 核心修正点：修改四合一模式的端口输入逻辑 ====================
+    if $is_one_click; then
+        log_info "您已选择一键四合一模式，请为每个协议指定端口。"
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
+                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
+                elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                    ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break
+                fi
+            done
+        done
+        if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi
+    else # 单协议模式保持不变
         local protocol_name=${protocols_to_create[0]}
         while true; do
             read -p "请输入 [${protocol_name}] 的端口 [回车则随机]: " port_input
@@ -2144,15 +2160,8 @@ singbox_add_node_orchestrator() {
             fi
         done
         read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
-    else
-        for p in "${protocols_to_create[@]}"; do
-            while true; do
-                local random_port=$(generate_random_port)
-                if _is_port_available "$random_port" "used_ports_for_this_run"; then ports[$p]=$random_port; used_ports_for_this_run+=("$random_port"); break; fi
-            done
-        done
-        if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi
     fi
+    # =================================================================================
 
     location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/'); if [ -z "$location" ]; then location="N/A"; fi
     local success_count=0
