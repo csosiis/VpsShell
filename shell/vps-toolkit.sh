@@ -2095,9 +2095,9 @@ singbox_add_node_orchestrator() {
     log_info "欢迎使用 Sing-Box 节点创建向导 v3.1"
     echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "-------------------------------------\n"
-    echo -e "1. VLESS\n\n2. VMess\n\n3. Trojan\n4. Hysteria2\n"
+    echo -e "1. VLESS\n\n2. VMess\n\n3. Trojan\n\n4. Hysteria2\n"
     echo -e "-------------------------------------\n"
-    echo -e "${GREEN}5. 一键生成以上全部 4 种协议节点${NC}"
+    echo -e "${GREEN}5. 一键生成以上全部 4 种协议节点${NC}\n"
     echo -e "-------------------------------------\n"
     echo -e "0. 返回上一级菜单\n"
     echo -e "-------------------------------------\n"
@@ -2131,7 +2131,7 @@ singbox_add_node_orchestrator() {
     elif [ "$cert_choice" == "2" ]; then
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n\n1. IPv4: ${ipv4_addr}\n\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
         elif [ -n "$ipv4_addr" ]; then log_info "仅检测到 IPv4 地址，将自动使用。"; connect_addr="$ipv4_addr"
         elif [ -n "$ipv6_addr" ]; then log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="[${ipv6_addr}]"
