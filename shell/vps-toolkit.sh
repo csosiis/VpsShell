@@ -2095,7 +2095,7 @@ singbox_add_node_orchestrator() {
     log_info "欢迎使用 Sing-Box 节点创建向导 v3.1"
     echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "-------------------------------------\n"
-    echo -e "1. VLESSn\n2. VMessn\n3. Trojann\n4. Hysteria2\n"
+    echo -e "1. VLESS\n\n2. VMess\n\n3. Trojan\n4. Hysteria2\n"
     echo -e "-------------------------------------\n"
     echo -e "${GREEN}5. 一键生成以上全部 4 种协议节点${NC}"
     echo -e "-------------------------------------\n"
