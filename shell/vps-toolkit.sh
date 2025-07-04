@@ -112,6 +112,13 @@ singbox_do_install() { ensure_dependencies "curl"; if is_singbox_installed; then
 { "log": { "level": "info", "timestamp": true }, "dns": {}, "inbounds": [], "outbounds": [ { "type": "direct", "tag": "direct" }, { "type": "block", "tag": "block" }, { "type": "dns", "tag": "dns-out" } ], "route": { "rules": [ { "protocol": "dns", "outbound": "dns-out" } ] } }
 EOL
 fi; echo ""; log_info "正在启用并重启 Sing-Box 服务..."; systemctl enable --now sing-box.service >/dev/null 2>&1; echo ""; log_info "✅ Sing-Box 配置文件初始化完成并已启动！"; echo ""; press_any_key; }
+_handle_nginx_cert() { local domain_name="$1"; log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"; if ! systemctl is-active --quiet nginx; then log_info "Nginx 服务未运行，正在启动..."; systemctl start nginx; fi; local NGINX_CONF_PATH="/etc/nginx/sites-available/${domain_name}.conf"; if [ ! -f "$NGINX_CONF_PATH" ]; then log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."; cat <<EOF > "$NGINX_CONF_PATH"
+server { listen 80; listen [::]:80; server_name ${domain_name}; root /var/www/html; index index.html index.htm; }
+EOF
+if [ ! -L "/etc/nginx/sites-enabled/${domain_name}.conf" ]; then ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"; fi; log_info "正在重载 Nginx 以应用临时配置..."; if ! nginx -t; then log_error "Nginx 临时配置测试失败！"; rm -f "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/${domain_name}.conf"; return 1; fi; systemctl reload nginx; else log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"; fi; log_info "正在使用 'certbot --nginx' 模式为 ${domain_name} 申请证书..."; certbot --nginx -d "${domain_name}" --non-interactive --agree-tos --email "temp@${domain_name}" --redirect; if [ -f "/etc/letsencrypt/live/${domain_name}/fullchain.pem" ]; then log_info "✅ Nginx 模式证书申请成功！"; return 0; else log_error "Nginx 模式证书申请失败！"; return 1; fi; }
+_handle_apache_cert() { log_error "Apache 模式暂未完全实现。"; return 1; }
+
+# 新的统一创建函数 (v2.7 - 增加IP选择和自定义SNI)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -124,7 +131,7 @@ singbox_add_node_orchestrator() {
     log_info "欢迎使用 Sing-Box 节点创建向导 v2.7"
     echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "1. VLESS + WSS\n2. VMess + WSS\n3. Trojan + WSS\n4. Hysteria2\n"
-    echo -e "${CYAN}-------------------------------------${NC}"
+    echo -e "${CYAN}-------------------------------------${NC}\n"
     echo -e "5. 一键生成以上全部 4 种协议节点"
     echo -e "${CYAN}-------------------------------------${NC}\n"
     echo -e "0. 返回上一级菜单\n"
@@ -155,20 +162,18 @@ singbox_add_node_orchestrator() {
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
 
-        # 决定连接地址
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
             echo -e "\n检测到 IPv4 和 IPv6 地址，请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"
             read -p "请输入选项 (1-2): " ip_choice
-            if [ "$ip_choice" == "2" ]; then connect_addr="$ipv6_addr"; else connect_addr="$ipv4_addr"; fi
+            if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
         elif [ -n "$ipv4_addr" ]; then
             log_info "仅检测到 IPv4 地址，将自动使用。"; connect_addr="$ipv4_addr"
         elif [ -n "$ipv6_addr" ]; then
-            log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="$ipv6_addr"
+            log_info "仅检测到 IPv6 地址，将自动使用。"; connect_addr="[${ipv6_addr}]"
         else
             log_error "无法获取任何公网 IP 地址！"; press_any_key; return
         fi
 
-        # 自定义 SNI
         read -p "请输入要用于 SNI 伪装的域名 [默认: www.bing.com]: " sni_input
         sni_domain=${sni_input:-"www.bing.com"}
 
@@ -226,12 +231,42 @@ singbox_add_node_orchestrator() {
         else log_error "Sing-Box 重启失败！"; press_any_key; fi
     else log_error "没有任何节点被成功添加。"; press_any_key; fi
 }
-singbox_main_menu() { while true; do clear; echo -e "${WHITE}=============================${NC}\n${WHITE}      Sing-Box 管理菜单      ${NC}\n${WHITE}=============================${NC}\n"; if is_singbox_installed; then if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi; echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"; echo -e "1. 新增节点 (向导模式)\n\n2. 管理已有节点 (查看/删除/推送)\n\n-----------------------------\n\n3. 启动 Sing-Box\n\n4. 停止 Sing-Box\n\n5. 重启 Sing-Box\n\n6. 查看日志\n\n-----------------------------\n\n7. ${RED}卸载 Sing-Box${NC}\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"; read -p "请输入选项: " choice; case $choice in 1) singbox_add_node_orchestrator;; 2) view_node_info;; 3) systemctl start sing-box; log_info "命令已发送"; sleep 1;; 4) systemctl stop sing-box; log_info "命令已发送"; sleep 1;; 5) systemctl restart sing-box; log_info "命令已发送"; sleep 1;; 6) clear; journalctl -u sing-box -f --no-pager;; 7) singbox_do_uninstall;; 0) break;; *) log_error "无效选项！"; sleep 1;; esac; else echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n${WHITE}-----------------------------${NC}\n\n1. 安装 Sing-Box\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"; read -p "请输入选项: " choice; case $choice in 1) singbox_do_install;; 0) break;; *) log_error "无效选项！"; sleep 1;; esac; fi; done; }
-
+singbox_main_menu() {
+    while true; do
+        clear; echo -e "${WHITE}=============================${NC}\n${WHITE}      Sing-Box 管理菜单      ${NC}\n${WHITE}=============================${NC}\n"
+        if is_singbox_installed; then
+            if systemctl is-active --quiet sing-box; then
+                STATUS_COLOR="${GREEN}● 活动${NC}"
+            else
+                STATUS_COLOR="${RED}● 不活动${NC}"
+            fi
+            echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"
+            echo -e "1. 新增节点 (向导模式)\n\n2. 管理已有节点 (查看/删除/推送)\n\n-----------------------------\n\n3. 启动 Sing-Box\n\n4. 停止 Sing-Box\n\n5. 重启 Sing-Box\n\n6. 查看日志\n\n-----------------------------\n\n7. ${RED}卸载 Sing-Box${NC}\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) singbox_add_node_orchestrator;;
+                2) view_node_info;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1;;
+                6) clear; journalctl -u sing-box -f --no-pager;;
+                7) singbox_do_uninstall;;
+                0) break;;
+                *) log_error "无效选项！"; sleep 1;;
+            esac
+        else
+            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n${WHITE}-----------------------------${NC}\n\n1. 安装 Sing-Box\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) singbox_do_install;;
+                0) break;;
+                *) log_error "无效选项！"; sleep 1;;
+            esac
+        fi
+    done
+}
 # (Sub-Store and other functions are omitted for brevity, they are correct)
-
 # --- 脚本入口 ---
 check_root
 initial_setup_check
 main_menu
-}
