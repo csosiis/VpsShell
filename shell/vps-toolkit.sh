@@ -1327,28 +1327,30 @@ is_substore_installed() {
 
 # 安装 Sub-Store
 substore_do_install() {
+    # 函数开头的这行按需依赖检查是正确的，它已经处理了所有需要的前置依赖
     ensure_dependencies "curl" "unzip" "git"
+
     echo ""
-    log_info "开始执行 Sub-Store 安装流程..."; set -e
-    # 注意：这里的依赖检查现在是全局自动的，保留日志作为流程说明
-    log_info "开始检查并安装必需的依赖项..."
-    check_and_install_dependencies
-    log_info "依赖检查完成。"
+    log_info "开始执行 Sub-Store 安装流程...";
+    set -e
+
+    # ==================== 关键修正点：删除对已不存在函数的调用和相关日志 ====================
+    # 下面这三行是多余的，需要被删除
+    # log_info "开始检查并安装必需的依赖项..."
+    # check_and_install_dependencies
+    # log_info "依赖检查完成。"
+    # ====================================================================================
 
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
-    FNM_DIR="/root/.local/share/fnm"
-    mkdir -p "$FNM_DIR"
+    FNM_DIR="/root/.local/share/fnm"; mkdir -p "$FNM_DIR"
     curl -L https://github.com/Schniz/fnm/releases/latest/download/fnm-linux.zip -o /tmp/fnm.zip
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
-    # 将 fnm 路径加入当前会话的 PATH
-    export PATH="${FNM_DIR}:$PATH"
+    export PATH="${FNM_DIR}:$PATH";
     log_info "FNM 安装完成。"
 
-    # ==================== 关键修正点 ====================
-    log_info "正在为当前会话配置 FNM 环境变量..."
+    log_info "正在为当前会话配置 FNM 环境变量...";
     eval "$(fnm env)"
-    # ===================================================
 
     log_info "正在使用 FNM 安装 Node.js (v20)..."
     fnm install v20
@@ -1359,6 +1361,7 @@ substore_do_install() {
     export PNPM_HOME="/root/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
+    # (后续代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
@@ -1372,15 +1375,11 @@ substore_do_install() {
     while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi; done
 
     API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1); log_info "生成的 API 密钥为: ${API_KEY}"
-
-    # 修正 ExecStart，确保使用正确的 Node 版本
     NODE_EXEC_PATH=$(which node)
-
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
-Wants=network-online.target
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
@@ -1391,15 +1390,9 @@ Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
 ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
-Type=simple
-User=root
-Group=root
-Restart=on-failure
-RestartSec=5s
-LimitNOFILE=32767
-ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal
-StandardError=journal
+Type=simple; User=root; Group=root; Restart=on-failure; RestartSec=5s
+LimitNOFILE=32767; ExecStartPre=/bin/sh -c "ulimit -n 51200"
+StandardOutput=journal; StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
