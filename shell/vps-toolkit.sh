@@ -1908,126 +1908,6 @@ _add_protocol_inbound() {
     return 0
 }
 
-# 新的主流程函数：向导式节点创建套件
-singbox_add_node_suite() {
-    ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
-
-    # --- 变量初始化 ---
-    local domain cert_choice port_choice custom_id location
-    local cert_path key_path
-    declare -A ports # 使用关联数组存储端口
-
-    # --- 引导用户完成选择 ---
-    clear
-    echo ""
-    log_info "欢迎使用 Sing-Box 节点创建向导。"
-    echo ""
-    read -p "请输入您已解析到本机的域名: " domain
-    if [ -z "$domain" ]; then log_error "域名不能为空！"; press_any_key; return; fi
-
-    echo ""
-    log_info "第 1 步：请选择证书类型"
-    echo "1. 使用 Let's Encrypt 申请域名证书 (公网访问，推荐)"
-    echo "2. 使用自签名证书 (IP直连或特殊场景)"
-    read -p "请输入选项 (1-2): " cert_choice
-
-    case $cert_choice in
-        1)
-            if ! apply_ssl_certificate "$domain"; then
-                log_error "Let's Encrypt 证书处理失败，操作中止。"; press_any_key; return
-            fi
-            cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
-            key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
-            ;;
-        2)
-            if ! _create_self_signed_cert "$domain"; then
-                log_error "自签名证书处理失败，操作中止。"; press_any_key; return
-            fi
-            # 函数内部已设置了 cert_path 和 key_path 全局变量
-            ;;
-        *) log_error "无效选择，操作中止。"; press_any_key; return;;
-    esac
-
-    echo ""
-    log_info "第 2 步：请选择端口分配方式"
-    echo "1. 为所有协议自动生成随机端口"
-    echo "2. 手动为每个协议指定端口"
-    read -p "请输入选项 (1-2): " port_choice
-
-    local protocols=("VLESS" "VMess" "Trojan" "Hysteria2")
-    if [ "$port_choice" == "1" ]; then
-        log_info "正在生成随机端口..."
-        for p in "${protocols[@]}"; do ports[$p]=$(generate_random_port); done
-    elif [ "$port_choice" == "2" ]; then
-        for p in "${protocols[@]}"; do read -p "请输入 [${p}] 协议的端口: " ports[$p]; done
-    else
-        log_error "无效选择，操作中止。"; press_any_key; return
-    fi
-    log_info "端口分配完成: VLESS[${ports[VLESS]}], VMess[${ports[VMess]}], Trojan[${ports[Trojan]}], Hysteria2[${ports[Hysteria2]}]"
-
-    echo ""
-    log_info "第 3 步：请设置节点标签 (Tag)"
-    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/') # 首字母大写
-    if [ -z "$location" ]; then location="N/A"; fi
-    read -p "请输入自定义标识 (如 GCP, Ali, 回车则使用默认): " custom_id
-
-    # --- 开始批量创建节点 ---
-    local success_count=0
-    for protocol in "${protocols[@]}"; do
-        echo ""
-        local tag_base="${location}"
-        if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
-        local tag="${tag_base}-${protocol}"
-
-        local uuid=$(uuidgen)
-        local password=$(generate_random_password)
-        local config=""
-        local node_link=""
-
-        case $protocol in
-            "VLESS")
-                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[VLESS]},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                node_link="vless://${uuid}@${domain}:${ports[VLESS]}?type=ws&security=tls&sni=${domain}&host=${domain}&path=%2F#${tag}"
-                ;;
-            "VMess")
-                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[VMess]},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain}\",\"port\":\"${ports[VMess]}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain}\",\"path\":\"/\",\"tls\":\"tls\"}"
-                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
-                ;;
-            "Trojan")
-                config="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[Trojan]},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                node_link="trojan://${password}@${domain}:${ports[Trojan]}?security=tls&sni=${domain}&type=ws&host=${domain}&path=/#${tag}"
-                ;;
-            "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${ports[Hysteria2]},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"up_mbps\":100,\"down_mbps\":1000}"
-                node_link="hysteria2://${password}@${domain}:${ports[Hysteria2]}?sni=${domain}#${tag}"
-                ;;
-        esac
-
-        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
-            ((success_count++))
-        fi
-    done
-
-    # --- 最终处理 ---
-    if [ "$success_count" -gt 0 ]; then
-        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
-        systemctl restart sing-box
-        sleep 2
-        if systemctl is-active --quiet sing-box; then
-            log_info "Sing-Box 重启成功。"
-            log_info "正在显示所有节点信息..."
-            sleep 1
-            view_node_info
-        else
-            log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
-            press_any_key
-        fi
-    else
-        log_error "没有任何节点被成功添加。"
-        press_any_key
-    fi
-}
 substore_manage_menu() {
     while true; do
         clear;
@@ -2165,6 +2045,289 @@ main_menu() {
         esac
     done
 }
+
+# --- Sing-Box 节点创建模块 (v2.1 按新流程重构) ---
+
+# 内部辅助函数：处理使用 Let's Encrypt 证书的节点搭建流程
+_node_setup_with_le() {
+    local domain custom_id port_choice
+    declare -A ports
+
+    echo ""
+    log_info "您已选择使用 Let's Encrypt 域名证书。"
+    echo ""
+    read -p "请输入您已解析到本机的域名: " domain
+    if [ -z "$domain" ]; then log_error "域名不能为空！"; press_any_key; return; fi
+
+    echo ""
+    log_info "请选择搭建方式："
+    echo "1. 一键生成所有协议节点 (VLESS/VMess/Trojan/Hysteria2)"
+    echo "2. 选择单个协议进行搭建"
+    read -p "请输入选项 (1-2): " protocol_choice
+
+    local protocols_to_create=()
+    case $protocol_choice in
+        1)
+            protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2")
+            log_info "将为 ${protocols_to_create[*]} 一键生成节点。"
+            # 一键模式下，自动分配随机端口和默认标签
+            port_choice="auto"
+            custom_id=""
+            ;;
+        2)
+            echo ""
+            log_info "请选择您要搭建的协议："
+            select protocol in "VLESS" "VMess" "Trojan" "Hysteria2"; do
+                if [ -n "$protocol" ]; then
+                    protocols_to_create=("$protocol")
+                    break
+                else
+                    log_error "无效选择！"
+                fi
+            done
+            ;;
+        *) log_error "无效选择，操作中止。"; press_any_key; return;;
+    esac
+
+    # 如果不是一键模式，则询问更多细节
+    if [ "$protocol_choice" != "1" ]; then
+        echo ""
+        log_info "请选择端口分配方式："
+        echo "1. 自动生成随机端口"
+        echo "2. 手动指定端口"
+        read -p "请输入选项 (1-2): " port_choice_manual
+        if [ "$port_choice_manual" == "2" ]; then
+             read -p "请输入 [${protocols_to_create[0]}] 协议的端口: " single_port
+             ports[${protocols_to_create[0]}]=$single_port
+        else
+            ports[${protocols_to_create[0]}]=$(generate_random_port)
+        fi
+        echo ""
+        read -p "请输入自定义标识 (如 GCP, 回车则使用默认): " custom_id
+    fi
+
+    if [ "$port_choice" == "auto" ]; then
+        log_info "正在为所有协议生成随机端口..."
+        for p in "${protocols_to_create[@]}"; do ports[$p]=$(generate_random_port); done
+    fi
+    log_info "端口分配完成。"
+
+    echo ""
+    if ! apply_ssl_certificate "$domain"; then
+        log_error "Let's Encrypt 证书处理失败，操作中止。"; press_any_key; return
+    fi
+    local cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
+    local key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
+
+    local location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/')
+    if [ -z "$location" ]; then location="N/A"; fi
+
+    # --- 开始创建 ---
+    local success_count=0
+    for protocol in "${protocols_to_create[@]}"; do
+        # ... (此处省略了与上一版本几乎完全相同的节点配置和链接生成代码) ...
+        # ... (为了保持代码块简洁, 这部分逻辑在后台是存在的) ...
+        # --- (以下为简化后的创建逻辑) ---
+        echo ""
+        local tag_base="${location}"
+        if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
+        local tag="${tag_base}-${protocol}"
+        local uuid=$(uuidgen)
+        local password=$(generate_random_password)
+        local config=""
+        local node_link=""
+        local current_port=${ports[$protocol]}
+
+        case $protocol in
+            "VLESS")
+                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="vless://${uuid}@${domain}:${current_port}?type=ws&security=tls&sni=${domain}&host=${domain}&path=%2F#${tag}"
+                ;;
+            "VMess")
+                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain}\",\"path\":\"/\",\"tls\":\"tls\"}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+                ;;
+            "Trojan")
+                config="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="trojan://${password}@${domain}:${current_port}?security=tls&sni=${domain}&type=ws&host=${domain}&path=/#${tag}"
+                ;;
+            "Hysteria2")
+                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"up_mbps\":100,\"down_mbps\":1000}"
+                node_link="hysteria2://${password}@${domain}:${current_port}?sni=${domain}#${tag}"
+                ;;
+        esac
+
+        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
+            ((success_count++))
+        fi
+    done
+
+    if [ "$success_count" -gt 0 ]; then
+        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box; sleep 2
+        if systemctl is-active --quiet sing-box; then
+            log_info "Sing-Box 重启成功。"; log_info "正在显示所有节点信息..."; sleep 1; view_node_info
+        else
+            log_error "Sing-Box 重启失败！请使用日志功能查看错误。"; press_any_key
+        fi
+    else
+        log_error "没有任何节点被成功添加。"; press_any_key
+    fi
+}
+
+# 内部辅助函数：处理使用自签名证书的节点搭建流程
+_node_setup_with_self_signed() {
+    local custom_id port_choice
+    declare -A ports
+
+    # 在自签名模式下，域名固定，连接地址使用公网IP
+    local domain="www.yahoo.com"
+    local public_ip=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+    if [ -z "$public_ip" ]; then
+        log_error "无法获取公网 IPv4 地址，自签名模式无法继续！"; press_any_key; return;
+    fi
+    log_info "您已选择使用自签名证书。"
+    log_warn "将使用 ${domain} 作为证书通用名 (CN)，使用 ${public_ip} 作为连接地址。"
+
+    # --- 后续流程与域名证书模式完全相同 ---
+    echo ""
+    log_info "请选择搭建方式："
+    echo "1. 一键生成所有协议节点 (VLESS/VMess/Trojan/Hysteria2)"
+    echo "2. 选择单个协议进行搭建"
+    read -p "请输入选项 (1-2): " protocol_choice
+
+    local protocols_to_create=()
+    case $protocol_choice in
+        1)
+            protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2")
+            log_info "将为 ${protocols_to_create[*]} 一键生成节点。"
+            port_choice="auto"
+            custom_id=""
+            ;;
+        2)
+            echo ""
+            log_info "请选择您要搭建的协议："
+            select protocol in "VLESS" "VMess" "Trojan" "Hysteria2"; do
+                if [ -n "$protocol" ]; then
+                    protocols_to_create=("$protocol")
+                    break
+                else
+                    log_error "无效选择！"
+                fi
+            done
+            ;;
+        *) log_error "无效选择，操作中止。"; press_any_key; return;;
+    esac
+
+    if [ "$protocol_choice" != "1" ]; then
+        echo ""
+        log_info "请选择端口分配方式："
+        echo "1. 自动生成随机端口"
+        echo "2. 手动指定端口"
+        read -p "请输入选项 (1-2): " port_choice_manual
+        if [ "$port_choice_manual" == "2" ]; then
+             read -p "请输入 [${protocols_to_create[0]}] 协议的端口: " single_port
+             ports[${protocols_to_create[0]}]=$single_port
+        else
+            ports[${protocols_to_create[0]}]=$(generate_random_port)
+        fi
+        echo ""
+        read -p "请输入自定义标识 (如 GCP, 回车则使用默认): " custom_id
+    fi
+
+    if [ "$port_choice" == "auto" ]; then
+        log_info "正在为所有协议生成随机端口..."
+        for p in "${protocols_to_create[@]}"; do ports[$p]=$(generate_random_port); done
+    fi
+    log_info "端口分配完成。"
+
+    echo ""
+    if ! _create_self_signed_cert "$domain"; then
+        log_error "自签名证书处理失败，操作中止。"; press_any_key; return
+    fi
+    local cert_path="/etc/sing-box/certs/${domain}.cert.pem"
+    local key_path="/etc/sing-box/certs/${domain}.key.pem"
+
+    local location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/')
+    if [ -z "$location" ]; then location="N/A"; fi
+
+    # --- 开始创建 ---
+    local success_count=0
+    for protocol in "${protocols_to_create[@]}"; do
+        # ... (此处省略了与上一版本几乎完全相同的节点配置和链接生成代码) ...
+        # --- (以下为简化后的创建逻辑) ---
+        echo ""
+        local tag_base="${location}"
+        if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
+        local tag="${tag_base}-${protocol}"
+        local uuid=$(uuidgen)
+        local password=$(generate_random_password)
+        local config=""
+        local node_link=""
+        local current_port=${ports[$protocol]}
+
+        case $protocol in
+            "VLESS")
+                config="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="vless://${uuid}@${public_ip}:${current_port}?type=ws&security=tls&sni=${domain}&host=${domain}&path=%2F#${tag}"
+                ;;
+            "VMess")
+                config="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${public_ip}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain}\",\"path\":\"/\",\"tls\":\"tls\"}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+                ;;
+            "Trojan")
+                config="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+                node_link="trojan://${password}@${public_ip}:${current_port}?security=tls&sni=${domain}&type=ws&host=${domain}&path=/#${tag}"
+                ;;
+            "Hysteria2")
+                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"},\"up_mbps\":100,\"down_mbps\":1000}"
+                node_link="hysteria2://${password}@${public_ip}:${current_port}?sni=${domain}#${tag}"
+                ;;
+        esac
+
+        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
+            ((success_count++))
+        fi
+    done
+
+    if [ "$success_count" -gt 0 ]; then
+        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box; sleep 2
+        if systemctl is-active --quiet sing-box; then
+            log_info "Sing-Box 重启成功。"; log_info "正在显示所有节点信息..."; sleep 1; view_node_info
+        else
+            log_error "Sing-Box 重启失败！请使用日志功能查看错误。"; press_any_key
+        fi
+    else
+        log_error "没有任何节点被成功添加。"; press_any_key
+    fi
+}
+
+# 新的总入口菜单
+singbox_add_node_menu() {
+    clear
+    echo ""
+    log_info "欢迎使用 Sing-Box 节点创建向导。"
+    echo ""
+    echo "请首先选择您要使用的证书类型："
+    echo ""
+    echo "1. 使用 Let's Encrypt 域名证书 (公网域名访问，推荐)"
+    echo "2. 使用自签名证书 (IP直连或内网使用)"
+    echo ""
+    echo "0. 返回"
+    echo ""
+    read -p "请输入选项: " main_choice
+
+    case $main_choice in
+        1) _node_setup_with_le ;;
+        2) _node_setup_with_self_signed ;;
+        0) return ;;
+        *) log_error "无效选择，操作中止。"; press_any_key ;;
+    esac
+}
+
 singbox_main_menu() {
     while true; do
         clear; echo -e "${WHITE}=============================${NC}\n${WHITE}      Sing-Box 管理菜单      ${NC}\n${WHITE}=============================${NC}\n"
@@ -2184,7 +2347,7 @@ singbox_main_menu() {
             echo -e "${WHITE}-----------------------------${NC}\n"
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_suite ;; # 调用新的向导函数
+                1) singbox_add_node_menu ;; # 调用新的总入口菜单
                 2) view_node_info ;;
                 3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
                 4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
@@ -2205,6 +2368,10 @@ singbox_main_menu() {
         fi
     done
 }
+
+
+
+
 # 首次运行检查函数
 initial_setup_check() {
     if [ ! -f "$FLAG_FILE" ]; then
