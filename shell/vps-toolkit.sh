@@ -680,7 +680,7 @@ apply_ssl_certificate() {
 
 # 获取域名和通用配置
 get_domain_and_common_config() {
-    ensure_dependencies "curl" "jq" "uuid-runtime"
+    ensure_dependencies "jq" "uuid-runtime"
     local type_flag=$1
     echo
     while true; do
@@ -995,6 +995,7 @@ select_nodes_for_push() {
 
 # 推送到 Sub-Store
 push_to_sub_store() {
+    ensure_dependencies "curl" "jq"
     if ! select_nodes_for_push; then
         press_any_key
         return
