@@ -697,10 +697,10 @@ apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/${domain_name}"
     if [ -d "$cert_dir" ]; then
-        log_info "检测到域名 ${domain_name} 的证书已存在，跳过申请流程。"
+        log_info "\n检测到域名 ${domain_name} 的证书已存在，跳过申请流程。"
         return 0
     fi
-    log_info "证书不存在，开始智能检测环境并为 ${domain_name} 申请新证书..."
+    log_info "\n证书不存在，开始智能检测环境并为 ${domain_name} 申请新证书..."
     ensure_dependencies "certbot"
     if command -v caddy &> /dev/null; then
         _handle_caddy_cert "$domain_name"
@@ -708,7 +708,7 @@ apply_ssl_certificate() {
         ensure_dependencies "python3-certbot-apache"
         _handle_apache_cert "$domain_name"
     else
-        log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
+        log_info "\n未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
         ensure_dependencies "nginx" "python3-certbot-nginx"
         _handle_nginx_cert "$domain_name"
     fi
@@ -721,9 +721,9 @@ get_domain_and_common_config() {
     local type_flag=$1
     echo
     while true; do
-        read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
-        if [[ -z "$domain_name" ]]; then log_error "域名不能为空"; continue; fi
-        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "无效的域名格式"; continue; fi
+        read -p "\n请输入您已解析到本机的域名 (用于TLS): " domain_name
+        if [[ -z "$domain_name" ]]; then log_error "\n域名不能为空"; continue; fi
+        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "\n无效的域名格式"; continue; fi
         break
     done
 
@@ -2135,13 +2135,13 @@ singbox_add_node_orchestrator() {
         log_info "您已选择一键四合一模式，请为每个协议指定端口。\n"
         for p in "${protocols_to_create[@]}"; do
             while true; do
-                read -p "\n请输入 [${p}] 的端口 [回车则随机]: " port_input
+                read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
                 if [ -z "$port_input" ]; then
                     port_input=$(generate_random_port)
-                    log_info "\n已为 [${p}] 生成随机端口: ${port_input}"
+                    log_info "已为 [${p}] 生成随机端口: ${port_input}"
                 fi
                 if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                    log_error "\n端口号必须是 1-65535 之间的数字。"
+                    log_error "端口号必须是 1-65535 之间的数字。"
                 elif _is_port_available "$port_input" "used_ports_for_this_run"; then
                     ports[$p]=$port_input
                     used_ports_for_this_run+=("$port_input")
