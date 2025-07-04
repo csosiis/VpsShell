@@ -461,7 +461,6 @@ singbox_do_install() {
         return
     fi
     log_info "正在安装Sing-Box ..."
-    check_and_install_dependencies # 确保依赖就绪
     set -e
     bash <(curl -fsSL https://sing-box.app/deb-install.sh)
     set +e
