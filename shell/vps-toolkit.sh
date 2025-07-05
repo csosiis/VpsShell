@@ -939,7 +939,7 @@ push_to_sub_store() {
     if [ -f "$sub_store_config_file" ]; then
         sub_store_subs=$(grep "sub_store_subs=" "$sub_store_config_file" | cut -d'=' -f2)
     fi
-
+    echo ""
     read -p "请输入 Sub-Store 的订阅标识 (name) [默认: ${sub_store_subs}]: " input_subs
     sub_store_subs=${input_subs:-$sub_store_subs}
 
@@ -958,8 +958,8 @@ push_to_sub_store() {
         "name": $name,
         "link": $link
     }')
-
-    log_info "正在推送到 Sub-Store API..."
+    echo ""
+    log_info "正在推送到 Sub-Store..."
     local response
     response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
