@@ -1685,38 +1685,30 @@ EOF
     substore_view_access_link
     press_any_key
 }
-
-
-# --- 主菜单和子菜单 ---
-
 # 脚本更新
 do_update_script() {
-    echo ""
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/vps_tool_new.sh"
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
-        echo ""
         log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
         press_any_key
         return
     fi
     if cmp -s "$SCRIPT_PATH" "$temp_script"; then
-        echo ""
         log_info "脚本已经是最新版本，无需更新。"
         rm "$temp_script"
         press_any_key
         return
     fi
-    echo ""
     log_info "下载成功，正在应用更新...";
     chmod +x "$temp_script"
     mv "$temp_script" "$SCRIPT_PATH"
-    echo ""
-    log_info "✅ 脚本已成功更新！"
-    echo ""
-    log_warn "请重新运行脚本以使新版本生效 (例如，再次输入 'sv')..."
-    echo ""
-    exit 0
+
+    # ==================== 核心修正点：使用 exec 重新运行新脚本 ====================
+    log_info "✅ 脚本已成功更新！正在立即重新加载..."
+    sleep 2
+    exec "$SCRIPT_PATH" # 替换当前进程为新脚本，实现无缝重启
+    # ==========================================================================
 }
 # 内部辅助函数，负责创建快捷方式的核心逻辑
 _create_shortcut() {
@@ -2291,9 +2283,9 @@ singbox_main_menu() {
             echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   1. 安装 Sing-Box                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 安装 Sing-Box                               ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             echo ""
@@ -2313,8 +2305,9 @@ initial_setup_check() {
         log_info "创建标记文件以跳过下次检查。"
         touch "$FLAG_FILE"
         echo ""
-        log_info "首次设置完成！按任意键继续进入主菜单..."
-        press_any_key
+        log_info "首次设置完成！正在进入主菜单..."
+        # 移除了 press_any_key，让脚本继续执行到 main_menu
+        sleep 2 # 短暂暂停2秒，让用户能看到提示信息
     fi
 }
 
