@@ -949,7 +949,6 @@ push_to_sub_store() {
         return
     fi
 
-    # 将选择的链接合并成一个由换行符分隔的字符串
     local links_str
     links_str=$(printf "%s\n" "${selected_links[@]}")
 
@@ -961,16 +960,26 @@ push_to_sub_store() {
     }')
 
     log_info "正在推送到 Sub-Store API..."
+    local response
     response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
         -d "$node_json")
 
-    if [[ "$response" == "节点更新成功!" ]]; then
+    # ==================== 核心修正点：使用 jq 解析 JSON 响应 ====================
+    # 检查返回的 JSON 中 .success 字段是否为 true
+    if echo "$response" | jq -e '.success' > /dev/null; then
         echo "sub_store_subs=$sub_store_subs" > "$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
+        local success_message
+        success_message=$(echo "$response" | jq -r '.message')
+        log_info "服务器响应: ${success_message}"
     else
-        log_error "推送到 Sub-Store 失败，服务器响应: $response"
+        local error_message
+        error_message=$(echo "$response" | jq -r '.message // "未知错误"')
+        log_error "推送到 Sub-Store 失败，服务器响应: $error_message"
     fi
+    # ==========================================================================
+
     press_any_key
 }
 
