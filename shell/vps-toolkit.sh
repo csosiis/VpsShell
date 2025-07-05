@@ -345,7 +345,7 @@ set_network_priority() {
             fi
             log_info "✅ IPv4 优先已设置。"
             ;;
-        0) break ;;
+        0) return 1 ;;
         *)
             log_error "无效选择。"
             ;;
