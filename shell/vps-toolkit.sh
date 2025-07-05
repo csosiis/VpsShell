@@ -1431,9 +1431,58 @@ EOF
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
+# 内部辅助函数：完整安装 Docker 和 Docker Compose
+_install_docker_and_compose() {
+    # 检查 Docker 是否已安装
+    if command -v docker &> /dev/null && docker compose version &>/dev/null; then
+        log_info "Docker 和 Docker Compose V2 已安装。"
+        return 0
+    fi
+
+    log_warn "未检测到完整的 Docker 环境，开始执行官方标准安装流程..."
+    ensure_dependencies "ca-certificates" "curl" "gnupg"
+
+    # --- 1. 添加 Docker 的官方 GPG 密钥 ---
+    log_info "正在添加 Docker 官方 GPG 密钥..."
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+
+    # --- 2. 添加 Docker 的软件仓库 ---
+    log_info "正在添加 Docker 软件仓库..."
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # --- 3. 更新软件包列表并安装 ---
+    log_info "正在更新软件包列表以识别新的 Docker 仓库..."
+    set -e
+    apt-get update -y
+
+    log_info "正在安装 Docker Engine, CLI, Containerd, 和 Docker Compose 插件..."
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    set +e
+
+    # --- 4. 最终验证 ---
+    if command -v docker &> /dev/null && docker compose version &>/dev/null; then
+        log_info "✅ Docker 和 Docker Compose V2 已成功安装！"
+        return 0
+    else
+        log_error "Docker 环境安装失败！请检查上面的日志输出。"
+        return 1
+    fi
+}
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    ensure_dependencies "docker.io" "docker-compose-plugin" "curl"
+    # ==================== 关键修正点：调用专业的 Docker 安装函数 ====================
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
+        press_any_key
+        return
+    fi
+    # ==============================================================================
+
     clear
     log_info "开始使用 Docker Compose 搭建 WordPress..."
     echo ""
@@ -1453,51 +1502,34 @@ install_wordpress() {
         echo ""
         read -s -p "请再次输入密码以确认: " db_password_confirm
         echo ""
-        if [[ -z "$db_password" ]]; then
-            log_error "密码不能为空！"
-        elif [[ "$db_password" != "$db_password_confirm" ]]; then
-            log_error "两次输入的密码不一致！"
-        else
-            break
-        fi
+        if [[ -z "$db_password" ]]; then log_error "密码不能为空！"
+        elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"
+        else break; fi
     done
 
     echo ""
     local wp_port
     while true; do
         read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
-        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
-            log_error "端口号必须是 1-65535 之间的数字。"
-        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then
-             # _is_port_available 会打印警告，这里无需再打印
-             :
-        else
-            break
-        fi
+        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :
+        else break; fi
     done
 
     echo ""
     local site_url
     while true; do
         read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url
-        if [[ -z "$site_url" ]]; then
-            log_error "网站域名不能为空！"
-        elif ! echo "$site_url" | grep -Pq '^https?://'; then
-            log_error "域名必须以 http:// 或 https:// 开头。"
-        else
-            break
-        fi
+        if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"
+        elif ! echo "$site_url" | grep -Pq '^https?://'; then log_error "域名必须以 http:// 或 https:// 开头。"
+        else break; fi
     done
 
     # --- 2. 生成 docker-compose.yml 文件 ---
     log_info "正在生成 docker-compose.yml 文件..."
     cat > docker-compose.yml <<EOF
-# Docker Compose 配置文件版本
 version: '3.8'
-
-# 定义所有服务
 services:
-  # 数据库服务 (MySQL)
   db:
     image: mysql:8.0
     container_name: ${project_dir##*/}_db
@@ -1511,8 +1543,6 @@ services:
       - db_data:/var/lib/mysql
     networks:
       - wordpress_net
-
-  # WordPress 服务
   wordpress:
     depends_on:
       - db
@@ -1532,22 +1562,14 @@ services:
       - wp_files:/var/www/html
     networks:
       - wordpress_net
-
-# 定义数据卷
 volumes:
   db_data:
   wp_files:
-
-# 定义网络
 networks:
   wordpress_net:
 EOF
 
-    if [ ! -f "docker-compose.yml" ]; then
-        log_error "docker-compose.yml 文件创建失败！"
-        press_any_key
-        return
-    fi
+    if [ ! -f "docker-compose.yml" ]; then log_error "docker-compose.yml 文件创建失败！"; press_any_key; return; fi
 
     # --- 3. 启动服务 ---
     echo ""
