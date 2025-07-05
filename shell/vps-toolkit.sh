@@ -1433,7 +1433,7 @@ EOF
 }
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    ensure_dependencies "docker.io" "docker-compose-v2" "curl"
+    ensure_dependencies "docker.io" "docker-compose-plugin" "curl"
     clear
     log_info "开始使用 Docker Compose 搭建 WordPress..."
     echo ""
