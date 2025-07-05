@@ -976,6 +976,7 @@ push_to_sub_store() {
     else
         local error_message
         error_message=$(echo "$response" | jq -r '.message // "未知错误"')
+        echo ""
         log_error "推送到 Sub-Store 失败，服务器响应: $error_message"
     fi
     # ==========================================================================
