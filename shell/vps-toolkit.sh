@@ -1857,7 +1857,7 @@ sys_manage_menu() {
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}   7. 设置系统时区                                ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-        echo -e "${CYAN}╟────────────────── ${WHITE}网络优化${CYAN} ────────────────────╢${NC}"
+        echo -e "${CYAN}╟─────────────────── ${WHITE}网络优化${CYAN} ─────────────────────╢${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}   8. BBR 拥塞控制管理                            ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
