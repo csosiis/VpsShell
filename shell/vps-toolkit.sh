@@ -695,6 +695,7 @@ apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/${domain_name}"
     if [ -d "$cert_dir" ]; then
+        echo ""
         log_info "检测到域名 ${domain_name} 的证书已存在，跳过申请流程。"
         return 0
     fi
@@ -719,6 +720,7 @@ get_domain_and_common_config() {
     local type_flag=$1
     echo
     while true; do
+        echo ""
         read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
         if [[ -z "$domain_name" ]]; then log_error "\n域名不能为空"; continue; fi
         if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "\n无效的域名格式"; continue; fi
@@ -2146,6 +2148,7 @@ singbox_add_node_orchestrator() {
         echo ""; log_info "您已选择一键四合一模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
+                echo ""
                 read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
                 if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
                 if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
