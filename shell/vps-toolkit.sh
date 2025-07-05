@@ -1839,51 +1839,36 @@ install_warp() {
 sys_manage_menu() {
     while true; do
         clear
-        echo -e "${WHITE}===========================${NC}\n"
-        echo -e "${WHITE}       系统综合管理      ${NC}\n"
-        echo -e "${WHITE}===========================${NC}\n"
-        echo "1. 系统信息查询"
-        echo ""
-        echo "2. 清理系统垃圾"
-        echo ""
-        echo "3. 修改主机名"
-        echo ""
-        echo "4. 优化 DNS"
-        echo ""
-        echo "5. 设置网络优先级 (IPv4/v6)"
-        echo ""
-        echo "6. 设置 SSH 密钥登录"
-        echo ""
-        echo "7. 设置系统时区"
-        echo ""
-        echo "8. BBR 拥塞控制管理"
-        echo ""
-        echo "9. 安装 WARP 网络接口"
-        echo ""
-        echo "---------------------------"
-        echo ""
-        echo "0. 返回主菜单"
-        echo ""
-        echo "---------------------------"
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${WHITE}                 系统综合管理                 ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   1. 系统信息查询                               ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   2. 清理系统垃圾                               ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   3. 修改主机名                                 ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   4. 优化 DNS                                   ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   5. 设置网络优先级 (IPv4/v6)                   ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   6. 设置 SSH 密钥登录                          ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   7. 设置系统时区                               ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}╟─────────── ${WHITE}网络优化${CYAN} ───────────────╢${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   8. BBR 拥塞控制管理                           ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   9. 安装 WARP 网络接口                         ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+        echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
         echo ""
         read -p "请输入选项: " choice
 
         case $choice in
-            1) show_system_info ;;
-            2) clean_system ;;
-            3) change_hostname ;;
-            4) optimize_dns ;;
-            5) set_network_priority ;;
-            6) setup_ssh_key ;;
-            7) set_timezone ;;
-            8) manage_bbr ;;      # 新增的 case
-            9) install_warp ;;    # 新增的 case
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
+            1) show_system_info;; 2) clean_system;; 3) change_hostname;; 4) optimize_dns;;
+            5) set_network_priority;; 6) setup_ssh_key;; 7) set_timezone;; 8) manage_bbr;;
+            9) install_warp;; 0) break;; *) log_error "无效选项！"; sleep 1;;
         esac
     done
 }
-# --- Sing-Box 节点创建模块 (v2.0 向导式) ---
 
 # 内部辅助函数：创建自签名证书
 _create_self_signed_cert() {
@@ -2002,38 +1987,38 @@ substore_manage_menu() {
 substore_main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}=============================${NC}\n"
-        echo -e "${WHITE}      Sub-Store 管理菜单      ${NC}\n"
-        echo -e "${WHITE}=============================${NC}\n"
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${WHITE}                 Sub-Store 管理               ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         if is_substore_installed; then
-            echo "1. 管理 Sub-Store"
-            echo ""
-            echo -e "2. ${GREEN}更新 Sub-Store 应用${NC}\n"
-            echo -e "3. ${RED}卸载 Sub-Store${NC}"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo "-----------------------------"
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
+            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 管理 Sub-Store (启停/日志/配置)            ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   2. ${GREEN}更新 Sub-Store 应用${NC}                        ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   3. ${RED}卸载 Sub-Store${NC}                             ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
             case $choice in
-                1) substore_manage_menu ;;
-                2) update_sub_store_app ;;
-                3) substore_do_uninstall ;;
-                0) break ;;
-                *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_manage_menu ;; 2) update_sub_store_app ;;
+                3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
             esac
         else
-            echo "1. 安装 Sub-Store"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo "-----------------------------"
-            echo ""
+            echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 安装 Sub-Store                             ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
             case $choice in
-                1) substore_do_install ;;
-                0) break ;;
-                *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
             esac
         fi
     done
@@ -2042,30 +2027,31 @@ substore_main_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${WHITE}=====================================${NC}\n"
-        echo -e "${WHITE}    全功能 VPS & 应用管理脚本      ${NC}\n"
-        echo -e "${WHITE}=====================================${NC}\n"
-        echo "1. 系统综合管理"
-        echo ""
-        echo "2. Sing-Box 管理"
-        echo ""
-        echo "3. Sub-Store 管理"
-        echo ""
-        echo -e "${WHITE}-------------------------------------${NC}"
-        echo ""
-        echo "4. 安装 S-ui 面板"
-        echo ""
-        echo "5. 安装 3X-ui 面板"
-        echo ""
-        echo -e "${WHITE}-------------------------------------${NC}"
-        echo ""
-        echo -e "8. ${GREEN}更新此脚本${NC}"
-        echo ""
-        echo -e "9. ${YELLOW}设置快捷命令 (默认: sv)${NC}"
-        echo ""
-        echo -e "0. ${RED}退出脚本${NC}"
-        echo ""
-        echo -e "${WHITE}=====================================${NC}"
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${WHITE}           全功能 VPS & 应用管理脚本           ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   1. 系统综合管理                               ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   2. Sing-Box 管理                              ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   3. Sub-Store 管理                             ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}╟─────────── ${WHITE}面板安装${CYAN} ───────────────╢${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   4. 安装 S-ui 面板                             ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   5. 安装 3X-ui 面板                            ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   8. ${GREEN}更新此脚本${NC}                                 ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   9. ${YELLOW}设置快捷命令 (默认: sv)${NC}                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   0. ${RED}退出脚本${NC}                                   ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
         echo ""
         read -p "请输入选项: " choice
 
@@ -2073,8 +2059,8 @@ main_menu() {
             1) sys_manage_menu ;;
             2) singbox_main_menu ;;
             3) substore_main_menu ;;
-            4) install_sui ;;
-            5) install_3xui ;;
+            4) ensure_dependencies "curl"; install_sui ;;
+            5) ensure_dependencies "curl"; install_3xui ;;
             8) do_update_script ;;
             9) setup_shortcut ;;
             0) exit 0 ;;
@@ -2248,40 +2234,54 @@ singbox_add_node_orchestrator() {
 }
 singbox_main_menu() {
     while true; do
-        clear; echo -e "${WHITE}=============================${NC}\n\n${WHITE}      Sing-Box 管理菜单      ${NC}\n\n${WHITE}=============================${NC}"
+        clear
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${WHITE}                 Sing-Box 管理                ${CYAN}║${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
-            echo -e "当前状态: ${STATUS_COLOR}\n${WHITE}-----------------------------${NC}\n"
-            echo -e "1. 新增节点\n"
-            echo -e "2. 管理节点"
-            echo -e "\n-----------------------------\n"
-            echo -e "3. 启动 Sing-Box\n"
-            echo -e "4. 停止 Sing-Box\n"
-            echo -e "5. 重启 Sing-Box\n"
-            echo -e "6. 查看日志"
-            echo -e "\n-----------------------------\n"
-            echo -e "7. ${RED}卸载 Sing-Box${NC}\n"
-            echo -e "0. 返回主菜单\n"
-            echo -e "${WHITE}-----------------------------${NC}\n"
+            if systemctl is-active --quiet sing-box; then
+                STATUS_COLOR="${GREEN}● 活动${NC}"
+            else
+                STATUS_COLOR="${RED}● 不活动${NC}"
+            fi
+            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 新增节点 (向导模式)                        ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   2. 管理已有节点 (查看/删除/推送)              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   3. 启动 Sing-Box                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   4. 停止 Sing-Box                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   5. 重启 Sing-Box                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   6. 查看日志                                   ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}   7. ${RED}卸载 Sing-Box${NC}                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_orchestrator ;; # 调用新的总入口函数
-                2) view_node_info ;;
-                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-                6) clear; journalctl -u sing-box -f --no-pager ;;
-                7) singbox_do_uninstall ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_add_node_orchestrator;; 2) view_node_info;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1;;
+                6) clear; journalctl -u sing-box -f --no-pager;;
+                7) singbox_do_uninstall;; 0) break;; *) log_error "无效选项！"; sleep 1;;
             esac
         else
-            echo -e "当前状态: ${YELLOW}● Sing-Box 未安装${NC}\n${WHITE}-----------------------------${NC}\n\n1. 安装 Sing-Box\n\n0. 返回主菜单\n\n${WHITE}-----------------------------${NC}\n"
+            echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 安装 Sing-Box                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_do_install ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_do_install;; 0) break;; *) log_error "无效选项！"; sleep 1;;
             esac
         fi
     done
