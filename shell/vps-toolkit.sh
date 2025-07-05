@@ -1431,7 +1431,142 @@ EOF
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
+# 安装 WordPress (通过 Docker Compose)
+install_wordpress() {
+    ensure_dependencies "docker.io" "docker-compose-v2" "curl"
+    clear
+    log_info "开始使用 Docker Compose 搭建 WordPress..."
+    echo ""
 
+    # --- 1. 收集用户配置 ---
+    local project_dir
+    read -p "请输入 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
+    project_dir=${project_dir:-"/root/wordpress"}
+    mkdir -p "$project_dir"
+    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; return 1; }
+    log_info "WordPress 将被安装在: $(pwd)"
+
+    echo ""
+    local db_password
+    while true; do
+        read -s -p "请输入新的数据库 root 和用户密码: " db_password
+        echo ""
+        read -s -p "请再次输入密码以确认: " db_password_confirm
+        echo ""
+        if [[ -z "$db_password" ]]; then
+            log_error "密码不能为空！"
+        elif [[ "$db_password" != "$db_password_confirm" ]]; then
+            log_error "两次输入的密码不一致！"
+        else
+            break
+        fi
+    done
+
+    echo ""
+    local wp_port
+    while true; do
+        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
+        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
+            log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then
+             # _is_port_available 会打印警告，这里无需再打印
+             :
+        else
+            break
+        fi
+    done
+
+    echo ""
+    local site_url
+    while true; do
+        read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url
+        if [[ -z "$site_url" ]]; then
+            log_error "网站域名不能为空！"
+        elif ! echo "$site_url" | grep -Pq '^https?://'; then
+            log_error "域名必须以 http:// 或 https:// 开头。"
+        else
+            break
+        fi
+    done
+
+    # --- 2. 生成 docker-compose.yml 文件 ---
+    log_info "正在生成 docker-compose.yml 文件..."
+    cat > docker-compose.yml <<EOF
+# Docker Compose 配置文件版本
+version: '3.8'
+
+# 定义所有服务
+services:
+  # 数据库服务 (MySQL)
+  db:
+    image: mysql:8.0
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: '${db_password}'
+      MYSQL_DATABASE: 'wordpress'
+      MYSQL_USER: 'wp_user'
+      MYSQL_PASSWORD: '${db_password}'
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - wordpress_net
+
+  # WordPress 服务
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    container_name: ${project_dir##*/}_app
+    restart: always
+    ports:
+      - "${wp_port}:80"
+    environment:
+      WORDPRESS_DB_HOST: 'db:3306'
+      WORDPRESS_DB_USER: 'wp_user'
+      WORDPRESS_DB_PASSWORD: '${db_password}'
+      WORDPRESS_DB_NAME: 'wordpress'
+      WORDPRESS_SITEURL: '${site_url}'
+      WORDPRESS_HOME: '${site_url}'
+    volumes:
+      - wp_files:/var/www/html
+    networks:
+      - wordpress_net
+
+# 定义数据卷
+volumes:
+  db_data:
+  wp_files:
+
+# 定义网络
+networks:
+  wordpress_net:
+EOF
+
+    if [ ! -f "docker-compose.yml" ]; then
+        log_error "docker-compose.yml 文件创建失败！"
+        press_any_key
+        return
+    fi
+
+    # --- 3. 启动服务 ---
+    echo ""
+    log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
+    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
+
+    docker compose up -d
+
+    echo ""
+    log_info "正在检查服务状态..."
+    sleep 5
+    docker compose ps
+
+    echo ""
+    log_info "✅ WordPress 搭建流程已启动！"
+    log_info "您现在应该可以通过访问 ${site_url} 或 http://<服务器IP>:${wp_port} 来完成最后的安装步骤了。"
+    log_warn "如果使用了域名，请确保已正确解析，并配置好反向代理将域名指向 ${wp_port} 端口。"
+    press_any_key
+}
 # 卸载 Sub-Store
 substore_do_uninstall() {
     if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
@@ -2044,6 +2179,8 @@ main_menu() {
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}   5. 安装 3X-ui 面板                             ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}   6. ${BLUE}搭建 WordPress (Docker)${NC}                      ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}   8. ${GREEN}更新此脚本${NC}                                  ${CYAN}║${NC}"
@@ -2062,6 +2199,7 @@ main_menu() {
             3) substore_main_menu ;;
             4) ensure_dependencies "curl"; install_sui ;;
             5) ensure_dependencies "curl"; install_3xui ;;
+            6) install_wordpress ;;
             8) do_update_script ;;
             9) setup_shortcut ;;
             0) exit 0 ;;
