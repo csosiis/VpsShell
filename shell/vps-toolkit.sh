@@ -169,31 +169,120 @@ uninstall_wordpress() {
     if [[ "$delete_dir_choice" =~ ^[Yy]$ ]]; then rm -rf "$project_dir"; log_info "✅ 项目目录已删除。"; fi
     log_info "WordPress 卸载完成。"; press_any_key
 }
+# 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    if ! _install_docker_and_compose; then log_error "Docker 环境准备失败，无法继续搭建 WordPress。"; press_any_key; return; fi
-    clear; log_info "开始使用 Docker Compose 搭建 WordPress..."; echo ""
-    local project_dir; read -p "请输入 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir; project_dir=${project_dir:-"/root/wordpress"}
-    mkdir -p "$project_dir"; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; return 1; }; log_info "WordPress 将被安装在: $(pwd)"
-    echo ""; local db_password; while true; do read -s -p "请输入新的数据库 root 和用户密码: " db_password; echo ""; read -s -p "请再次输入密码以确认: " db_password_confirm; echo ""; if [[ -z "$db_password" ]]; then log_error "密码不能为空！"; elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"; else break; fi; done
-    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
-    echo ""; local site_url; while true; do read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url; if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"; elif ! echo "$site_url" | grep -Pq '^https?://'; then log_error "域名必须以 http:// 或 https:// 开头。"; else break; fi; done
-    log_info "正在生成 docker-compose.yml 文件..."; cat > docker-compose.yml <<EOF
+    ensure_dependencies "docker.io" "docker-compose-plugin" "curl"
+    clear
+    log_info "开始使用 Docker Compose 搭建 WordPress..."
+    echo ""
+
+    # --- 1. 收集用户配置 ---
+    local project_dir
+    read -p "请输入 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
+    project_dir=${project_dir:-"/root/wordpress"}
+    # 使用 '|| return' 在目录创建失败时安全退出
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
+    log_info "WordPress 将被安装在: $(pwd)"
+
+    echo ""
+    local db_password
+    while true; do
+        read -s -p "请输入新的数据库 root 和用户密码: " db_password
+        echo ""
+        read -s -p "请再次输入密码以确认: " db_password_confirm
+        echo ""
+        if [[ -z "$db_password" ]]; then log_error "密码不能为空！"
+        elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"
+        else break; fi
+    done
+
+    echo ""
+    local wp_port
+    while true; do
+        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
+        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then : # 警告已在函数内打印
+        else break; fi
+    done
+
+    echo ""
+    local site_url
+    while true; do
+        read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url
+        if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"
+        elif ! echo "$site_url" | grep -Pq '^https?://'; then log_error "域名必须以 http:// 或 https:// 开头。"
+        else break; fi
+    done
+
+    # ==================== 核心修正点：使用标准、多行的 YAML 格式 ====================
+    log_info "正在生成 docker-compose.yml 文件..."
+    cat > docker-compose.yml <<EOF
 version: '3.8'
+
 services:
   db:
-    image: mysql:8.0; container_name: ${project_dir##*/}_db; restart: always
-    environment: { MYSQL_ROOT_PASSWORD: '${db_password}', MYSQL_DATABASE: 'wordpress', MYSQL_USER: 'wp_user', MYSQL_PASSWORD: '${db_password}' }
-    volumes: [ db_data:/var/lib/mysql ]; networks: [ wordpress_net ]
+    image: mysql:8.0
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=${db_password}
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wp_user
+      - MYSQL_PASSWORD=${db_password}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - wordpress_net
+
   wordpress:
-    depends_on: [ db ]; image: wordpress:latest; container_name: ${project_dir##*/}_app; restart: always
-    ports: [ "${wp_port}:80" ]
-    environment: { WORDPRESS_DB_HOST: 'db:3306', WORDPRESS_DB_USER: 'wp_user', WORDPRESS_DB_PASSWORD: '${db_password}', WORDPRESS_DB_NAME: 'wordpress', WORDPRESS_SITEURL: '${site_url}', WORDPRESS_HOME: '${site_url}' }
-    volumes: [ wp_files:/var/www/html ]; networks: [ wordpress_net ]
-volumes: { db_data: null, wp_files: null }
-networks: { wordpress_net: null }
+    depends_on:
+      - db
+    image: wordpress:latest
+    container_name: ${project_dir##*/}_app
+    restart: always
+    ports:
+      - "${wp_port}:80"
+    environment:
+      - WORDPRESS_DB_HOST=db:3306
+      - WORDPRESS_DB_USER=wp_user
+      - WORDPRESS_DB_PASSWORD=${db_password}
+      - WORDPRESS_DB_NAME=wordpress
+      - WORDPRESS_SITEURL=${site_url}
+      - WORDPRESS_HOME=${site_url}
+    volumes:
+      - wp_files:/var/www/html
+    networks:
+      - wordpress_net
+
+volumes:
+  db_data:
+  wp_files:
+
+networks:
+  wordpress_net:
 EOF
+    # =================================================================================
+
     if [ ! -f "docker-compose.yml" ]; then log_error "docker-compose.yml 文件创建失败！"; press_any_key; return; fi
-    echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."; docker compose up -d; echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""; log_info "✅ WordPress 搭建流程已启动！"; log_info "您现在应该可以通过访问 ${site_url} 或 http://<服务器IP>:${wp_port} 来完成最后的安装步骤了。"; log_warn "如果使用了域名，请确保已正确解析，并配置好反向代理将域名指向 ${wp_port} 端口。"; press_any_key
+
+    # --- 3. 启动服务 ---
+    echo ""
+    log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
+    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
+
+    docker compose up -d
+
+    echo ""
+    log_info "正在检查服务状态..."
+    sleep 5
+    docker compose ps
+
+    echo ""
+    log_info "✅ WordPress 搭建流程已启动！"
+    log_info "您现在应该可以通过访问 ${site_url} 或 http://<服务器IP>:${wp_port} 来完成最后的安装步骤了。"
+    log_warn "如果使用了域名，请确保已正确解析，并配置好反向代理将域名指向 ${wp_port} 端口。"
+    press_any_key
 }
 _install_docker_and_compose() { if command -v docker &> /dev/null && docker compose version &>/dev/null; then log_info "Docker 和 Docker Compose V2 已安装。"; return 0; fi; log_warn "未检测到完整的 Docker 环境，开始执行官方标准安装流程..."; ensure_dependencies "ca-certificates" "curl" "gnupg"; log_info "正在添加 Docker 官方 GPG 密钥..."; install -m 0755 -d /etc/apt/keyrings; curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc; chmod a+r /etc/apt/keyrings/docker.asc; log_info "正在添加 Docker 软件仓库..."; echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null; log_info "正在更新软件包列表以识别新的 Docker 仓库..."; set -e; apt-get update -y; log_info "正在安装 Docker Engine, CLI, Containerd, 和 Docker Compose 插件..."; apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; set +e; if command -v docker &> /dev/null && docker compose version &>/dev/null; then log_info "✅ Docker 和 Docker Compose V2 已成功安装！"; return 0; else log_error "Docker 环境安装失败！"; return 1; fi; }
