@@ -171,7 +171,13 @@ uninstall_wordpress() {
 }
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    ensure_dependencies "docker.io" "docker-compose-plugin" "curl"
+    # 确保 Docker 环境就绪
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
+        press_any_key
+        return
+    fi
+
     clear
     log_info "开始使用 Docker Compose 搭建 WordPress..."
     echo ""
@@ -180,7 +186,6 @@ install_wordpress() {
     local project_dir
     read -p "请输入 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
     project_dir=${project_dir:-"/root/wordpress"}
-    # 使用 '|| return' 在目录创建失败时安全退出
     mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
     cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
     log_info "WordPress 将被安装在: $(pwd)"
@@ -202,7 +207,7 @@ install_wordpress() {
     while true; do
         read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
         if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
-        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then : # 警告已在函数内打印
+        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :
         else break; fi
     done
 
@@ -215,7 +220,7 @@ install_wordpress() {
         else break; fi
     done
 
-    # ==================== 核心修正点：使用标准、多行的 YAML 格式 ====================
+    # --- 2. 生成 docker-compose.yml 文件 (已修正为标准YAML格式) ---
     log_info "正在生成 docker-compose.yml 文件..."
     cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -262,7 +267,6 @@ volumes:
 networks:
   wordpress_net:
 EOF
-    # =================================================================================
 
     if [ ! -f "docker-compose.yml" ]; then log_error "docker-compose.yml 文件创建失败！"; press_any_key; return; fi
 
