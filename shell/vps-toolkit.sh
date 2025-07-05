@@ -270,7 +270,8 @@ clean_system() {
 
 # 修改主机名
 change_hostname() {
-    log_info "准备修改主机名..."
+    echo ""
+    log_info "准备修改主机名...\n"
     read -p "请输入新的主机名: " new_hostname
     if [ -z "$new_hostname" ]; then
         log_error "主机名不能为空！"
