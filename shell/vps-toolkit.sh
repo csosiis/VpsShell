@@ -2028,7 +2028,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${WHITE}           全功能 VPS & 应用管理脚本           ${CYAN}║${NC}"
+        echo -e "${CYAN}║${WHITE}               全功能 VPS & 应用管理脚本           ${CYAN}║${NC}"
         echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
         echo -e "${CYAN}║${NC}   1. 系统综合管理                               ${CYAN}║${NC}"
