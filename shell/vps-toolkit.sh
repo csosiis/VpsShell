@@ -1999,7 +1999,7 @@ substore_main_menu() {
         echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         if is_substore_installed; then
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
-            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   1. 管理 Sub-Store (启停/日志/配置)             ${CYAN}║${NC}"
@@ -2256,9 +2256,9 @@ singbox_main_menu() {
             echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   1. 新增节点 (向导模式)                         ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 新增节点                                   ${CYAN}║${NC}"
              echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   2. 管理已有节点 (查看/删除/推送)               ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   2. 管理节点                                   ${CYAN}║${NC}"
              echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   3. 启动 Sing-Box                               ${CYAN}║${NC}"
