@@ -1995,18 +1995,20 @@ substore_main_menu() {
     while true; do
         clear
         echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${WHITE}                 Sub-Store 管理               ${CYAN}║${NC}"
+        echo -e "${CYAN}║${WHITE}                   Sub-Store 管理                 ${CYAN}║${NC}"
         echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         if is_substore_installed; then
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="${GREEN}● 活动${NC}"; else STATUS_COLOR="${RED}● 不活动${NC}"; fi
             echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   1. 管理 Sub-Store (启停/日志/配置)            ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   2. ${GREEN}更新 Sub-Store 应用${NC}                        ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   3. ${RED}卸载 Sub-Store${NC}                             ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 管理 Sub-Store (启停/日志/配置)             ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   2. ${GREEN}更新 Sub-Store 应用${NC}                         ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   3. ${RED}卸载 Sub-Store${NC}                              ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
@@ -2018,9 +2020,9 @@ substore_main_menu() {
             echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   1. 安装 Sub-Store                             ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   1. 安装 Sub-Store                              ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-            echo -e "${CYAN}║${NC}   0. 返回主菜单                                 ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}   0. 返回主菜单                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
@@ -2243,7 +2245,7 @@ singbox_main_menu() {
     while true; do
         clear
         echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${WHITE}                 Sing-Box 管理                ${CYAN}║${NC}"
+        echo -e "${CYAN}║${WHITE}                   Sing-Box 管理                  ${CYAN}║${NC}"
         echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then
@@ -2251,7 +2253,7 @@ singbox_main_menu() {
             else
                 STATUS_COLOR="${RED}● 不活动${NC}"
             fi
-            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}  当前状态: ${STATUS_COLOR}                                ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   1. 新增节点 (向导模式)                         ${CYAN}║${NC}"
