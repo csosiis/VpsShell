@@ -955,13 +955,13 @@ push_to_sub_store() {
 
     local node_json
     node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" '{
-        "token": "csosiis5",
+        "token": "sanjose",
         "name": $name,
         "link": $link
     }')
 
     log_info "正在推送到 Sub-Store API..."
-    response=$(curl -s -X POST "https://oregen.wiitwo.eu.org/data" \
+    response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
         -d "$node_json")
 
