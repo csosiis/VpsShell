@@ -2082,6 +2082,35 @@ main_menu() {
         esac
     done
 }
+post_add_node_menu() {
+    while true; do
+        echo ""
+        echo -e "请选择接下来的操作：\n"
+        echo -e "${GREEN}1. 继续新增节点${NC}  ${YELLOW}2. 管理已有节点 (查看/删除/推送)${NC}    ${RED}0. 返回上一级菜单${NC}\n"
+        read -p "请输入选项: " next_choice
+
+        case $next_choice in
+            1)
+                # 调用主创建函数，然后退出当前菜单循环
+                singbox_add_node_orchestrator
+                break
+                ;;
+            2)
+                # 调用节点管理函数，然后退出当前菜单循环
+                view_node_info
+                break
+                ;;
+            0)
+                # 直接退出当前菜单循环
+                break
+                ;;
+            *)
+                log_error "无效选项，请重新输入。"
+                sleep 1
+                ;;
+        esac
+    done
+}
 # 新的统一创建函数 (v3.1 - 智能唯一 Tag)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
@@ -2148,7 +2177,6 @@ singbox_add_node_orchestrator() {
         echo ""; log_info "您已选择一键四合一模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
-                echo ""
                 read -p "请输入 [${p}] 的端口 [回车则随机]: " port_input
                 if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
                 if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
@@ -2172,12 +2200,10 @@ singbox_add_node_orchestrator() {
     for protocol in "${protocols_to_create[@]}"; do
         echo ""; local tag_base="${location}"; if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
 
-        # ==================== 核心修正点：调用新函数来生成唯一 Tag ====================
         local base_tag_for_protocol="${tag_base}-${protocol}"
         local tag
         tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为此节点分配唯一 Tag: ${tag}"
-        # ===========================================================================
 
         local uuid=$(uuidgen); local password=$(generate_random_password)
         local config=""; local node_link=""; local current_port=${ports[$protocol]}
@@ -2198,9 +2224,27 @@ singbox_add_node_orchestrator() {
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."; systemctl restart sing-box; sleep 2
         if systemctl is-active --quiet sing-box; then
-            log_info "Sing-Box 重启成功。"; if [ "$success_count" -eq 1 ] && ! $is_one_click; then echo ""; log_info "✅ 节点添加成功！分享链接如下："; echo -e "${CYAN}--------------------------------------------------------------${NC}"; echo -e "\n${YELLOW}${final_node_link}${NC}\n"; echo -e "${CYAN}--------------------------------------------------------------${NC}"; press_any_key; else log_info "正在显示所有节点信息..."; sleep 1; view_node_info; fi
-        else log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"; press_any_key; fi
-    else log_error "没有任何节点被成功添加。"; press_any_key; fi
+            log_info "Sing-Box 重启成功。";
+            if [ "$success_count" -eq 1 ] && ! $is_one_click; then
+                echo "";
+                log_info "✅ 节点添加成功！分享链接如下：";
+                echo -e "${CYAN}--------------------------------------------------------------${NC}";
+                echo -e "\n${YELLOW}${final_node_link}${NC}\n";
+                echo -e "${CYAN}--------------------------------------------------------------${NC}";
+                post_add_node_menu
+            else
+                log_info "正在显示所有节点信息...";
+                sleep 1;
+                view_node_info;
+            fi
+        else
+            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。";
+            press_any_key;
+        fi
+    else
+        log_error "没有任何节点被成功添加。";
+        press_any_key;
+    fi
 }
 singbox_main_menu() {
     while true; do

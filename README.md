@@ -8,12 +8,6 @@ curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell
 
 
 
-#### 系统脚本
-
-```
-curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/sys.sh && chmod +x sys.sh && ./sys.sh
-```
-
 
 #### Sing-Box节点脚本
 
