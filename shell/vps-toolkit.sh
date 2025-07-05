@@ -580,16 +580,11 @@ EOL
 # 内部函数：处理 Caddy (全自动HTTPS)
 _handle_caddy_cert() {
     log_info "检测到 Caddy 已安装。"
-    log_warn "Caddy 会自动管理 SSL 证书，本脚本无需执行任何操作。"
-    log_warn "请确保您的 Caddyfile 中已正确配置您的域名，例如："
-    echo -e "${WHITE}"
-    echo "sg.facebookbio.eu.org { Gzip 压缩指令"
-    echo "    reverse_proxy localhost:PORT # 将 PORT 替换为 Sing-Box 的监听端口"
-    echo "}"
-    echo -e "${NC}"
-    log_info "Caddy 会在首次被访问时自动申请证书。"
-    # 既然 Caddy 会处理，我们在这里就认为“证书环节”是成功的
-    return 0
+    log_error "脚本的自动证书功能与 Caddy 冲突。"
+    log_error "请先卸载 Caddy，或手动配置 Caddyfile 并创建无TLS的 Sing-Box 节点。"
+    log_error "操作已中止，以防止生成错误的配置。"
+    # 返回 1 代表失败，这将阻止后续函数的执行
+    return 1
 }
 
 # 内部函数：处理 Nginx
