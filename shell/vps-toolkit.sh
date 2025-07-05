@@ -327,9 +327,10 @@ EOF
 # 设置网络优先级
 set_network_priority() {
     clear
-    echo "请选择网络优先级设置:"
-    echo "1. IPv6 优先"
-    echo "2. IPv4 优先"
+    echo -e "请选择网络优先级设置:\n"
+    echo -e "1. IPv6 优先\n"
+    echo -e "2. IPv4 优先\n"
+    echo -e "0. 返回主菜单\n"
     read -p "请输入选择: " choice
     case $choice in
         1)
@@ -344,6 +345,7 @@ set_network_priority() {
             fi
             log_info "✅ IPv4 优先已设置。"
             ;;
+        0) break ;;
         *)
             log_error "无效选择。"
             ;;
