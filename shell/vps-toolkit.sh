@@ -1372,28 +1372,20 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
-    FNM_DIR="/root/.local/share/fnm"; mkdir -p "$FNM_DIR"
+    # ==================== 核心修正点：使用官方推荐的 fnm 安装脚本 ====================
+    log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
+    curl -fsSL https://fnm.vercel.app/install | bash
 
-    # ==================== 核心修正点：使用正确的 aarch64 架构名 ====================
-    local arch
-    case $(dpkg --print-architecture) in
-        arm64) arch="aarch64";; # arm64 架构在 fnm 的发布中被称为 aarch64
-        aarch64) arch="aarch64";;
-        amd64) arch="x64";; # 之前的版本可能错写为 x64，这里统一为 amd64
-        *) arch="x64";; # 默认回退到 x64
-    esac
-    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载对应 (${arch}) 版本的 FNM..."
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux-${arch}.zip" -o /tmp/fnm.zip
-    # ====================================================================================
-
-    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
-
-    export PATH="${FNM_DIR}:$PATH";
+    log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
+    # .bashrc 文件可能不存在于非交互式 shell 的默认路径中，使用 $HOME 更安全
+    # 同时检查 .zshrc 以增加兼容性
+    if [ -f "$HOME/.bashrc" ]; then
+        source "$HOME/.bashrc"
+    elif [ -f "$HOME/.zshrc" ]; then
+        source "$HOME/.zshrc"
+    fi
     log_info "FNM 安装完成。"
-
-    log_info "正在为当前会话配置 FNM 环境变量...";
-    eval "$(fnm env)"
+    # =================================================================================
 
     log_info "正在使用 FNM 安装 Node.js (v20)..."
     fnm install v20
@@ -1401,7 +1393,7 @@ substore_do_install() {
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="/root/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
+    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
     log_info "正在下载并设置 Sub-Store 项目文件..."
