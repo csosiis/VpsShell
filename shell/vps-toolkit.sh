@@ -1366,23 +1366,26 @@ is_substore_installed() {
 
 # 安装 Sub-Store
 substore_do_install() {
-    # 函数开头的这行按需依赖检查是正确的，它已经处理了所有需要的前置依赖
     ensure_dependencies "curl" "unzip" "git"
 
     echo ""
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 关键修正点：删除对已不存在函数的调用和相关日志 ====================
-    # 下面这三行是多余的，需要被删除
-    # log_info "开始检查并安装必需的依赖项..."
-    # check_and_install_dependencies
-    # log_info "依赖检查完成。"
-    # ====================================================================================
-
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="/root/.local/share/fnm"; mkdir -p "$FNM_DIR"
-    curl -L https://github.com/Schniz/fnm/releases/latest/download/fnm-linux.zip -o /tmp/fnm.zip
+
+    # ==================== 核心修正点：动态检测架构并下载对应的 fnm 版本 ====================
+    local arch
+    case $(dpkg --print-architecture) in
+        arm64) arch="arm64";;
+        aarch64) arch="arm64";;
+        *) arch="x64";;
+    esac
+    log_info "检测到系统架构为 ${arch}，将下载对应版本的 FNM..."
+    curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux-${arch}.zip" -o /tmp/fnm.zip
+    # ====================================================================================
+
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
     export PATH="${FNM_DIR}:$PATH";
@@ -1400,7 +1403,6 @@ substore_do_install() {
     export PNPM_HOME="/root/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
-    # (后续代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
