@@ -2421,8 +2421,7 @@ post_add_node_menu() {
         esac
     done
 }
-
-# 新的统一创建函数 (v3.6 - 修正 UDP 协议的 TLS ALPN)
+# 新的统一创建函数 (v3.8 - 新增国旗 Tag)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -2432,22 +2431,7 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     # (函数前面的所有向导逻辑保持不变)
-    clear;
-    echo -e "${CYAN}-------------------------------------${NC}\n "
-    echo -e "           请选择要搭建的节点类型"
-    echo -e "\n${CYAN}-------------------------------------${NC}\n"
-    echo -e "1. VLESS + WSS\n"
-    echo -e "2. VMess + WSS\n"
-    echo -e "3. Trojan + WSS\n"
-    echo -e "4. Hysteria2 (UDP)\n"
-    echo -e "5. TUIC v5 (UDP)\n" # <-- 新增选项
-    echo -e "${CYAN}-------------------------------------${NC}\n"
-    echo -e "6. ${GREEN}一键生成以上全部 5 种协议节点${NC}"
-    echo -e "\n${CYAN}-------------------------------------${NC}\n"
-    echo -e "0. 返回上一级菜单\n"
-    echo -e "${CYAN}-------------------------------------${NC}\n"
-    read -p "请输入选项: " protocol_choice
-    case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("TUIC");; 6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
+    clear; log_info "欢迎使用 Sing-Box 节点创建向导 v3.8"; echo -e "\n请选择您要搭建的节点类型：\n"; echo -e "1. VLESS\n2. VMess\n3. Trojan\n4. Hysteria2 (UDP)\n5. TUIC v5 (UDP)\n\n${CYAN}-------------------------------------${NC}\n"; echo -e "6. 一键生成以上全部 5 种协议节点\n\n${CYAN}-------------------------------------${NC}\n\n0. 返回上一级菜单\n"; read -p "请输入选项: " protocol_choice; case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("TUIC");; 6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
     clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"; echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"; read -p "请输入选项 (1-2): " cert_choice
     if [ "$cert_choice" == "1" ]; then
         while true; do read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then log_error "域名格式不正确。"; else break; fi; done
@@ -2467,18 +2451,30 @@ singbox_add_node_orchestrator() {
     fi
     local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi; else local protocol_name=${protocols_to_create[0]}; local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; while true; do read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; fi
 
-    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/'); if [ -z "$location" ]; then location="N/A"; fi
+    # ==================== 核心修正点：获取地理位置信息并转换为国旗 ====================
+    local geo_info_json
+    geo_info_json=$(curl -s ip-api.com/json)
+    local country_code
+    country_code=$(echo "$geo_info_json" | jq -r '.countryCode')
+    local city
+    city=$(echo "$geo_info_json" | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/')
+    if [ -z "$city" ]; then city="N/A"; fi
+
+    # 将国家代码转换为国旗 Emoji
+    local flag
+    flag=$(printf '%s' "$country_code" | sed 's/./\U&/g' | tr -d '\n' | sed 's/./&\uFE0F/g' | awk '{ for(i=1;i<=length;i++) printf("%c", (substr($0,i,1) == "\uFE0F") ? 0 : (127397 + toupper(substr($0,i,1)))); }')
+    # =================================================================================
+
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
-        echo ""; local tag_base="${location}"; if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
-        local base_tag_for_protocol="${tag_base}-${protocol}"; local tag; tag=$(_get_unique_tag "$base_tag_for_protocol"); log_info "已为此节点分配唯一 Tag: ${tag}"
+        # 将国旗加入 Tag
+        echo ""; local tag_base="${flag} ${city}"; if [ -n "$custom_id" ]; then tag_base+=" - ${custom_id}"; fi
+        local base_tag_for_protocol="${tag_base} - ${protocol}"; local tag; tag=$(_get_unique_tag "$base_tag_for_protocol"); log_info "已为此节点分配唯一 Tag: ${tag}"
         local uuid=$(uuidgen); local password=$(generate_random_password)
         local config=""; local node_link=""; local current_port=${ports[$protocol]}
 
-        # 为不同协议组构建不同的 TLS 配置
         local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-        local tls_config_udp_hysteria="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-        local tls_config_udp_tuic="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+        local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
         case $protocol in
             "VLESS"|"VMess"|"Trojan")
@@ -2488,11 +2484,11 @@ singbox_add_node_orchestrator() {
                 else node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/#${tag}"; fi
                 ;;
             "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp_hysteria},\"up_mbps\":100,\"down_mbps\":1000}"
+                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
                 node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3#${tag}"
                 ;;
             "TUIC")
-                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp_tuic}}"
+                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
                 node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr#${tag}"
                 ;;
         esac
