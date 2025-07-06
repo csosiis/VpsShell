@@ -2433,16 +2433,16 @@ singbox_add_node_orchestrator() {
 
     # (函数前面的所有向导逻辑保持不变)
     clear
+    echo -e "${CYAN}-------------------------------------${NC}"
+    echo -e "\n请选择您要搭建的节点类型：\n"
     echo -e "${CYAN}-------------------------------------${NC}\n"
-    echo -e "             请选择要搭建的节点类型"
-    echo -e "$\n{CYAN}-------------------------------------${NC}\n"
     echo -e "1. VLESS + WSS\n"
     echo -e "2. VMess + WSS\n"
     echo -e "3. Trojan + WSS\n"
     echo -e "4. Hysteria2 (UDP)\n"
     echo -e "5. TUIC v5 (UDP)\n" # <-- 新增选项
     echo -e "${CYAN}-------------------------------------${NC}\n"
-    echo -e "6. ${GREEN}一键生成以上全部 5 种协议节点${NC}"
+    echo -e "6. 一键生成以上全部 5 种协议节点" # <-- 升级为五合一
     echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "0. 返回上一级菜单\n"
     echo -e "${CYAN}-------------------------------------${NC}\n"
