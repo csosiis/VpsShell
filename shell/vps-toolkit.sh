@@ -1441,6 +1441,7 @@ EOF
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
+
 # 内部辅助函数：完整安装 Docker 和 Docker Compose
 _install_docker_and_compose() {
     # 检查 Docker 是否已安装
@@ -1458,12 +1459,17 @@ _install_docker_and_compose() {
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
 
-    # --- 2. 添加 Docker 的软件仓库 ---
+    # ==================== 核心修正点：动态检测系统并使用正确的仓库地址 ====================
     log_info "正在添加 Docker 软件仓库..."
+    # 自动检测是 'ubuntu' 还是 'debian'
+    local os_id
+    os_id=$(. /etc/os-release && echo "$ID")
+
     echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${os_id} \
       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
       tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # ====================================================================================
 
     # --- 3. 更新软件包列表并安装 ---
     log_info "正在更新软件包列表以识别新的 Docker 仓库..."
@@ -1483,6 +1489,7 @@ _install_docker_and_compose() {
         return 1
     fi
 }
+
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
     # ==================== 关键修正点：调用专业的 Docker 安装函数 ====================
