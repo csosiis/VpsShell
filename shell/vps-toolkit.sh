@@ -2432,7 +2432,8 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     # (函数前面的所有向导逻辑保持不变)
-    echo -e "${CYAN}-------------------------------------${NC}\n "
+    clear
+    echo -e "${CYAN}-------------------------------------${NC}\n"
     echo -e "             请选择要搭建的节点类型"
     echo -e "$\n{CYAN}-------------------------------------${NC}\n"
     echo -e "1. VLESS + WSS\n"
