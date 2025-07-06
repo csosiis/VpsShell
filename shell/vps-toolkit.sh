@@ -2432,23 +2432,23 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     # (函数前面的所有向导逻辑保持不变)
-    clear
-    echo -e "${CYAN}-------------------------------------${NC}"
-    echo -e "\n请选择您要搭建的节点类型：\n"
-    echo -e "${CYAN}-------------------------------------${NC}\n"
+    clear;
+    echo -e "${CYAN}-------------------------------------${NC}\n "
+    echo -e "           请选择要搭建的节点类型"
+    echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "1. VLESS + WSS\n"
     echo -e "2. VMess + WSS\n"
     echo -e "3. Trojan + WSS\n"
     echo -e "4. Hysteria2 (UDP)\n"
     echo -e "5. TUIC v5 (UDP)\n" # <-- 新增选项
     echo -e "${CYAN}-------------------------------------${NC}\n"
-    echo -e "6. 一键生成以上全部 5 种协议节点" # <-- 升级为五合一
+    echo -e "6. ${GREEN}一键生成以上全部 5 种协议节点${NC}"
     echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "0. 返回上一级菜单\n"
     echo -e "${CYAN}-------------------------------------${NC}\n"
     read -p "请输入选项: " protocol_choice
     case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("TUIC");; 6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
-    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。";  echo -e "\n请选择证书类型：\n\n1. 使用 Let's Encrypt 域名证书 (推荐)\n\n2. 使用自签名证书 (IP 直连)\n"; read -p "请输入选项 (1-2): " cert_choice
+    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"; echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"; read -p "请输入选项 (1-2): " cert_choice
     if [ "$cert_choice" == "1" ]; then
         while true; do read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then log_error "域名格式不正确。"; else break; fi; done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
