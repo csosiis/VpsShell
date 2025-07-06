@@ -1375,14 +1375,15 @@ substore_do_install() {
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="/root/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
-    # ==================== 核心修正点：动态检测架构并下载对应的 fnm 版本 ====================
+    # ==================== 核心修正点：使用正确的 aarch64 架构名 ====================
     local arch
     case $(dpkg --print-architecture) in
-        arm64) arch="arm64";;
-        aarch64) arch="arm64";;
-        *) arch="x64";;
+        arm64) arch="aarch64";; # arm64 架构在 fnm 的发布中被称为 aarch64
+        aarch64) arch="aarch64";;
+        amd64) arch="x64";; # 之前的版本可能错写为 x64，这里统一为 amd64
+        *) arch="x64";; # 默认回退到 x64
     esac
-    log_info "检测到系统架构为 ${arch}，将下载对应版本的 FNM..."
+    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载对应 (${arch}) 版本的 FNM..."
     curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux-${arch}.zip" -o /tmp/fnm.zip
     # ====================================================================================
 
