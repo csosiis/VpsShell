@@ -2421,7 +2421,6 @@ post_add_node_menu() {
         esac
     done
 }
-
 # 新的统一创建函数 (v4.0 - 全新 Tag 系统)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
@@ -2554,7 +2553,6 @@ singbox_add_node_orchestrator() {
         else log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"; press_any_key; fi
     else log_error "没有任何节点被成功添加。"; press_any_key; fi
 }
-
 singbox_main_menu() {
     while true; do
         clear
