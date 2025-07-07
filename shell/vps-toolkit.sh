@@ -64,6 +64,7 @@ _is_port_available() {
     eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
     if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
+        echo "";
         log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
         return 1
     fi
@@ -736,11 +737,13 @@ get_domain_and_common_config() {
             read -p "请输入一个 TCP 端口 (回车则随机生成): " port
         fi
         if [[ -z "$port" ]]; then
+            echo "";
             port=$(generate_random_port)
             log_info "已生成随机端口: $port"
             break
         fi
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
+            echo "";
             log_error "无效的端口号，请输入 1-65535 之间的数字。"
         else
             break
@@ -2482,17 +2485,18 @@ singbox_add_node_orchestrator() {
                 echo "";
                 local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
                 read -p "$(echo -e "${port_prompt}")" port_input
-                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
-                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+                if [ -z "$port_input" ]; then port_input=$(generate_random_port); echo ""; log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then echo ""; log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
             done
         done
     else
         local protocol_name=${protocols_to_create[0]}
         while true; do
             local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+            echo "";
             read -p "$(echo -e "${port_prompt}")" port_input
-            if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi
-            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then echo ""; log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
         done
     fi
 
