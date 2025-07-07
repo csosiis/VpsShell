@@ -2447,13 +2447,10 @@ singbox_add_node_orchestrator() {
 
     if [ "$cert_choice" == "1" ]; then
         while true; do
-            echo "错误"
             read -p "请输入您已解析到本机的域名: " domain
             if [[ -z "$domain" ]]; then
-                echo ""
                 log_error "域名不能为空！"
             elif ! _is_domain_valid "$domain"; then
-                echo ""
                 log_error "域名格式不正确，请重新输入。"
             else
                 break
@@ -2475,7 +2472,48 @@ singbox_add_node_orchestrator() {
         echo "";
         log_error "无效证书选择。"; press_any_key; return
     fi
-    local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; echo "";do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; echo "";then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; echo "";then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ];echo ""; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; else local protocol_name=${protocols_to_create[0]};echo ""; local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]];echo ""; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; while true; do read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ];echo ""; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; fi
+    # ... (证书选择逻辑之后)
+    local used_ports_for_this_run=()
+    if ! $is_one_click; then
+        # 单协议模式，需要交互
+        local protocol_name=${protocols_to_create[0]}
+        while true; do
+            echo ""
+            local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "
+            if [[ "$protocol_name" == "Hysteria2" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+            read -p "$(echo -e "${port_prompt}")" port_input
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi
+
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"
+            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                ports[$protocol_name]=$port_input
+                used_ports_for_this_run+=("$port_input")
+                break
+            fi
+        done
+        echo ""
+        read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
+    else
+        # 一键模式，自动生成所有端口，不再询问
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                local random_port=$(generate_random_port)
+                if _is_port_available "$random_port" "used_ports_for_this_run"; then
+                    ports[$p]=$random_port
+                    used_ports_for_this_run+=("$random_port")
+                    break
+                fi
+            done
+        done
+        # 仅在域名证书模式下询问一次Tag
+        if [ "$cert_choice" == "1" ]; then
+             echo ""
+             read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
+        else
+            # 自签名证书的一键模式，使用默认空标识
+            custom_id=""
+        fi
+    fi
 
     # ==================== 核心修正点：新的 Tag 生成逻辑 ====================
     # 统一询问自定义标识，并设置默认值
