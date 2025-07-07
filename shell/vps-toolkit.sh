@@ -2449,7 +2449,7 @@ singbox_add_node_orchestrator() {
     case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("TUIC");; 6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
 
     clear; echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议${NC}\n"
-    echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n\n"
+    echo -e "请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n\n"
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
