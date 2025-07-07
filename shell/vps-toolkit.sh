@@ -2479,6 +2479,7 @@ singbox_add_node_orchestrator() {
         echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
+                echo "";
                 local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
                 read -p "$(echo -e "${port_prompt}")" port_input
                 if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
