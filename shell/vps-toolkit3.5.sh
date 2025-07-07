@@ -61,25 +61,6 @@ generate_random_password() {
 _is_port_available() {
     local port_to_check=$1
     local used_ports_array_name=$2
-    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
-
-    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
-        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
-        return 1
-    fi
-
-    for used_port in "${used_ports[@]}"; do
-        if [ "$port_to_check" == "$used_port" ]; then
-            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
-            return 1
-        fi
-    done
-    return 0
-}
-# 检查端口是否可用 (增强版)
-_is_port_available() {
-    local port_to_check=$1
-    local used_ports_array_name=$2
     # 转换为本地数组引用
     eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 

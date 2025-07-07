@@ -76,27 +76,16 @@ _is_port_available() {
     done
     return 0
 }
-# 检查端口是否可用 (增强版)
-_is_port_available() {
-    local port_to_check=$1
-    local used_ports_array_name=$2
-    # 转换为本地数组引用
-    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
-
-    # 检查系统是否已占用
-    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
-        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
-        return 1
+# 验证域名格式是否有效
+_is_domain_valid() {
+    local domain_to_check=$1
+    # 此正则表达式检查域名是否由有效的字符、标签和 TLD 组成
+    # 它不允许标签以连字符开头或结尾，并要求 TLD 至少为2个字母。
+    if [[ $domain_to_check =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$ ]]; then
+        return 0 # 验证成功
+    else
+        return 1 # 验证失败
     fi
-
-    # 检查是否在本次任务中已被预定
-    for used_port in "${used_ports[@]}"; do
-        if [ "$port_to_check" == "$used_port" ]; then
-            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
-            return 1
-        fi
-    done
-    return 0
 }
 # --- 核心功能：依赖项管理 ---
 ensure_dependencies() {
