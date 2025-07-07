@@ -50,6 +50,7 @@ _is_port_available() {
     fi
     for used_port in "${used_ports[@]}"; do
         if [ "$port_to_check" == "$used_port" ]; then
+            echo ""
             log_warn "端口 $port_to_check 即将被本次操作中的其他协议使用。"
             return 1
         fi
@@ -2297,6 +2298,7 @@ singbox_add_node_orchestrator() {
             fi
         done
     fi
+    echo ""
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
     custom_id=${custom_id:-"Jcole"}
     local geo_info_json
