@@ -2420,10 +2420,19 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     clear
-    log_info "欢迎使用 Sing-Box 节点创建向导 v4.0"
-    echo -e "\n请选择您要搭建的节点类型：\n"
-    echo -e "1. VLESS\n2. VMess\n3. Trojan\n4. Hysteria2\n5. TUIC v5 (UDP)\n\n${CYAN}-------------------------------------${NC}\n"
-    echo -e "6. 一键生成以上全部 5 种协议节点\n\n${CYAN}-------------------------------------${NC}\n\n0. 返回上一级菜单\n"
+    echo -e "${CYAN}-------------------------------------${NC}\n "
+    echo -e "           请选择要搭建的节点类型"
+    echo -e "\n${CYAN}-------------------------------------${NC}\n"
+    echo -e "1. VLESS + WSS\n"
+    echo -e "2. VMess + WSS\n"
+    echo -e "3. Trojan + WSS\n"
+    echo -e "4. Hysteria2 (UDP)\n"
+    echo -e "5. TUIC v5 (UDP)\n" # <-- 新增选项
+    echo -e "${CYAN}-------------------------------------${NC}\n"
+    echo -e "6. ${GREEN}一键生成以上全部 5 种协议节点${NC}"
+    echo -e "\n${CYAN}-------------------------------------${NC}\n"
+    echo -e "0. 返回上一级菜单\n"
+    echo -e "${CYAN}-------------------------------------${NC}\n"
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
@@ -2437,28 +2446,29 @@ singbox_add_node_orchestrator() {
         *) log_error "无效选择，操作中止。"; press_any_key; return;;
     esac
 
-    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"
-    echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"
+    clear; echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议。${NC}"
+    echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
+        echo "";
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
-            if [[ -z "$domain" ]]; then log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。";
+            if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then echo ""; log_error "域名格式不正确。";
             else break; fi
         done
-        if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
+        if ! apply_ssl_certificate "$domain"; then echo ""; log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
         connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: ${ipv4_addr}\n\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
+        elif [ -n "$ipv4_addr" ]; then echo "";log_info  "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; then echo "";log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else echo "";log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
-        if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
+        if ! _create_self_signed_cert "$sni_domain"; then echo ""; log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
         log_error "无效证书选择。"; press_any_key; return
