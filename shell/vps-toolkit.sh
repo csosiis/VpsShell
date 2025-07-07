@@ -2452,13 +2452,8 @@ singbox_add_node_orchestrator() {
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n\n"
     read -p "请输入选项 (1-2): " cert_choice
 
-
-    clear; echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议${NC}\n"
-    echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n\n"
-    read -p "请输入选项 (1-2): " cert_choice
-
     if [ "$cert_choice" == "1" ]; then
-        while true; do read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then log_error "域名格式不正确。"; else break; fi; done
+        while true; do echo ""; read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"; elif ! echo ""; echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then  echo "";log_error "域名格式不正确。"; else break; fi; done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"; connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
@@ -2466,17 +2461,20 @@ singbox_add_node_orchestrator() {
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
             echo -e "\n请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
+        elif [ -n "$ipv4_addr" ]; then echo ""; log_info "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; echo ""; then log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else echo ""; log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
+        echo "";
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
+        echo "";
         log_error "无效证书选择。"; press_any_key; return
     fi
-    local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; else local protocol_name=${protocols_to_create[0]}; local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; while true; do read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; fi
+    local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; echo "";do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; echo "";then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; echo "";then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ];echo ""; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; else local protocol_name=${protocols_to_create[0]};echo ""; local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]];echo ""; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; while true; do read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ];echo ""; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; fi
 
     # ==================== 核心修正点：新的 Tag 生成逻辑 ====================
     # 统一询问自定义标识，并设置默认值
+    echo "";
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Csos): " custom_id
     custom_id=${custom_id:-"Csos"}
 
