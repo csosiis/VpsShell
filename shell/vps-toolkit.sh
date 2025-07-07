@@ -11,7 +11,6 @@
 #       - Sub-Store 服务管理 (Sub-Store Management)
 # =================================================================================
 
-
 # --- 全局变量和辅助函数 ---
 # 颜色定义
 GREEN='\033[0;32m'
@@ -37,8 +36,14 @@ FLAG_FILE="/root/.vps_toolkit.initialized"
 log_info() { echo -e "${GREEN}[信息] - $1${NC}"; }
 log_warn() { echo -e "${YELLOW}[注意] - $1${NC}"; }
 log_error() { echo -e "${RED}[错误] - $1${NC}"; }
-press_any_key() { echo ""; read -n 1 -s -r -p "按任意键返回..."; }
-check_root() { if [ "$(id -u)" -ne 0 ]; then log_error "此脚本必须以 root 用户身份运行。"; exit 1; fi; }
+press_any_key() {
+    echo ""
+    read -n 1 -s -r -p "按任意键返回..."
+}
+check_root() { if [ "$(id -u)" -ne 0 ]; then
+    log_error "此脚本必须以 root 用户身份运行。"
+    exit 1
+fi; }
 
 # 检查端口是否被占用
 check_port() {
@@ -55,7 +60,7 @@ generate_random_port() {
     echo $((RANDOM % 64512 + 1024))
 }
 generate_random_password() {
-    < /dev/urandom tr -dc 'A-Za-z0-9' | head -c 20
+    tr </dev/urandom -dc 'A-Za-z0-9' | head -c 20
 }
 # 检查端口是否可用 (增强版)
 _is_port_available() {
@@ -64,7 +69,7 @@ _is_port_available() {
     eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
     if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
-        echo "";
+        echo ""
         log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
         return 1
     fi
@@ -80,8 +85,8 @@ _is_port_available() {
 # 验证域名格式是否有效
 _is_domain_valid() {
     local domain_to_check=$1
-    # 修正后的正则表达式，兼容多级域名和各种 TLD
-    if [[ $domain_to_check =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]{2,}$ ]]; then
+    # 最终修正版正则表达式：检查以字母或数字开头，可包含连字符，由点分隔，并以至少两个字母的顶级域名结尾。
+    if [[ $domain_to_check =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$ ]]; then
         return 0 # 验证成功
     else
         return 1 # 验证失败
@@ -163,7 +168,7 @@ show_system_info() {
     log_info "正在查询系统信息，请稍候..."
 
     # 检查核心命令是否存在
-    if ! command -v lsb_release &> /dev/null || ! command -v lscpu &> /dev/null; then
+    if ! command -v lsb_release &>/dev/null || ! command -v lscpu &>/dev/null; then
         log_error "缺少核心查询命令 (如 lsb_release, lscpu)，请先执行依赖安装。"
         press_any_key
         return
@@ -275,7 +280,7 @@ change_hostname() {
     fi
     set -e
     hostnamectl set-hostname "$new_hostname"
-    echo "$new_hostname" > /etc/hostname
+    echo "$new_hostname" >/etc/hostname
     sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
     set +e
     log_info "✅ 主机名修改成功！新的主机名是：${new_hostname}"
@@ -288,9 +293,9 @@ optimize_dns() {
     ensure_dependencies "net-tools"
     log_info "开始优化DNS地址..."
     log_info "正在检查IPv6支持..."
-    if ping6 -c 1 google.com > /dev/null 2>&1; then
+    if ping6 -c 1 google.com >/dev/null 2>&1; then
         log_info "检测到IPv6支持，配置IPv6优先的DNS..."
-        cat <<EOF > /etc/resolv.conf
+        cat <<EOF >/etc/resolv.conf
 nameserver 2a00:1098:2b::1
 nameserver 2a00:1098:2c::1
 nameserver 2a01:4f8:c2c:123f::1
@@ -301,7 +306,7 @@ nameserver 8.8.8.8
 EOF
     else
         log_info "未检测到IPv6支持，仅配置IPv4 DNS..."
-        cat <<EOF > /etc/resolv.conf
+        cat <<EOF >/etc/resolv.conf
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 nameserver 9.9.9.9
@@ -323,22 +328,22 @@ set_network_priority() {
     echo -e "0. 返回主菜单\n"
     read -p "请输入选择: " choice
     case $choice in
-        1)
-            log_info "正在设置 IPv6 优先..."
-            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
-            log_info "✅ IPv6 优先已设置。"
-            ;;
-        2)
-            log_info "正在设置 IPv4 优先..."
-            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-                echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
-            fi
-            log_info "✅ IPv4 优先已设置。"
-            ;;
-        0) return 1 ;;
-        *)
-            log_error "无效选择。"
-            ;;
+    1)
+        log_info "正在设置 IPv6 优先..."
+        sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+        log_info "✅ IPv6 优先已设置。"
+        ;;
+    2)
+        log_info "正在设置 IPv4 优先..."
+        if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+            echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+        fi
+        log_info "✅ IPv4 优先已设置。"
+        ;;
+    0) return 1 ;;
+    *)
+        log_error "无效选择。"
+        ;;
     esac
     press_any_key
 }
@@ -375,7 +380,7 @@ setup_ssh_key() {
     fi
 
     # 使用 printf 更安全地写入文件
-    printf "%s\n" "$public_key" >> ~/.ssh/authorized_keys
+    printf "%s\n" "$public_key" >>~/.ssh/authorized_keys
 
     # 去重，防止重复添加同一个密钥
     sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
@@ -411,7 +416,7 @@ set_timezone() {
 
     # 手动打印菜单，增加间距
     for i in "${!options[@]}"; do
-        echo "$((i+1))) ${options[$i]}"
+        echo "$((i + 1))) ${options[$i]}"
         echo "" # 在每个选项后增加一个空行
     done
 
@@ -441,7 +446,7 @@ set_timezone() {
 }
 
 # 安装 S-ui
-install_sui(){
+install_sui() {
     ensure_dependencies "curl"
     log_info "正在准备安装 S-ui..."
     bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
@@ -450,7 +455,7 @@ install_sui(){
 }
 
 # 安装 3X-ui
-install_3xui(){
+install_3xui() {
     ensure_dependencies "curl"
     log_info "正在准备安装 3X-ui..."
     bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
@@ -458,12 +463,11 @@ install_3xui(){
     press_any_key
 }
 
-
 # --- 功能模块：Sing-Box 管理 (来自 singbox.sh) ---
 
 # 检查 Sing-Box 是否已安装
 is_singbox_installed() {
-    if command -v sing-box &> /dev/null; then return 0; else return 1; fi
+    if command -v sing-box &>/dev/null; then return 0; else return 1; fi
 }
 
 # 检查并提示安装 Sing-Box
@@ -521,7 +525,7 @@ singbox_do_install() {
     # ==================== 关键修正点：恢复为简单且兼容的 DNS 配置 ====================
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
         log_info "正在创建兼容性更强的 Sing-Box 默认配置文件..."
-        cat > "$SINGBOX_CONFIG_FILE" <<EOL
+        cat >"$SINGBOX_CONFIG_FILE" <<EOL
 {
   "log": {
     "level": "info",
@@ -594,7 +598,7 @@ _handle_nginx_cert() {
     # 这是为了让 Certbot --nginx 插件有一个可以识别和操作的目标。
     if [ ! -f "$NGINX_CONF_PATH" ]; then
         log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."
-        cat <<EOF > "$NGINX_CONF_PATH"
+        cat <<EOF >"$NGINX_CONF_PATH"
 server {
     listen 80;
     listen [::]:80;
@@ -690,9 +694,9 @@ apply_ssl_certificate() {
     fi
     log_info "证书不存在，开始智能检测环境并为 ${domain_name} 申请新证书..."
     ensure_dependencies "certbot"
-    if command -v caddy &> /dev/null; then
+    if command -v caddy &>/dev/null; then
         _handle_caddy_cert "$domain_name"
-    elif command -v apache2 &> /dev/null; then
+    elif command -v apache2 &>/dev/null; then
         ensure_dependencies "python3-certbot-apache"
         _handle_apache_cert "$domain_name"
     else
@@ -711,8 +715,14 @@ get_domain_and_common_config() {
     while true; do
         echo ""
         read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
-        if [[ -z "$domain_name" ]]; then log_error "\n域名不能为空"; continue; fi
-        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "\n无效的域名格式"; continue; fi
+        if [[ -z "$domain_name" ]]; then
+            log_error "\n域名不能为空"
+            continue
+        fi
+        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then
+            log_error "\n无效的域名格式"
+            continue
+        fi
         break
     done
 
@@ -736,13 +746,13 @@ get_domain_and_common_config() {
             read -p "请输入一个 TCP 端口 (回车则随机生成): " port
         fi
         if [[ -z "$port" ]]; then
-            echo "";
+            echo ""
             port=$(generate_random_port)
             log_info "已生成随机端口: $port"
             break
         fi
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
-            echo "";
+            echo ""
             log_error "无效的端口号，请输入 1-65535 之间的数字。"
         else
             break
@@ -779,11 +789,11 @@ get_domain_and_common_config() {
 
     local protocol_name=""
     case $type_flag in
-        1) protocol_name="VLESS" ;;
-        2) protocol_name="Hysteria2" ;;
-        3) protocol_name="VMess" ;;
-        4) protocol_name="Trojan" ;;
-        *) protocol_name="UNKNOWN" ;;
+    1) protocol_name="VLESS" ;;
+    2) protocol_name="Hysteria2" ;;
+    3) protocol_name="VMess" ;;
+    4) protocol_name="Trojan" ;;
+    *) protocol_name="UNKNOWN" ;;
     esac
     tag="${location}-${custom_id}-${protocol_name}"
     return 0
@@ -797,7 +807,7 @@ add_protocol_node() {
 
     log_info "正在将新的入站配置添加到 config.json..."
     # 使用临时文件确保原子性操作，防止配置文件损坏
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp"; then
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp"; then
         log_error "更新配置文件失败！请检查JSON格式和文件权限。"
         rm -f "$SINGBOX_CONFIG_FILE.tmp"
         return 1
@@ -805,28 +815,28 @@ add_protocol_node() {
     mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
 
     case $protocol in
-        VLESS)
-            node_link="vless://${uuid}@${domain_name}:${port}?type=ws&security=tls&sni=${domain_name}&host=${domain_name}&path=%2F#${tag}"
-            ;;
-        Hysteria2)
-            node_link="hysteria2://${password}@${domain_name}:${port}?upmbps=100&downmbps=1000&sni=${domain_name}&obfs=salamander&obfs-password=${obfs_password}#${tag}"
-            ;;
-        VMess)
-            vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain_name}\",\"port\":\"${port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain_name}\",\"path\":\"/\",\"tls\":\"tls\"}"
-            base64_vmess_link=$(echo -n "$vmess_json" | base64 -w 0)
-            node_link="vmess://${base64_vmess_link}"
-            ;;
-        Trojan)
-            node_link="trojan://${password}@${domain_name}:${port}?security=tls&sni=${domain_name}&type=ws&host=${domain_name}&path=/#${tag}"
-            ;;
-        *)
-            log_error "未知的协议类型！"
-            return 1
-            ;;
+    VLESS)
+        node_link="vless://${uuid}@${domain_name}:${port}?type=ws&security=tls&sni=${domain_name}&host=${domain_name}&path=%2F#${tag}"
+        ;;
+    Hysteria2)
+        node_link="hysteria2://${password}@${domain_name}:${port}?upmbps=100&downmbps=1000&sni=${domain_name}&obfs=salamander&obfs-password=${obfs_password}#${tag}"
+        ;;
+    VMess)
+        vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${domain_name}\",\"port\":\"${port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${domain_name}\",\"path\":\"/\",\"tls\":\"tls\"}"
+        base64_vmess_link=$(echo -n "$vmess_json" | base64 -w 0)
+        node_link="vmess://${base64_vmess_link}"
+        ;;
+    Trojan)
+        node_link="trojan://${password}@${domain_name}:${port}?security=tls&sni=${domain_name}&type=ws&host=${domain_name}&path=/#${tag}"
+        ;;
+    *)
+        log_error "未知的协议类型！"
+        return 1
+        ;;
     esac
 
     # 将新生成的链接追加到文件中
-    echo "$node_link" >> "$SINGBOX_NODE_LINKS_FILE"
+    echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
 
     log_info "正在重启 Sing-Box 使配置生效..."
     systemctl restart sing-box
@@ -851,7 +861,7 @@ add_protocol_node() {
 
 # 选择要推送的节点
 select_nodes_for_push() {
-    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     if [ ${#node_lines[@]} -eq 0 ]; then
         log_warn "没有可推送的节点。"
         return 1
@@ -868,43 +878,45 @@ select_nodes_for_push() {
 
     selected_links=()
     case $push_choice in
-        1)
-            # 推送所有节点
-            echo ""
-            log_info "已选择推送所有节点。"
-            for line in "${node_lines[@]}"; do
-                selected_links+=("$line")
-            done
-            ;;
-        2)
-            # 推送单个或多个节点
-            echo ""
-            log_info "请选择要推送的节点 (可多选，用空格分隔):"
-            echo ""
-            for i in "${!node_lines[@]}"; do
-                line="${node_lines[$i]}"
-                node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-                if [[ "$line" =~ ^vmess:// ]]; then
-                    node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
-                fi
-                echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n"
-            done
-            read -p "请输入编号 (输入 0 返回): " -a selected_indices
+    1)
+        # 推送所有节点
+        echo ""
+        log_info "已选择推送所有节点。"
+        for line in "${node_lines[@]}"; do
+            selected_links+=("$line")
+        done
+        ;;
+    2)
+        # 推送单个或多个节点
+        echo ""
+        log_info "请选择要推送的节点 (可多选，用空格分隔):"
+        echo ""
+        for i in "${!node_lines[@]}"; do
+            line="${node_lines[$i]}"
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
+            fi
+            echo -e "${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n"
+        done
+        read -p "请输入编号 (输入 0 返回): " -a selected_indices
 
-            for index in "${selected_indices[@]}"; do
-                if [[ "$index" == "0" ]]; then return 1; fi
-                if ! [[ "$index" =~ ^[0-9]+$ ]] || [[ $index -lt 1 || $index -gt ${#node_lines[@]} ]]; then
-                    log_error "包含无效编号: $index"
-                    return 1
-                fi
-                selected_links+=("${node_lines[$((index - 1))]}")
-            done
-            ;;
-        0)
-            return 1 ;;
-        *)
-            log_error "无效选项！"
-            return 1 ;;
+        for index in "${selected_indices[@]}"; do
+            if [[ "$index" == "0" ]]; then return 1; fi
+            if ! [[ "$index" =~ ^[0-9]+$ ]] || [[ $index -lt 1 || $index -gt ${#node_lines[@]} ]]; then
+                log_error "包含无效编号: $index"
+                return 1
+            fi
+            selected_links+=("${node_lines[$((index - 1))]}")
+        done
+        ;;
+    0)
+        return 1
+        ;;
+    *)
+        log_error "无效选项！"
+        return 1
+        ;;
     esac
 
     # 检查是否选择了任何链接
@@ -958,8 +970,8 @@ push_to_sub_store() {
 
     # ==================== 核心修正点：使用 jq 解析 JSON 响应 ====================
     # 检查返回的 JSON 中 .success 字段是否为 true
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        echo "sub_store_subs=$sub_store_subs" > "$sub_store_config_file"
+    if echo "$response" | jq -e '.success' >/dev/null; then
+        echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
         local success_message
         success_message=$(echo "$response" | jq -r '.message')
@@ -999,7 +1011,7 @@ push_to_telegram() {
     # ==================== 关键修正点：使用数组和 IFS 构建包含真实换行的消息 ====================
     # 1. 创建一个数组，包含消息的每一行
     local message_lines=("节点推送成功，详情如下：" "") # 头部信息和紧跟的一个空行
-    message_lines+=("${selected_links[@]}") # 将所有选择的链接追加到数组中
+    message_lines+=("${selected_links[@]}")                         # 将所有选择的链接追加到数组中
 
     # 2. 临时将 Bash 的内部字段分隔符(IFS)设置为换行符
     local IFS=$'\n'
@@ -1014,10 +1026,10 @@ push_to_telegram() {
     log_info "正在将节点合并为单条消息推送到 Telegram..."
 
     response=$(curl -s -X POST "https://api.telegram.org/bot${tg_api_token}/sendMessage" \
-         --data-urlencode "chat_id=${tg_chat_id}" \
-         --data-urlencode "text=${message_text}")
+        --data-urlencode "chat_id=${tg_chat_id}" \
+        --data-urlencode "text=${message_text}")
 
-    if ! echo "$response" | jq -e '.ok' > /dev/null; then
+    if ! echo "$response" | jq -e '.ok' >/dev/null; then
         log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
         read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
         if [[ "$choice" =~ ^[Yy]$ ]]; then
@@ -1028,8 +1040,8 @@ push_to_telegram() {
     fi
 
     # 成功后保存配置
-    echo "tg_api_token=$tg_api_token" > "$tg_config_file"
-    echo "tg_chat_id=$tg_chat_id" >> "$tg_config_file"
+    echo "tg_api_token=$tg_api_token" >"$tg_config_file"
+    echo "tg_chat_id=$tg_chat_id" >>"$tg_config_file"
     log_info "✅ 节点信息已成功推送到 Telegram！"
     press_any_key
 }
@@ -1046,16 +1058,19 @@ push_nodes() {
     read -p "请选择推送方式: " push_choice
 
     case $push_choice in
-        1) push_to_sub_store ;;
-        2) push_to_telegram ;;
-        0) return ;;
-        *) log_error "无效选项！"; press_any_key ;;
+    1) push_to_sub_store ;;
+    2) push_to_telegram ;;
+    0) return ;;
+    *)
+        log_error "无效选项！"
+        press_any_key
+        ;;
     esac
 }
 # 生成临时订阅链接
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
-    if ! command -v nginx &> /dev/null; then
+    if ! command -v nginx &>/dev/null; then
         log_error "Nginx 未安装，无法生成可访问的订阅链接。"
         press_any_key
         return
@@ -1082,7 +1097,9 @@ generate_subscription_link() {
     fi
 
     if [ -z "$host" ]; then
-        log_error "无法确定主机地址 (域名或IP)，操作中止。"; press_any_key; return
+        log_error "无法确定主机地址 (域名或IP)，操作中止。"
+        press_any_key
+        return
     fi
 
     # 2. 在 Nginx 网站根目录创建随机命名的临时订阅文件
@@ -1092,14 +1109,14 @@ generate_subscription_link() {
     local sub_filepath="${sub_dir}/${sub_filename}"
 
     # 3. 将所有节点链接合并并进行 Base64 编码
-    mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str
     all_links_str=$(printf "%s\n" "${node_lines[@]}")
     local base64_content
     base64_content=$(echo -n "$all_links_str" | base64 -w0)
 
     # 4. 将编码后的内容写入临时文件
-    echo "$base64_content" > "$sub_filepath"
+    echo "$base64_content" >"$sub_filepath"
 
     # 5. 构建并显示 URL
     local sub_url="http://${host}/${sub_filename}"
@@ -1119,19 +1136,25 @@ generate_subscription_link() {
 # 显示/管理节点信息
 view_node_info() {
     while true; do
-        clear; echo "";
+        clear
+        echo ""
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
             read -p "请输入选项: " choice
-            if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
+            if [[ "$choice" == "1" ]]; then
+                singbox_add_node_orchestrator
+                continue
+            else return; fi
         fi
 
         log_info "当前已配置的节点链接信息："
         echo -e "${CYAN}--------------------------------------------------------------${NC}"
-        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"; all_links=""
+        mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
+        all_links=""
         for i in "${!node_lines[@]}"; do
-            line="${node_lines[$i]}"; node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            line="${node_lines[$i]}"
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
             if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"'); fi
             echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
@@ -1145,12 +1168,27 @@ view_node_info() {
         read -p "请输入选项: " choice
 
         case $choice in
-            1) singbox_add_node_orchestrator; continue ;;
-            2) delete_nodes; continue ;;
-            3) push_nodes; continue ;;
-            4) generate_subscription_link; continue ;; # 新增的选项
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
+        1)
+            singbox_add_node_orchestrator
+            continue
+            ;;
+        2)
+            delete_nodes
+            continue
+            ;;
+        3)
+            push_nodes
+            continue
+            ;;
+        4)
+            generate_subscription_link
+            continue
+            ;; # 新增的选项
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -1165,7 +1203,7 @@ delete_nodes() {
             return # 如果没有节点文件，直接退出函数
         fi
 
-        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+        mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
 
         declare -A node_tags_map
         for i in "${!node_lines[@]}"; do
@@ -1207,7 +1245,7 @@ delete_nodes() {
             read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
             if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
                 log_info "正在删除所有节点..."
-                jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+                jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
                 rm -f "$SINGBOX_NODE_LINKS_FILE"
                 log_info "✅ 所有节点已删除。"
             else
@@ -1248,21 +1286,24 @@ delete_nodes() {
             log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
             cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
             for tag in "${tags_to_delete[@]}"; do
-                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" > "$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" >"$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
             done
             mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
 
             remaining_lines=()
             for i in "${!node_lines[@]}"; do
                 should_keep=true
-                for del_idx in "${indices_to_delete[@]}"; do if [[ $i -eq $del_idx ]]; then should_keep=false; break; fi; done
+                for del_idx in "${indices_to_delete[@]}"; do if [[ $i -eq $del_idx ]]; then
+                    should_keep=false
+                    break
+                fi; done
                 if $should_keep; then remaining_lines+=("${node_lines[$i]}"); fi
             done
 
             if [ ${#remaining_lines[@]} -eq 0 ]; then
                 rm -f "$SINGBOX_NODE_LINKS_FILE"
             else
-                printf "%s\n" "${remaining_lines[@]}" > "$SINGBOX_NODE_LINKS_FILE"
+                printf "%s\n" "${remaining_lines[@]}" >"$SINGBOX_NODE_LINKS_FILE"
             fi
             log_info "✅ 所选节点已删除。"
             systemctl restart sing-box
@@ -1292,10 +1333,13 @@ push_nodes() {
     read -p "请选择推送方式: " push_choice
 
     case $push_choice in
-        1) push_to_sub_store ;;
-        2) push_to_telegram ;;
-        0) return ;;
-        *) log_error "无效选项！"; press_any_key ;;
+    1) push_to_sub_store ;;
+    2) push_to_telegram ;;
+    0) return ;;
+    *)
+        log_error "无效选项！"
+        press_any_key
+        ;;
     esac
 }
 
@@ -1338,7 +1382,7 @@ singbox_do_uninstall() {
     systemctl daemon-reload
 
     # ==================== 关键修正点：最终验证 ====================
-    if command -v sing-box &> /dev/null; then
+    if command -v sing-box &>/dev/null; then
         log_error "卸载失败！系统中仍能找到 'sing-box' 命令。"
         log_warn "请手动执行 'whereis sing-box' 查找并删除残留文件。"
     else
@@ -1360,7 +1404,7 @@ substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
     echo ""
-    log_info "开始执行 Sub-Store 安装流程...";
+    log_info "开始执行 Sub-Store 安装流程..."
     set -e
 
     # ==================== 核心修正点：使用官方推荐的 fnm 安装脚本 ====================
@@ -1384,24 +1428,36 @@ substore_do_install() {
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
+    export PNPM_HOME="$HOME/.local/share/pnpm"
+    export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
     log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
+    mkdir -p "$SUBSTORE_INSTALL_DIR"
+    cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
 
-    log_info "开始配置系统服务..."; echo ""
-    while true; do read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT; FRONTEND_PORT=${FRONTEND_PORT:-3000}; check_port "$FRONTEND_PORT" && break; done
-    echo "";
-    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi; done
+    log_info "开始配置系统服务..."
+    echo ""
+    while true; do
+        read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT
+        FRONTEND_PORT=${FRONTEND_PORT:-3000}
+        check_port "$FRONTEND_PORT" && break
+    done
+    echo ""
+    while true; do
+        read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT
+        BACKEND_PORT=${BACKEND_PORT:-3001}
+        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi
+    done
 
-    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1); log_info "生成的 API 密钥为: ${API_KEY}"
+    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
+    log_info "生成的 API 密钥为: ${API_KEY}"
     NODE_EXEC_PATH=$(which node)
-    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
+    cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
@@ -1421,17 +1477,26 @@ StandardOutput=journal; StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
-    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
-    echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+    log_info "正在启动并启用 sub-store 服务..."
+    systemctl daemon-reload
+    systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
+    systemctl start "$SUBSTORE_SERVICE_NAME"
+    log_info "正在检测服务状态 (等待 5 秒)..."
+    sleep 5
+    set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ 服务状态正常 (active)。"
+        substore_view_access_link
+    else log_error "服务启动失败！请使用日志功能排查。"; fi
+    echo ""
+    read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
 
 # 内部辅助函数：完整安装 Docker 和 Docker Compose
 _install_docker_and_compose() {
     # 检查 Docker 是否已安装
-    if command -v docker &> /dev/null && docker compose version &>/dev/null; then
+    if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "Docker 和 Docker Compose V2 已安装。"
         return 0
     fi
@@ -1452,9 +1517,9 @@ _install_docker_and_compose() {
     os_id=$(. /etc/os-release && echo "$ID")
 
     echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${os_id} \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-      tee /etc/apt/sources.list.d/docker.list > /dev/null
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${os_id} \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
+        tee /etc/apt/sources.list.d/docker.list >/dev/null
     # ====================================================================================
 
     # --- 3. 更新软件包列表并安装 ---
@@ -1467,7 +1532,7 @@ _install_docker_and_compose() {
     set +e
 
     # --- 4. 最终验证 ---
-    if command -v docker &> /dev/null && docker compose version &>/dev/null; then
+    if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "✅ Docker 和 Docker Compose V2 已成功安装！"
         return 0
     else
@@ -1482,9 +1547,9 @@ install_wordpress() {
     local project_dir; while true; do read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir; project_dir=${project_dir:-"/root/wordpress"}; if [ -f "${project_dir}/docker-compose.yml" ]; then log_error "错误：目录 \"${project_dir}\" 下已存在一个 WordPress 站点！"; log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"; echo ""; continue; else break; fi; done
     mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }; log_info "新的 WordPress 将被安装在: $(pwd)"; echo ""
     local db_password; while true; do read -s -p "请输入新的数据库 root 和用户密码: " db_password; echo ""; read -s -p "请再次输入密码以确认: " db_password_confirm; echo ""; if [[ -z "$db_password" ]]; then log_error "密码不能为空！"; elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"; else break; fi; done
-    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
+    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
 
-    # ==================== 核心修正点 1：简化域名输入并自动补全 ====================
+    # --- 核心修正点 1：简化域名输入并自动补全 ---
     echo ""; local domain
     while true; do
         read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
@@ -1493,7 +1558,7 @@ install_wordpress() {
         else break; fi
     done
     local site_url="https://${domain}" # 自动在前面加上 https://
-    # ===========================================================================
+    # ---
 
     log_info "正在生成 docker-compose.yml 文件..."; cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -1514,52 +1579,80 @@ EOF
     echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."; docker compose up -d
     echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
 
-    # ==================== 核心修正点 2：全新的无缝反代流程 ====================
+    # --- 核心修正点 2：全新的无缝反代流程 ---
     log_info "✅ WordPress 容器已成功启动！"
     echo ""
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
 
     if [[ "$setup_proxy_choice" != "n" && "$setup_proxy_choice" != "N" ]]; then
-        # 如果用户选择是，则自动调用反代函数，并把当前设置的域名和端口传给它
+        # 传递不带协议头的纯域名
         setup_auto_reverse_proxy "$domain" "$wp_port"
         echo ""
         log_info "WordPress 配置流程完毕！您现在应该可以通过 ${site_url} 访问您的网站了。"
     else
-        # 如果用户选择否，则显示 IP 访问链接
         log_info "好的，您选择不设置反向代理。"
         log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
         local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
-
         if [ -n "$ipv4_addr" ]; then log_info "IPv4 地址: http://${ipv4_addr}:${wp_port}"; fi
         if [ -n "$ipv6_addr" ]; then log_info "IPv6 地址: http://[${ipv6_addr}]:${wp_port}"; fi
-        log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常，建议后续还是配置反代。"
+        log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常。"
     fi
     press_any_key
-    # ===========================================================================
 }
 # 卸载 Sub-Store
 substore_do_uninstall() {
-    if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
+    if ! is_substore_installed; then
+        log_warn "Sub-Store 未安装。"
+        press_any_key
+        return
+    fi
     echo ""
-    log_warn "你确定要卸载 Sub-Store 吗？此操作不可逆！"; echo ""; read -p "请输入 Y 确认: " choice
-    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "取消卸载。"; press_any_key; return; fi
-    log_info "正在停止并禁用服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME" || true; systemctl disable "$SUBSTORE_SERVICE_NAME" || true
-    log_info "正在删除服务文件..."; rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
-    log_info "正在删除项目文件和 Node.js 环境..."; rm -rf "$SUBSTORE_INSTALL_DIR"; rm -rf "/root/.local"; rm -rf "/root/.pnpm-state.json"
-    log_info "✅ Sub-Store 已成功卸载。"; press_any_key
+    log_warn "你确定要卸载 Sub-Store 吗？此操作不可逆！"
+    echo ""
+    read -p "请输入 Y 确认: " choice
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
+        log_info "取消卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用服务..."
+    systemctl stop "$SUBSTORE_SERVICE_NAME" || true
+    systemctl disable "$SUBSTORE_SERVICE_NAME" || true
+    log_info "正在删除服务文件..."
+    rm -f "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload
+    log_info "正在删除项目文件和 Node.js 环境..."
+    rm -rf "$SUBSTORE_INSTALL_DIR"
+    rm -rf "/root/.local"
+    rm -rf "/root/.pnpm-state.json"
+    log_info "✅ Sub-Store 已成功卸载。"
+    press_any_key
 }
 
 # 更新 Sub-Store
 update_sub_store_app() {
     ensure_dependencies "curl" "unzip"
     echo ""
-    log_info "开始更新 Sub-Store 应用..."; if ! is_substore_installed; then log_error "Sub-Store 尚未安装，无法更新。"; press_any_key; return; fi
-    set -e; cd "$SUBSTORE_INSTALL_DIR"
-    log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    log_info "正在下载最新的前端文件 (dist.zip)..."; curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    log_info "正在部署新版前端..."; rm -rf frontend; unzip -q -o dist.zip && mv dist frontend && rm dist.zip
-    log_info "正在重启 Sub-Store 服务以应用更新..."; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+    log_info "开始更新 Sub-Store 应用..."
+    if ! is_substore_installed; then
+        log_error "Sub-Store 尚未安装，无法更新。"
+        press_any_key
+        return
+    fi
+    set -e
+    cd "$SUBSTORE_INSTALL_DIR"
+    log_info "正在下载最新的后端文件 (sub-store.bundle.js)..."
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    log_info "正在下载最新的前端文件 (dist.zip)..."
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    log_info "正在部署新版前端..."
+    rm -rf frontend
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
+    log_info "正在重启 Sub-Store 服务以应用更新..."
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    sleep 2
+    set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
 }
@@ -1567,7 +1660,7 @@ update_sub_store_app() {
 # 查看访问链接
 substore_view_access_link() {
     echo ""
-    log_info "正在读取配置并生成访问链接...";
+    log_info "正在读取配置并生成访问链接..."
     if ! is_substore_installed; then
         echo ""
         log_error "Sub-Store尚未安装。"
@@ -1604,9 +1697,9 @@ substore_view_access_link() {
 
 # 重置端口
 substore_reset_ports() {
-    log_info "开始重置 Sub-Store 端口...";
+    log_info "开始重置 Sub-Store 端口..."
     if ! is_substore_installed; then
-        log_error "Sub-Store 尚未安装，无法重置端口。";
+        log_error "Sub-Store 尚未安装，无法重置端口。"
         press_any_key
         return
     fi
@@ -1630,18 +1723,24 @@ substore_reset_ports() {
     while true; do
         read -p "请输入新的后端 API 端口 [直接回车则不修改: ${CURRENT_BACKEND_PORT}]: " NEW_BACKEND_PORT
         NEW_BACKEND_PORT=${NEW_BACKEND_PORT:-$CURRENT_BACKEND_PORT}
-        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同！"; continue; fi
+        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then
+            log_error "后端端口不能与前端端口相同！"
+            continue
+        fi
         if [ "$NEW_BACKEND_PORT" == "$CURRENT_BACKEND_PORT" ]; then break; fi
         if check_port "$NEW_BACKEND_PORT"; then break; fi
     done
 
-    log_info "正在更新服务文件...";
+    log_info "正在更新服务文件..."
     set -e
     sed -i "s|^Environment=\"SUB_STORE_FRONTEND_PORT=.*|Environment=\"SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}\"|" "$SUBSTORE_SERVICE_FILE"
     sed -i "s|^Environment=\"SUB_STORE_BACKEND_API_PORT=.*|Environment=\"SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}\"|" "$SUBSTORE_SERVICE_FILE"
 
-    log_info "正在重载并重启服务...";
-    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+    log_info "正在重载并重启服务..."
+    systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    sleep 2
+    set +e
 
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 端口重置成功！"
@@ -1649,9 +1748,12 @@ substore_reset_ports() {
         if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
             NGINX_CONF_PATH="/etc/nginx/sites-available/${REVERSE_PROXY_DOMAIN}.conf"
             if [ -f "$NGINX_CONF_PATH" ]; then
-                log_info "检测到 Nginx 反代配置，正在自动更新端口...";
+                log_info "检测到 Nginx 反代配置，正在自动更新端口..."
                 sed -i "s|proxy_pass http://127.0.0.1:.*|proxy_pass http://127.0.0.1:${NEW_FRONTEND_PORT};|g" "$NGINX_CONF_PATH"
-                if nginx -t >/dev/null 2>&1; then systemctl reload nginx; log_info "Nginx 配置已更新并重载。"; else log_error "更新 Nginx 端口后配置测试失败！"; fi
+                if nginx -t >/dev/null 2>&1; then
+                    systemctl reload nginx
+                    log_info "Nginx 配置已更新并重载。"
+                else log_error "更新 Nginx 端口后配置测试失败！"; fi
             fi
         fi
 
@@ -1667,33 +1769,44 @@ substore_reset_ports() {
 
 # 重置API密钥
 substore_reset_api_key() {
-    if ! is_substore_installed; then log_error "Sub-Store 尚未安装。"; press_any_key; return; fi
-
-    echo ""
-    log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"; echo ""; read -p "请输入 Y 确认: " choice;
-    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
-        log_info "取消操作。"; press_any_key; return;
+    if ! is_substore_installed; then
+        log_error "Sub-Store 尚未安装。"
+        press_any_key
+        return
     fi
 
-    log_info "正在生成新的 API 密钥...";
-    set -e;
+    echo ""
+    log_warn "确定要重置 API 密钥吗？旧的访问链接将立即失效。"
+    echo ""
+    read -p "请输入 Y 确认: " choice
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
+        log_info "取消操作。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在生成新的 API 密钥..."
+    set -e
     NEW_API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
 
-    log_info "正在更新服务文件...";
+    log_info "正在更新服务文件..."
     sed -i "s|^Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=.*|Environment=\"SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}\"|" "$SUBSTORE_SERVICE_FILE"
 
-    log_info "正在重载并重启服务...";
-    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
+    log_info "正在重载并重启服务..."
+    systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    sleep 2
+    set +e
 
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ API 密钥重置成功！";
+        log_info "✅ API 密钥重置成功！"
 
         # ==================== 关键修正点：调用函数显示新链接 ====================
-        substore_view_access_link;
+        substore_view_access_link
         # ======================================================================
 
     else
-        log_error "服务重启失败！";
+        log_error "服务重启失败！"
     fi
     press_any_key
 }
@@ -1703,17 +1816,23 @@ substore_setup_reverse_proxy() {
     ensure_dependencies "nginx"
     clear
     log_info "为保证安全和便捷，强烈建议使用域名和HTTPS访问Sub-Store。"
-    if command -v nginx &> /dev/null; then
-        log_info "检测到 Nginx，将为您生成配置代码和操作指南。"; substore_handle_nginx_proxy
+    if command -v nginx &>/dev/null; then
+        log_info "检测到 Nginx，将为您生成配置代码和操作指南。"
+        substore_handle_nginx_proxy
     else
-        log_warn "未检测到 Nginx。此功能目前仅支持Nginx。";
+        log_warn "未检测到 Nginx。此功能目前仅支持Nginx。"
         # 未来可以加入Caddy的支持
     fi
     press_any_key
 }
 
 substore_handle_nginx_proxy() {
-    echo ""; read -p "请输入您要使用的新域名: " DOMAIN; if [ -z "$DOMAIN" ]; then log_error "域名不能为空！"; return; fi
+    echo ""
+    read -p "请输入您要使用的新域名: " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        log_error "域名不能为空！"
+        return
+    fi
 
     log_info "正在从服务配置中读取 Sub-Store 端口..."
     local FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
@@ -1739,7 +1858,7 @@ substore_handle_nginx_proxy() {
 
     log_info "正在为新域名 ${DOMAIN} 写入 Nginx 配置..."
     NGINX_CONF_PATH="/etc/nginx/sites-available/${DOMAIN}.conf"
-    cat <<EOF > "$NGINX_CONF_PATH"
+    cat <<EOF >"$NGINX_CONF_PATH"
 server {
     listen 80;
     listen [::]:80;
@@ -1767,11 +1886,14 @@ server {
 }
 EOF
     if [ ! -L "/etc/nginx/sites-enabled/${DOMAIN}.conf" ]; then
-        ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/";
+        ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
     fi
 
     log_info "正在重载 Nginx 以应用新域名配置..."
-    if ! nginx -t; then log_error "Nginx 新配置测试失败！请检查。"; return; fi
+    if ! nginx -t; then
+        log_error "Nginx 新配置测试失败！请检查。"
+        return
+    fi
     systemctl reload nginx
 
     log_info "✅ Nginx 反向代理已更新为新域名！"
@@ -1806,7 +1928,7 @@ do_update_script() {
         press_any_key
         return
     fi
-    log_info "下载成功，正在应用更新...";
+    log_info "下载成功，正在应用更新..."
     chmod +x "$temp_script"
     mv "$temp_script" "$SCRIPT_PATH"
 
@@ -1892,24 +2014,24 @@ manage_bbr() {
     sed -i '/net.ipv4.tcp_congestion_control/d' "$sysctl_conf"
 
     case $choice in
-        1)
-            log_info "正在启用 BBR..."
-            echo "net.ipv4.tcp_congestion_control = bbr" >> "$sysctl_conf"
-            ;;
-        2)
-            log_info "正在启用 BBR + FQ..."
-            echo "net.core.default_qdisc = fq" >> "$sysctl_conf"
-            echo "net.ipv4.tcp_congestion_control = bbr" >> "$sysctl_conf"
-            ;;
-        0)
-            log_info "操作已取消。"
-            return
-            ;;
-        *)
-            log_error "无效选项！"
-            press_any_key
-            return
-            ;;
+    1)
+        log_info "正在启用 BBR..."
+        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        ;;
+    2)
+        log_info "正在启用 BBR + FQ..."
+        echo "net.core.default_qdisc = fq" >>"$sysctl_conf"
+        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        ;;
+    0)
+        log_info "操作已取消。"
+        return
+        ;;
+    *)
+        log_error "无效选项！"
+        press_any_key
+        return
+        ;;
     esac
 
     log_info "正在应用配置..."
@@ -1968,9 +2090,12 @@ sys_manage_menu() {
         read -p "请输入选项: " choice
 
         case $choice in
-            1) show_system_info;; 2) clean_system;; 3) change_hostname;; 4) optimize_dns;;
-            5) set_network_priority;; 6) setup_ssh_key;; 7) set_timezone;; 8) manage_bbr;;
-            9) install_warp;; 0) break;; *) log_error "无效选项！"; sleep 1;;
+        1) show_system_info ;; 2) clean_system ;; 3) change_hostname ;; 4) optimize_dns ;;
+        5) set_network_priority ;; 6) setup_ssh_key ;; 7) set_timezone ;; 8) manage_bbr ;;
+        9) install_warp ;; 0) break ;; *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2010,7 +2135,7 @@ _get_unique_tag() {
 
     # 循环检查 final_tag 是否已在 config.json 的 inbounds 中存在
     # 使用 jq 的 any 函数进行高效判断
-    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" > /dev/null; do
+    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" >/dev/null; do
         final_tag="${base_tag}-${counter}"
         ((counter++))
     done
@@ -2022,7 +2147,7 @@ _get_unique_tag() {
 _add_protocol_inbound() {
     local protocol=$1 config=$2 node_link=$3
     log_info "正在为 [${protocol}] 协议添加入站配置..."
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$SINGBOX_CONFIG_FILE.tmp"; then
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp"; then
         log_error "[${protocol}] 协议配置写入失败！请检查JSON格式。"
         # 从失败中恢复，不破坏原始文件
         rm -f "$SINGBOX_CONFIG_FILE.tmp"
@@ -2030,14 +2155,14 @@ _add_protocol_inbound() {
     fi
     # 使用新配置覆盖旧配置
     mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-    echo "$node_link" >> "$SINGBOX_NODE_LINKS_FILE"
+    echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
     log_info "✅ [${protocol}] 协议配置添加成功！"
     return 0
 }
 
 substore_manage_menu() {
     while true; do
-        clear;
+        clear
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
             rp_menu_text="更换反代域名"
@@ -2051,11 +2176,11 @@ substore_manage_menu() {
         echo ""
         echo "1. 启动服务"
         echo ""
-        echo "2. 停止服务";
+        echo "2. 停止服务"
         echo ""
         echo "3. 重启服务"
         echo ""
-        echo "4. 查看状态";
+        echo "4. 查看状态"
         echo ""
         echo "5. 查看日志"
         echo ""
@@ -2074,17 +2199,42 @@ substore_manage_menu() {
         echo -e "${WHITE}-----------------------------${NC}\n"
         read -p "请输入选项: " choice
         case $choice in
-            1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-            2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-            3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-            4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key;;
-            5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager;;
-            6) substore_view_access_link; press_any_key;;
-            7) substore_reset_ports; ;;
-            8) substore_reset_api_key; ;;
-            9) substore_setup_reverse_proxy;;
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
+        1)
+            systemctl start "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        2)
+            systemctl stop "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        3)
+            systemctl restart "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        4)
+            clear
+            systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager
+            press_any_key
+            ;;
+        5)
+            clear
+            journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager
+            ;;
+        6)
+            substore_view_access_link
+            press_any_key
+            ;;
+        7) substore_reset_ports ;;
+        8) substore_reset_api_key ;;
+        9) substore_setup_reverse_proxy ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2111,8 +2261,11 @@ substore_main_menu() {
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
             case $choice in
-                1) substore_manage_menu ;; 2) update_sub_store_app ;;
-                3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) substore_manage_menu ;; 2) update_sub_store_app ;;
+            3) substore_do_uninstall ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
             esac
         else
             echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
@@ -2125,7 +2278,10 @@ substore_main_menu() {
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             read -p "请输入选项: " choice
             case $choice in
-                1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) substore_do_install ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
             esac
         fi
     done
@@ -2144,11 +2300,12 @@ _configure_nginx_proxy() {
     local cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
     local key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
     if [ ! -f "$cert_path" ]; then
-        log_error "未找到预期的证书文件，无法配置 HTTPS。"; return 1;
+        log_error "未找到预期的证书文件，无法配置 HTTPS。"
+        return 1
     fi
 
     # 创建 Nginx 配置文件
-    cat > "$conf_path" <<EOF
+    cat >"$conf_path" <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -2189,7 +2346,8 @@ EOF
 
     log_info "正在测试并重载 Nginx 配置..."
     if ! nginx -t; then
-        log_error "Nginx 配置测试失败！请手动检查。"; return 1;
+        log_error "Nginx 配置测试失败！请手动检查。"
+        return 1
     fi
     systemctl reload nginx
     log_info "✅ Nginx 反向代理配置成功！"
@@ -2212,10 +2370,10 @@ _configure_caddy_proxy() {
     fi
 
     # 将新的反代配置追加到 Caddyfile 末尾
-    echo -e "\n# Auto-generated by vps-toolkit for ${domain}" >> "$caddyfile"
-    echo "${domain} {" >> "$caddyfile"
-    echo "    reverse_proxy 127.0.0.1:${port}" >> "$caddyfile"
-    echo "}" >> "$caddyfile"
+    echo -e "\n# Auto-generated by vps-toolkit for ${domain}" >>"$caddyfile"
+    echo "${domain} {" >>"$caddyfile"
+    echo "    reverse_proxy 127.0.0.1:${port}" >>"$caddyfile"
+    echo "}" >>"$caddyfile"
 
     # 重载 Caddy 使配置生效
     log_info "正在重载 Caddy 服务..."
@@ -2223,7 +2381,8 @@ _configure_caddy_proxy() {
         log_error "Caddyfile 格式化失败，请检查配置。"
     fi
     if ! systemctl reload caddy; then
-        log_error "Caddy 服务重载失败！请手动检查。"; return 1;
+        log_error "Caddy 服务重载失败！请手动检查。"
+        return 1
     fi
     log_info "✅ Caddy 反向代理配置成功！Caddy 会自动处理 HTTPS。"
     return 0
@@ -2242,8 +2401,10 @@ setup_auto_reverse_proxy() {
     if [ -z "$domain_input" ]; then
         while true; do
             read -p "请输入您要设置反代的域名: " domain_input
-            if [[ -z "$domain_input" ]]; then log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain_input"; then log_error "域名格式不正确。"
+            if [[ -z "$domain_input" ]]; then
+                log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain_input"; then
+                log_error "域名格式不正确。"
             else break; fi
         done
     else
@@ -2262,20 +2423,22 @@ setup_auto_reverse_proxy() {
     fi
 
     # 2. 智能环境检测与执行
-    if command -v caddy &> /dev/null; then
+    if command -v caddy &>/dev/null; then
         _configure_caddy_proxy "$domain_input" "$local_port"
-    elif command -v nginx &> /dev/null; then
+    elif command -v nginx &>/dev/null; then
         if ! apply_ssl_certificate "$domain_input"; then
-            log_error "证书处理失败，无法继续配置 Nginx 反代。"; press_any_key; return;
+            log_error "证书处理失败，无法继续配置 Nginx 反代。"
+            press_any_key
+            return
         fi
         _configure_nginx_proxy "$domain_input" "$local_port"
-    elif command -v apache2 &> /dev/null; then
+    elif command -v apache2 &>/dev/null; then
         log_error "Apache 自动配置暂未实现。"
     else
         # 默认安装 Caddy
         log_warn "未检测到任何 Web 服务器。将为您自动安装 Caddy..."
         ensure_dependencies "caddy"
-        if command -v caddy &> /dev/null; then
+        if command -v caddy &>/dev/null; then
             _configure_caddy_proxy "$domain_input" "$local_port"
         else
             log_error "Caddy 安装失败，无法继续。"
@@ -2323,17 +2486,26 @@ main_menu() {
         read -p "请输入选项: " choice
 
         case $choice in
-            1) sys_manage_menu ;;
-            2) singbox_main_menu ;;
-            3) substore_main_menu ;;
-            4) ensure_dependencies "curl"; install_sui ;;
-            5) ensure_dependencies "curl"; install_3xui ;;
-            6) install_wordpress ;;
-            7) setup_auto_reverse_proxy ;;
-            8) do_update_script ;;
-            9) setup_shortcut ;;
-            0) exit 0 ;;
-            *) log_error "无效选项！"; sleep 1 ;;
+        1) sys_manage_menu ;;
+        2) singbox_main_menu ;;
+        3) substore_main_menu ;;
+        4)
+            ensure_dependencies "curl"
+            install_sui
+            ;;
+        5)
+            ensure_dependencies "curl"
+            install_3xui
+            ;;
+        6) install_wordpress ;;
+        7) setup_auto_reverse_proxy ;;
+        8) do_update_script ;;
+        9) setup_shortcut ;;
+        0) exit 0 ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2345,24 +2517,24 @@ post_add_node_menu() {
         read -p "请输入选项: " next_choice
 
         case $next_choice in
-            1)
-                # 调用主创建函数，然后退出当前菜单循环
-                singbox_add_node_orchestrator
-                break
-                ;;
-            2)
-                # 调用节点管理函数，然后退出当前菜单循环
-                view_node_info
-                break
-                ;;
-            0)
-                # 直接退出当前菜单循环
-                break
-                ;;
-            *)
-                log_error "无效选项，请重新输入。"
-                sleep 1
-                ;;
+        1)
+            # 调用主创建函数，然后退出当前菜单循环
+            singbox_add_node_orchestrator
+            break
+            ;;
+        2)
+            # 调用节点管理函数，然后退出当前菜单循环
+            view_node_info
+            break
+            ;;
+        0)
+            # 直接退出当前菜单循环
+            break
+            ;;
+        *)
+            log_error "无效选项，请重新输入。"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2392,64 +2564,132 @@ singbox_add_node_orchestrator() {
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-        1) protocols_to_create=("VLESS");;
-        2) protocols_to_create=("VMess");;
-        3) protocols_to_create=("Trojan");;
-        4) protocols_to_create=("Hysteria2");;
-        5) protocols_to_create=("TUIC");;
-        6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;;
-        0) return;;
-        *) log_error "无效选择，操作中止。"; press_any_key; return;;
+    1) protocols_to_create=("VLESS") ;;
+    2) protocols_to_create=("VMess") ;;
+    3) protocols_to_create=("Trojan") ;;
+    4) protocols_to_create=("Hysteria2") ;;
+    5) protocols_to_create=("TUIC") ;;
+    6)
+        protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+        is_one_click=true
+        ;;
+    0) return ;;
+    *)
+        log_error "无效选择，操作中止。"
+        press_any_key
+        return
+        ;;
     esac
 
-    clear; echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议。${NC}"
+    clear
+    echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议。${NC}"
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
-        echo "";
+        echo ""
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
-            if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain"; then echo ""; log_error "域名格式不正确。";
+            if [[ -z "$domain" ]]; then
+                echo ""
+                log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then
+                echo ""
+                log_error "域名格式不正确。"
             else break; fi
         done
-        if ! apply_ssl_certificate "$domain"; then echo ""; log_error "证书处理失败。"; press_any_key; return; fi
-        cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
-        connect_addr="$domain"; sni_domain="$domain"
+        if ! apply_ssl_certificate "$domain"; then
+            echo ""
+            log_error "证书处理失败。"
+            press_any_key
+            return
+        fi
+        cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"
+        key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
+        connect_addr="$domain"
+        sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
+        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+        ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: ${ipv4_addr}\n\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
+            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: ${ipv4_addr}\n\n2. IPv6: ${ipv6_addr}\n"
+            read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then echo "";log_info  "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; then echo "";log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else echo "";log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
-        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
-        if ! _create_self_signed_cert "$sni_domain"; then echo ""; log_error "自签名证书处理失败。"; press_any_key; return; fi
-        cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
+        elif [ -n "$ipv4_addr" ]; then
+            echo ""
+            log_info "将自动使用 IPv4 地址。"
+            connect_addr="$ipv4_addr"
+        elif [ -n "$ipv6_addr" ]; then
+            echo ""
+            log_info "将自动使用 IPv6 地址。"
+            connect_addr="[${ipv6_addr}]"
+        else
+            echo ""
+            log_error "无法获取任何公网 IP 地址！"
+            press_any_key
+            return
+        fi
+        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
+        sni_domain=${sni_input:-"www.bing.com"}
+        if ! _create_self_signed_cert "$sni_domain"; then
+            echo ""
+            log_error "自签名证书处理失败。"
+            press_any_key
+            return
+        fi
+        cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"
+        key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
-        log_error "无效证书选择。"; press_any_key; return
+        log_error "无效证书选择。"
+        press_any_key
+        return
     fi
 
-    local used_ports_for_this_run=();
+    local used_ports_for_this_run=()
     if $is_one_click; then
-        echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"
+        echo ""
+        log_info "您已选择一键模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
-                echo "";
-                local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+                echo ""
+                local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "
+                if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
                 read -p "$(echo -e "${port_prompt}")" port_input
-                if [ -z "$port_input" ]; then port_input=$(generate_random_port); echo ""; log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
-                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then echo ""; log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+                if [ -z "$port_input" ]; then
+                    port_input=$(generate_random_port)
+                    echo ""
+                    log_info "已为 [${p}] 生成随机端口: ${port_input}"
+                fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                    echo ""
+                    log_error "端口号需为 1-65535。"
+                elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                    ports[$p]=$port_input
+                    used_ports_for_this_run+=("$port_input")
+                    break
+                fi
             done
         done
     else
         local protocol_name=${protocols_to_create[0]}
         while true; do
-            local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
-            echo "";
+            local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "
+            if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+            echo ""
             read -p "$(echo -e "${port_prompt}")" port_input
-            if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi
-            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then echo ""; log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+            if [ -z "$port_input" ]; then
+                port_input=$(generate_random_port)
+                echo ""
+                log_info "已生成随机端口: ${port_input}"
+            fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                echo ""
+                log_error "端口号需为 1-65535。"
+            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                ports[$protocol_name]=$port_input
+                used_ports_for_this_run+=("$port_input")
+                break
+            fi
         done
     fi
 
@@ -2471,44 +2711,75 @@ singbox_add_node_orchestrator() {
 
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
-        echo "";
+        echo ""
 
         # 使用新的 Tag 生成逻辑
         local tag_base="${country_code}-${region_name}-${custom_id}"
         local base_tag_for_protocol="${tag_base}-${protocol}"
 
-        local tag; tag=$(_get_unique_tag "$base_tag_for_protocol"); log_info "已为此节点分配唯一 Tag: ${tag}"
+        local tag
+        tag=$(_get_unique_tag "$base_tag_for_protocol")
+        log_info "已为此节点分配唯一 Tag: ${tag}"
 
-        local uuid=$(uuidgen); local password=$(generate_random_password)
-        local config=""; local node_link=""; local current_port=${ports[$protocol]}
+        local uuid=$(uuidgen)
+        local password=$(generate_random_password)
+        local config=""
+        local node_link=""
+        local current_port=${ports[$protocol]}
         local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
         local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
         case $protocol in
-            "VLESS"|"VMess"|"Trojan")
-                config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[$(if [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]; then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":${tls_config_tcp},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                if [[ "$protocol" == "VLESS" ]]; then node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F#${tag}";
-                elif [[ "$protocol" == "VMess" ]]; then local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${connect_addr}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${sni_domain}\",\"path\":\"/\",\"tls\":\"tls\"}"; node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)";
-                else node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/#${tag}"; fi
-                ;;
-            "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
-                node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3#${tag}"
-                ;;
-            "TUIC")
-                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
-                node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr#${tag}"
-                ;;
+        "VLESS" | "VMess" | "Trojan")
+            config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[$(if [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]; then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":${tls_config_tcp},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+            if [[ "$protocol" == "VLESS" ]]; then
+                node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F#${tag}"
+            elif [[ "$protocol" == "VMess" ]]; then
+                local vmess_json="{\"v\":\"2\",\"ps\":\"${tag}\",\"add\":\"${connect_addr}\",\"port\":\"${current_port}\",\"id\":\"${uuid}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${sni_domain}\",\"path\":\"/\",\"tls\":\"tls\"}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+            else node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/#${tag}"; fi
+            ;;
+        "Hysteria2")
+            config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
+            node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3#${tag}"
+            ;;
+        "TUIC")
+            config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
+            node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr#${tag}"
+            ;;
         esac
-        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then ((success_count++)); final_node_link="$node_link"; fi
+        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
+            ((success_count++))
+            final_node_link="$node_link"
+        fi
     done
 
     if [ "$success_count" -gt 0 ]; then
-        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."; systemctl restart sing-box; sleep 2
+        log_info "共成功添加 ${success_count} 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box
+        sleep 2
         if systemctl is-active --quiet sing-box; then
-            log_info "Sing-Box 重启成功。"; if [ "$success_count" -eq 1 ] && ! $is_one_click; then echo ""; log_info "✅ 节点添加成功！分享链接如下："; echo -e "${CYAN}--------------------------------------------------------------${NC}"; echo -e "\n${YELLOW}${final_node_link}${NC}\n"; echo -e "${CYAN}--------------------------------------------------------------${NC}"; press_any_key; else log_info "正在显示所有节点信息..."; sleep 1; view_node_info; fi
-        else log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"; press_any_key; fi
-    else log_error "没有任何节点被成功添加。"; press_any_key; fi
+            log_info "Sing-Box 重启成功。"
+            if [ "$success_count" -eq 1 ] && ! $is_one_click; then
+                echo ""
+                log_info "✅ 节点添加成功！分享链接如下："
+                echo -e "${CYAN}--------------------------------------------------------------${NC}"
+                echo -e "\n${YELLOW}${final_node_link}${NC}\n"
+                echo -e "${CYAN}--------------------------------------------------------------${NC}"
+                press_any_key
+            else
+                log_info "正在显示所有节点信息..."
+                sleep 1
+                view_node_info
+            fi
+        else
+            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            press_any_key
+        fi
+    else
+        log_error "没有任何节点被成功添加。"
+        press_any_key
+    fi
 }
 singbox_main_menu() {
     while true; do
@@ -2528,33 +2799,51 @@ singbox_main_menu() {
             echo -e "${CYAN}║${NC}   1. 新增节点                                    ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   2. 管理节点                                    ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   3. 启动 Sing-Box                               ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   4. 停止 Sing-Box                               ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   5. 重启 Sing-Box                               ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   6. 查看日志                                    ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╟──────────────────────────────────────────────────╢${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   7. ${RED}卸载 Sing-Box${NC}                               ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}║${NC}   0. 返回主菜单                                  ${CYAN}║${NC}"
-             echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
             echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_orchestrator;; 2) view_node_info;;
-                3) systemctl start sing-box; log_info "命令已发送"; sleep 1;;
-                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1;;
-                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1;;
-                6) clear; journalctl -u sing-box -f --no-pager;;
-                7) singbox_do_uninstall;; 0) break;; *) log_error "无效选项！"; sleep 1;;
+            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
+            3)
+                systemctl start sing-box
+                log_info "命令已发送"
+                sleep 1
+                ;;
+            4)
+                systemctl stop sing-box
+                log_info "命令已发送"
+                sleep 1
+                ;;
+            5)
+                systemctl restart sing-box
+                log_info "命令已发送"
+                sleep 1
+                ;;
+            6)
+                clear
+                journalctl -u sing-box -f --no-pager
+                ;;
+            7) singbox_do_uninstall ;; 0) break ;; *)
+                log_error "无效选项！"
+                sleep 1
+                ;;
             esac
         else
             echo -e "${CYAN}║${NC}  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║${NC}"
@@ -2568,7 +2857,10 @@ singbox_main_menu() {
             echo ""
             read -p "请输入选项: " choice
             case $choice in
-                1) singbox_do_install;; 0) break;; *) log_error "无效选项！"; sleep 1;;
+            1) singbox_do_install ;; 0) break ;; *)
+                log_error "无效选项！"
+                sleep 1
+                ;;
             esac
         fi
     done
