@@ -61,25 +61,6 @@ generate_random_password() {
 _is_port_available() {
     local port_to_check=$1
     local used_ports_array_name=$2
-    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
-
-    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
-        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
-        return 1
-    fi
-
-    for used_port in "${used_ports[@]}"; do
-        if [ "$port_to_check" == "$used_port" ]; then
-            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
-            return 1
-        fi
-    done
-    return 0
-}
-# 检查端口是否可用 (增强版)
-_is_port_available() {
-    local port_to_check=$1
-    local used_ports_array_name=$2
     # 转换为本地数组引用
     eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
@@ -97,6 +78,17 @@ _is_port_available() {
         fi
     done
     return 0
+}
+# 验证域名格式是否有效
+_is_domain_valid() {
+    local domain_to_check=$1
+    # 此正则表达式检查域名是否由有效的字符、标签和 TLD 组成
+    # 它不允许标签以连字符开头或结尾，并要求 TLD 至少为2个字母。
+    if [[ $domain_to_check =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]; then
+        return 0 # 验证成功
+    else
+        return 1 # 验证失败
+    fi
 }
 # --- 核心功能：依赖项管理 ---
 ensure_dependencies() {
@@ -720,11 +712,11 @@ get_domain_and_common_config() {
     local type_flag=$1
     echo
     while true; do
-        echo ""
-        read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
-        if [[ -z "$domain_name" ]]; then log_error "\n域名不能为空"; continue; fi
-        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "\n无效的域名格式"; continue; fi
-        break
+        read -p "请输入您已解析到本机的域名: " domain
+        if [[ -z "$domain" ]]; then log_error "域名不能为空！"
+        elif ! echo "$domain" | grep -Pq '...'; then
+            log_error "域名格式不正确。"
+        else break; fi
     done
 
     if [[ $type_flag -eq 2 ]]; then # Hysteria2
