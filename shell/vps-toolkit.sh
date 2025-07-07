@@ -2447,7 +2447,7 @@ singbox_add_node_orchestrator() {
 
     if [ "$cert_choice" == "1" ]; then
         while true; do
-            echo ""
+            echo "错误"
             read -p "请输入您已解析到本机的域名: " domain
             if [[ -z "$domain" ]]; then
                 echo ""
