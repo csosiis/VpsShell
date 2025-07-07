@@ -84,7 +84,7 @@ _is_domain_valid() {
     local domain_to_check=$1
     # 此正则表达式检查域名是否由有效的字符、标签和 TLD 组成
     # 它不允许标签以连字符开头或结尾，并要求 TLD 至少为2个字母。
-    if [[ $domain_to_check =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]; then
+    if [[ $domain_to_check =^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
         return 0 # 验证成功
     else
         return 1 # 验证失败
@@ -2294,10 +2294,13 @@ setup_auto_reverse_proxy() {
     local domain local_port
     while true; do
         read -p "请输入您要设置反代的域名: " domain
-        if [[ -z "$domain" ]]; then log_error "域名不能为空！"
-        elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then
+        if [[ -z "$domain" ]]; then
+            log_error "域名不能为空！"
+        elif ! _is_domain_valid "$domain"; then
             log_error "域名格式不正确，请重新输入。"
-        else break; fi
+        else
+            break
+        fi
     done
     while true; do
         read -p "请输入要代理到的本地端口 (例如 8080): " local_port
