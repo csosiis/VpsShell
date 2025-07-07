@@ -2300,8 +2300,7 @@ singbox_add_node_orchestrator() {
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
     custom_id=${custom_id:-"Jcole"}
     local geo_info_json
-    # 强制API返回英文地理位置信息
-    geo_info_json=$(curl -s "ip-api.com/json?lang=en")
+    geo_info_json=$(curl -s ip-api.com/json)
     local country_code
     country_code=$(echo "$geo_info_json" | jq -r '.countryCode')
     local region_name
