@@ -1542,56 +1542,95 @@ _install_docker_and_compose() {
 }
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    if ! _install_docker_and_compose; then log_error "Docker 环境准备失败。"; press_any_key; return; fi
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
+        press_any_key
+        return
+    fi
     clear; log_info "开始使用 Docker Compose 搭建 WordPress..."; echo ""
-    local project_dir; while true; do read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir; project_dir=${project_dir:-"/root/wordpress"}; if [ -f "${project_dir}/docker-compose.yml" ]; then log_error "错误：目录 \"${project_dir}\" 下已存在一个 WordPress 站点！"; log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"; echo ""; continue; else break; fi; done
-    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }; log_info "新的 WordPress 将被安装在: $(pwd)"; echo ""
+    local project_dir;
+    while true; do
+        read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
+        project_dir=${project_dir:-"/root/wordpress"}
+        if [ -f "${project_dir}/docker-compose.yml" ]; then
+            log_error "错误：目录 \"${project_dir}\" 下已存在一个 WordPress 站点！"
+            log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
+            echo ""
+            continue
+        else
+            break
+        fi
+    done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
+    log_info "新的 WordPress 将被安装在: $(pwd)"; echo ""
     local db_password; while true; do read -s -p "请输入新的数据库 root 和用户密码: " db_password; echo ""; read -s -p "请再次输入密码以确认: " db_password_confirm; echo ""; if [[ -z "$db_password" ]]; then log_error "密码不能为空！"; elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"; else break; fi; done
     echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
+    echo ""; local domain; while true; do read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain; if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi; done
+    local site_url="https://${domain}"
 
-    # --- 核心修正点 1：简化域名输入并自动补全 ---
-    echo ""; local domain
-    while true; do
-        read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
-        if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"
-        elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"
-        else break; fi
-    done
-    local site_url="https://${domain}" # 自动在前面加上 https://
-    # ---
-
-    log_info "正在生成 docker-compose.yml 文件..."; cat > docker-compose.yml <<EOF
+    # ==================== 核心修正点：使用标准、多行的 YAML 格式 ====================
+    log_info "正在生成 docker-compose.yml 文件..."
+    cat > docker-compose.yml <<EOF
 version: '3.8'
+
 services:
   db:
-    image: mysql:8.0; container_name: ${project_dir##*/}_db; restart: always
-    environment: { MYSQL_ROOT_PASSWORD: '${db_password}', MYSQL_DATABASE: 'wordpress', MYSQL_USER: 'wp_user', MYSQL_PASSWORD: '${db_password}' }
-    volumes: [ db_data:/var/lib/mysql ]; networks: [ wordpress_net ]
+    image: mysql:8.0
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=${db_password}
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wp_user
+      - MYSQL_PASSWORD=${db_password}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - wordpress_net
+
   wordpress:
-    depends_on: [ db ]; image: wordpress:latest; container_name: ${project_dir##*/}_app; restart: always
-    ports: [ "${wp_port}:80" ]
-    environment: { WORDPRESS_DB_HOST: 'db:3306', WORDPRESS_DB_USER: 'wp_user', WORDPRESS_DB_PASSWORD: '${db_password}', WORDPRESS_DB_NAME: 'wordpress', WORDPRESS_SITEURL: '${site_url}', WORDPRESS_HOME: '${site_url}' }
-    volumes: [ wp_files:/var/www/html ]; networks: [ wordpress_net ]
-volumes: { db_data: null, wp_files: null }
-networks: { wordpress_net: null }
+    depends_on:
+      - db
+    image: wordpress:latest
+    container_name: ${project_dir##*/}_app
+    restart: always
+    ports:
+      - "${wp_port}:80"
+    environment:
+      - WORDPRESS_DB_HOST=db:3306
+      - WORDPRESS_DB_USER=wp_user
+      - WORDPRESS_DB_PASSWORD=${db_password}
+      - WORDPRESS_DB_NAME=wordpress
+      - WORDPRESS_SITEURL=${site_url}
+      - WORDPRESS_HOME=${site_url}
+    volumes:
+      - wp_files:/var/www/html
+    networks:
+      - wordpress_net
+
+volumes:
+  db_data:
+  wp_files:
+
+networks:
+  wordpress_net:
 EOF
+    # =================================================================================
+
     if [ ! -f "docker-compose.yml" ]; then log_error "docker-compose.yml 文件创建失败！"; press_any_key; return; fi
-    echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."; docker compose up -d
+    echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待...";
+    docker compose up -d
     echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
 
-    # --- 核心修正点 2：全新的无缝反代流程 ---
     log_info "✅ WordPress 容器已成功启动！"
     echo ""
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
-
     if [[ "$setup_proxy_choice" != "n" && "$setup_proxy_choice" != "N" ]]; then
-        # 传递不带协议头的纯域名
         setup_auto_reverse_proxy "$domain" "$wp_port"
-        echo ""
-        log_info "WordPress 配置流程完毕！您现在应该可以通过 ${site_url} 访问您的网站了。"
+        echo ""; log_info "WordPress 配置流程完毕！您现在应该可以通过 ${site_url} 访问您的网站了。"
     else
-        log_info "好的，您选择不设置反向代理。"
-        log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
+        log_info "好的，您选择不设置反向代理。"; log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
         local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ]; then log_info "IPv4 地址: http://${ipv4_addr}:${wp_port}"; fi
