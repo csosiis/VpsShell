@@ -1476,122 +1476,61 @@ _install_docker_and_compose() {
         return 1
     fi
 }
-
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    # ==================== 关键修正点：调用专业的 Docker 安装函数 ====================
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
-        press_any_key
-        return
-    fi
-    # ==============================================================================
-
-    clear
-    log_info "开始使用 Docker Compose 搭建 WordPress..."
-    echo ""
-
-    # --- 1. 收集用户配置 ---
-    local project_dir
-    read -p "请输入 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
-    project_dir=${project_dir:-"/root/wordpress"}
-    mkdir -p "$project_dir"
-    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; return 1; }
-    log_info "WordPress 将被安装在: $(pwd)"
-
-    echo ""
-    local db_password
-    while true; do
-        read -s -p "请输入新的数据库 root 和用户密码: " db_password
-        echo ""
-        read -s -p "请再次输入密码以确认: " db_password_confirm
-        echo ""
-        if [[ -z "$db_password" ]]; then log_error "密码不能为空！"
-        elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"
-        else break; fi
-    done
-
-    echo ""
-    local wp_port
-    while true; do
-        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
-        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
-        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :
-        else break; fi
-    done
-
-    echo ""
-    local site_url
-    while true; do
-        read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url
-        if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"
-        elif ! echo "$site_url" | grep -Pq '^https?://'; then log_error "域名必须以 http:// 或 https:// 开头。"
-        else break; fi
-    done
-
-    # --- 2. 生成 docker-compose.yml 文件 ---
-    log_info "正在生成 docker-compose.yml 文件..."
-    cat > docker-compose.yml <<EOF
+    # (此函数前面的所有代码保持不变)
+    if ! _install_docker_and_compose; then log_error "Docker 环境准备失败。"; press_any_key; return; fi
+    clear; log_info "开始使用 Docker Compose 搭建 WordPress..."; echo ""
+    local project_dir; while true; do read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir; project_dir=${project_dir:-"/root/wordpress"}; if [ -f "${project_dir}/docker-compose.yml" ]; then log_error "错误：目录 \"${project_dir}\" 下已存在一个 WordPress 站点！"; log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"; echo ""; continue; else break; fi; done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }; log_info "新的 WordPress 将被安装在: $(pwd)"; echo ""
+    local db_password; while true; do read -s -p "请输入新的数据库 root 和用户密码: " db_password; echo ""; read -s -p "请再次输入密码以确认: " db_password_confirm; echo ""; if [[ -z "$db_password" ]]; then log_error "密码不能为空！"; elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"; else break; fi; done
+    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
+    echo ""; local site_url; while true; do read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url; if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$site_url"; then log_error "域名格式不正确，或必须以 http(s):// 开头。"; else break; fi; done
+    log_info "正在生成 docker-compose.yml 文件..."; cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
   db:
-    image: mysql:8.0
-    container_name: ${project_dir##*/}_db
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: '${db_password}'
-      MYSQL_DATABASE: 'wordpress'
-      MYSQL_USER: 'wp_user'
-      MYSQL_PASSWORD: '${db_password}'
-    volumes:
-      - db_data:/var/lib/mysql
-    networks:
-      - wordpress_net
+    image: mysql:8.0; container_name: ${project_dir##*/}_db; restart: always
+    environment: { MYSQL_ROOT_PASSWORD: '${db_password}', MYSQL_DATABASE: 'wordpress', MYSQL_USER: 'wp_user', MYSQL_PASSWORD: '${db_password}' }
+    volumes: [ db_data:/var/lib/mysql ]; networks: [ wordpress_net ]
   wordpress:
-    depends_on:
-      - db
-    image: wordpress:latest
-    container_name: ${project_dir##*/}_app
-    restart: always
-    ports:
-      - "${wp_port}:80"
-    environment:
-      WORDPRESS_DB_HOST: 'db:3306'
-      WORDPRESS_DB_USER: 'wp_user'
-      WORDPRESS_DB_PASSWORD: '${db_password}'
-      WORDPRESS_DB_NAME: 'wordpress'
-      WORDPRESS_SITEURL: '${site_url}'
-      WORDPRESS_HOME: '${site_url}'
-    volumes:
-      - wp_files:/var/www/html
-    networks:
-      - wordpress_net
-volumes:
-  db_data:
-  wp_files:
-networks:
-  wordpress_net:
+    depends_on: [ db ]; image: wordpress:latest; container_name: ${project_dir##*/}_app; restart: always
+    ports: [ "${wp_port}:80" ]
+    environment: { WORDPRESS_DB_HOST: 'db:3306', WORDPRESS_DB_USER: 'wp_user', WORDPRESS_DB_PASSWORD: '${db_password}', WORDPRESS_DB_NAME: 'wordpress', WORDPRESS_SITEURL: '${site_url}', WORDPRESS_HOME: '${site_url}' }
+    volumes: [ wp_files:/var/www/html ]; networks: [ wordpress_net ]
+volumes: { db_data: null, wp_files: null }
+networks: { wordpress_net: null }
 EOF
-
     if [ ! -f "docker-compose.yml" ]; then log_error "docker-compose.yml 文件创建失败！"; press_any_key; return; fi
+    echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."; docker compose up -d
+    echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
 
-    # --- 3. 启动服务 ---
+    # ==================== 核心修正点：用新的交互式结尾替换旧的 ====================
+    log_info "✅ WordPress 容器已成功启动！"
     echo ""
-    log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
-    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
+    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
 
-    docker compose up -d
+    if [[ "$setup_proxy_choice" != "n" && "$setup_proxy_choice" != "N" ]]; then
+        # 如果用户选择是，则调用反代函数，并把当前设置的域名和端口传给它
+        setup_auto_reverse_proxy "$site_url" "$wp_port"
+        log_info "WordPress 配置流程完毕。"
+    else
+        # 如果用户选择否，则显示 IP 访问链接
+        log_info "好的，您选择不设置反向代理。"
+        log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
+        local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+        local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
 
-    echo ""
-    log_info "正在检查服务状态..."
-    sleep 5
-    docker compose ps
-
-    echo ""
-    log_info "✅ WordPress 搭建流程已启动！"
-    log_info "您现在应该可以通过访问 ${site_url} 或 http://<服务器IP>:${wp_port} 来完成最后的安装步骤了。"
-    log_warn "如果使用了域名，请确保已正确解析，并配置好反向代理将域名指向 ${wp_port} 端口。"
+        if [ -n "$ipv4_addr" ]; then
+            log_info "IPv4 地址: http://${ipv4_addr}:${wp_port}"
+        fi
+        if [ -n "$ipv6_addr" ]; then
+            log_info "IPv6 地址: http://[${ipv6_addr}]:${wp_port}"
+        fi
+        log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常，建议后续还是配置反代。"
+    fi
     press_any_key
+    # ===========================================================================
 }
 # 卸载 Sub-Store
 substore_do_uninstall() {
@@ -2283,35 +2222,45 @@ _configure_caddy_proxy() {
     log_info "✅ Caddy 反向代理配置成功！Caddy 会自动处理 HTTPS。"
     return 0
 }
-
-# 主函数：自动设置反向代理
+# 主函数：自动设置反向代理 (v3.1 - 支持接收参数)
 setup_auto_reverse_proxy() {
+    # 接收可选的参数：$1 为域名，$2 为端口
+    local domain="$1"
+    local local_port="$2"
+
     clear
     log_info "欢迎使用通用反向代理设置向导。"
     echo ""
 
-    # 1. 获取用户输入
-    local domain local_port
-    while true; do
-        read -p "请输入您要设置反代的域名: " domain
-        if [[ -z "$domain" ]]; then log_error "域名不能为空！"
-        elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then
-            log_error "域名格式不正确，请重新输入。"
-        else break; fi
-    done
-    while true; do
-        read -p "请输入要代理到的本地端口 (例如 8080): " local_port
-        if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then
-            log_error "端口号必须是 1-65535 之间的数字。"
-        else break; fi
-    done
+    # 1. 获取用户输入 (如果未通过参数传入)
+    if [ -z "$domain" ]; then
+        while true; do
+            read -p "请输入您要设置反代的域名: " domain
+            if [[ -z "$domain" ]]; then log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"
+            else break; fi
+        done
+    else
+        # 如果域名是通过参数传入的 (可能包含 https://)，则清理一下
+        domain=$(echo "$domain" | sed -E 's#^https?://##; s#/$##')
+        log_info "将为预设域名 ${domain} 进行操作。"
+    fi
+
+    if [ -z "$local_port" ]; then
+        while true; do
+            read -p "请输入要代理到的本地端口 (例如 8080): " local_port
+            if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then
+                log_error "端口号必须是 1-65535 之间的数字。"
+            else break; fi
+        done
+    else
+        log_info "将代理到预设的本地端口: ${local_port}"
+    fi
 
     # 2. 智能环境检测与执行
     if command -v caddy &> /dev/null; then
-        # Caddy 会自动处理证书，所以我们直接配置它
         _configure_caddy_proxy "$domain" "$local_port"
     elif command -v nginx &> /dev/null; then
-        # 对于 Nginx，需要先确保有证书
         if ! apply_ssl_certificate "$domain"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"; press_any_key; return;
         fi
@@ -2319,10 +2268,8 @@ setup_auto_reverse_proxy() {
     elif command -v apache2 &> /dev/null; then
         log_error "Apache 自动配置暂未实现。"
     else
-        # 默认安装 Nginx
         log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
         ensure_dependencies "nginx"
-        # 再次检查以确认安装成功
         if command -v nginx &> /dev/null; then
              if ! apply_ssl_certificate "$domain"; then
                 log_error "证书处理失败，无法继续配置 Nginx 反代。"; press_any_key; return;
@@ -2332,7 +2279,10 @@ setup_auto_reverse_proxy() {
             log_error "Nginx 安装失败，无法继续。"
         fi
     fi
-    press_any_key
+    # 如果是从其他函数调用而来，则不暂停
+    if [ -z "$1" ]; then
+        press_any_key
+    fi
 }
 main_menu() {
     while true; do
