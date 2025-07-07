@@ -2446,7 +2446,19 @@ singbox_add_node_orchestrator() {
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
-        while true; do echo ""; read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"; elif ! echo ""; echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then  log_error "域名格式不正确。"; else break; fi; done
+        while true; do
+            echo ""
+            read -p "请输入您已解析到本机的域名: " domain
+            if [[ -z "$domain" ]]; then
+                echo ""
+                log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then
+                echo ""
+                log_error "域名格式不正确，请重新输入。"
+            else
+                break
+            fi
+        done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"; connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
