@@ -2431,15 +2431,38 @@ singbox_add_node_orchestrator() {
     local protocols_to_create=()
     local is_one_click=false
 
-    # (函数前面的协议选择菜单逻辑保持不变)
-    clear; log_info "欢迎使用 Sing-Box 节点创建向导 v4.0"; echo -e "\n请选择您要搭建的节点类型：\n"; echo -e "1. VLESS\n2. VMess\n3. Trojan\n4. Hysteria2\n\n${CYAN}-------------------------------------${NC}\n"; echo -e "5. 一键生成以上全部 4 种协议节点\n\n${CYAN}-------------------------------------${NC}\n\n0. 返回上一级菜单\n"; read -p "请输入选项: " protocol_choice; case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
+    clear
+    log_info "欢迎使用 Sing-Box 节点创建向导 v4.0"
+    echo -e "\n请选择您要搭建的节点类型：\n"
+    echo -e "1. VLESS\n2. VMess\n3. Trojan\n4. Hysteria2\n5. TUIC v5 (UDP)\n\n${CYAN}-------------------------------------${NC}\n"
+    echo -e "6. 一键生成以上全部 5 种协议节点\n\n${CYAN}-------------------------------------${NC}\n\n0. 返回上一级菜单\n"
+    read -p "请输入选项: " protocol_choice
 
-    # (证书选择和端口输入的逻辑也保持不变)
-    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"; echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"; read -p "请输入选项 (1-2): " cert_choice
+    case $protocol_choice in
+        1) protocols_to_create=("VLESS");;
+        2) protocols_to_create=("VMess");;
+        3) protocols_to_create=("Trojan");;
+        4) protocols_to_create=("Hysteria2");;
+        5) protocols_to_create=("TUIC");;
+        6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;;
+        0) return;;
+        *) log_error "无效选择，操作中止。"; press_any_key; return;;
+    esac
+
+    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"
+    echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"
+    read -p "请输入选项 (1-2): " cert_choice
+
     if [ "$cert_choice" == "1" ]; then
-        while true; do read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi; done
+        while true; do
+            read -p "请输入您已解析到本机的域名: " domain
+            if [[ -z "$domain" ]]; then log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。";
+            else break; fi
+        done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
-        cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"; connect_addr="$domain"; sni_domain="$domain"
+        cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"
+        connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
@@ -2452,12 +2475,32 @@ singbox_add_node_orchestrator() {
     else
         log_error "无效证书选择。"; press_any_key; return
     fi
-    local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; else local protocol_name=${protocols_to_create[0]}; while true; do local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; fi
+
+    local used_ports_for_this_run=();
+    if $is_one_click; then
+        echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+                read -p "$(echo -e "${port_prompt}")" port_input
+                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+            done
+        done
+    else
+        local protocol_name=${protocols_to_create[0]}
+        while true; do
+            local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
+            read -p "$(echo -e "${port_prompt}")" port_input
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+        done
+    fi
 
     # ==================== 核心修正点：新的 Tag 生成逻辑 ====================
     # 统一询问自定义标识，并设置默认值
-    read -p "请输入自定义标识 (如 Google, 回车则默认用 Csos): " custom_id
-    custom_id=${custom_id:-"Csos"}
+    read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
+    custom_id=${custom_id:-"Jcole"}
 
     # 获取详细地理位置信息
     local geo_info_json
@@ -2495,6 +2538,10 @@ singbox_add_node_orchestrator() {
             "Hysteria2")
                 config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
                 node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3#${tag}"
+                ;;
+            "TUIC")
+                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
+                node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr#${tag}"
                 ;;
         esac
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then ((success_count++)); final_node_link="$node_link"; fi
