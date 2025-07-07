@@ -2431,7 +2431,7 @@ singbox_add_node_orchestrator() {
     local protocols_to_create=()
     local is_one_click=false
 
-    lear;
+    clear;
     echo -e "${CYAN}-------------------------------------${NC}\n "
     echo -e "        ${WHITE}请选择要搭建的节点类型${NC}"
     echo -e "\n${CYAN}-------------------------------------${NC}\n"
