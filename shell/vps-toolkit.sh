@@ -61,6 +61,25 @@ generate_random_password() {
 _is_port_available() {
     local port_to_check=$1
     local used_ports_array_name=$2
+    eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
+
+    if ss -tlnu | grep -q -E ":${port_to_check}\s"; then
+        log_warn "端口 ${port_to_check} 已被系统其他服务占用。"
+        return 1
+    fi
+
+    for used_port in "${used_ports[@]}"; do
+        if [ "$port_to_check" == "$used_port" ]; then
+            log_warn "端口 ${port_to_check} 即将被本次操作中的其他协议使用。"
+            return 1
+        fi
+    done
+    return 0
+}
+# 检查端口是否可用 (增强版)
+_is_port_available() {
+    local port_to_check=$1
+    local used_ports_array_name=$2
     # 转换为本地数组引用
     eval "local used_ports=(\"\${${used_ports_array_name}[@]}\")"
 
@@ -78,15 +97,6 @@ _is_port_available() {
         fi
     done
     return 0
-}
-# 验证域名格式是否有效
-_is_domain_valid() {
-    local domain_to_check=$1
-    if [[ $domain_to_check =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$ ]]; then
-        return 0 # 验证成功
-    else
-        return 1 # 验证失败
-    fi
 }
 # --- 核心功能：依赖项管理 ---
 ensure_dependencies() {
@@ -710,11 +720,11 @@ get_domain_and_common_config() {
     local type_flag=$1
     echo
     while true; do
-        read -p "请输入您已解析到本机的域名: " domain
-        if [[ -z "$domain" ]]; then log_error "域名不能为空！"
-        elif ! echo "$domain" | grep -Pq '...'; then
-            log_error "域名格式不正确。"
-        else break; fi
+        echo ""
+        read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
+        if [[ -z "$domain_name" ]]; then log_error "\n域名不能为空"; continue; fi
+        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then log_error "\n无效的域名格式"; continue; fi
+        break
     done
 
     if [[ $type_flag -eq 2 ]]; then # Hysteria2
@@ -2292,13 +2302,10 @@ setup_auto_reverse_proxy() {
     local domain local_port
     while true; do
         read -p "请输入您要设置反代的域名: " domain
-        if [[ -z "$domain" ]]; then
-            log_error "域名不能为空！"
-        elif ! _is_domain_valid "$domain"; then
+        if [[ -z "$domain" ]]; then log_error "域名不能为空！"
+        elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then
             log_error "域名格式不正确，请重新输入。"
-        else
-            break
-        fi
+        else break; fi
     done
     while true; do
         read -p "请输入要代理到的本地端口 (例如 8080): " local_port
@@ -2415,7 +2422,7 @@ post_add_node_menu() {
     done
 }
 
-# 新的统一创建函数 (v4.0 - 全新 Tag 系统)
+# 新的统一创建函数 (v3.6 - 修正 UDP 协议的 TLS ALPN)
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
     local cert_choice custom_id location connect_addr sni_domain final_node_link
@@ -2424,9 +2431,10 @@ singbox_add_node_orchestrator() {
     local protocols_to_create=()
     local is_one_click=false
 
+    # (函数前面的所有向导逻辑保持不变)
     clear;
     echo -e "${CYAN}-------------------------------------${NC}\n "
-    echo -e "        ${WHITE}请选择要搭建的节点类型${NC}"
+    echo -e "           请选择要搭建的节点类型"
     echo -e "\n${CYAN}-------------------------------------${NC}\n"
     echo -e "1. VLESS + WSS\n"
     echo -e "2. VMess + WSS\n"
@@ -2440,22 +2448,9 @@ singbox_add_node_orchestrator() {
     echo -e "${CYAN}-------------------------------------${NC}\n"
     read -p "请输入选项: " protocol_choice
     case $protocol_choice in 1) protocols_to_create=("VLESS");; 2) protocols_to_create=("VMess");; 3) protocols_to_create=("Trojan");; 4) protocols_to_create=("Hysteria2");; 5) protocols_to_create=("TUIC");; 6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;; 0) return;; *) log_error "无效选择，操作中止。"; press_any_key; return;; esac
-
-    clear; echo -e "${GREEN}您选择了 [${protocols_to_create[*]}] 协议${NC}\n"
-    echo -e "请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)${NC}\n\n2. 使用自签名证书 (IP 直连)\n\n"
-    read -p "请输入选项 (1-2): " cert_choice
-
+    clear; log_info "您选择了 [${protocols_to_create[*]}] 协议。"; echo -e "\n请选择证书类型：\n1. 使用 Let's Encrypt 域名证书 (推荐)\n2. 使用自签名证书 (IP 直连)\n"; read -p "请输入选项 (1-2): " cert_choice
     if [ "$cert_choice" == "1" ]; then
-        while true; do
-            read -p "请输入您已解析到本机的域名: " domain
-            if [[ -z "$domain" ]]; then
-                log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain"; then
-                log_error "域名格式不正确，请重新输入。"
-            else
-                break
-            fi
-        done
+        while true; do read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then log_error "域名格式不正确。"; else break; fi; done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"; connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
@@ -2463,89 +2458,27 @@ singbox_add_node_orchestrator() {
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
             echo -e "\n请选择用于节点链接的地址：\n1. IPv4: ${ipv4_addr}\n2. IPv6: ${ipv6_addr}\n"; read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[${ipv6_addr}]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then echo ""; log_info "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; echo ""; then log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else echo ""; log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
-        echo "";
+        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr="$ipv4_addr"; elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr="[${ipv6_addr}]"; else log_error "无法获取任何公网 IP 地址！"; press_any_key; return; fi
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input; sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/sing-box/certs/${sni_domain}.cert.pem"; key_path="/etc/sing-box/certs/${sni_domain}.key.pem"
     else
-        echo "";
         log_error "无效证书选择。"; press_any_key; return
     fi
-    # ... (证书选择逻辑之后)
-    local used_ports_for_this_run=()
-    if ! $is_one_click; then
-        # 单协议模式，需要交互
-        local protocol_name=${protocols_to_create[0]}
-        while true; do
-            echo ""
-            local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "
-            if [[ "$protocol_name" == "Hysteria2" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi
-            read -p "$(echo -e "${port_prompt}")" port_input
-            if [ -z "$port_input" ]; then port_input=$(generate_random_port);echo ""; log_info "已生成随机端口: ${port_input}"; fi
+    local used_ports_for_this_run=(); if $is_one_click; then echo ""; log_info "您已选择一键模式，请为每个协议指定端口。"; for p in "${protocols_to_create[@]}"; do while true; do local port_prompt="请输入 [${p}] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [${p}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [${p}] 生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; done; if [ "$cert_choice" == "1" ]; then read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; else custom_id=""; fi; else local protocol_name=${protocols_to_create[0]}; local port_prompt="请输入 [${protocol_name}] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [${protocol_name}] 的 ${YELLOW}UDP${NC} 端口 [回车则随机]: "; fi; while true; do read -p "$(echo -e "${port_prompt}")" port_input; if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: ${port_input}"; fi; if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"; elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi; done; read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id; fi
 
-            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。"
-            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
-                ports[$protocol_name]=$port_input
-                used_ports_for_this_run+=("$port_input")
-                break
-            fi
-        done
-        echo ""
-        read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
-    else
-        # 一键模式，自动生成所有端口，不再询问
-        for p in "${protocols_to_create[@]}"; do
-            while true; do
-                local random_port=$(generate_random_port)
-                if _is_port_available "$random_port" "used_ports_for_this_run"; then
-                    ports[$p]=$random_port
-                    used_ports_for_this_run+=("$random_port")
-                    break
-                fi
-            done
-        done
-        # 仅在域名证书模式下询问一次Tag
-        if [ "$cert_choice" == "1" ]; then
-             echo ""
-             read -p "请输入自定义标识 (如 GCP, 回车则默认): " custom_id
-        else
-            # 自签名证书的一键模式，使用默认空标识
-            custom_id=""
-        fi
-    fi
-
-    # ==================== 核心修正点：新的 Tag 生成逻辑 ====================
-    # 统一询问自定义标识，并设置默认值
-    echo "";
-    read -p "请输入自定义标识 (如 Google, 回车则默认用 Csos): " custom_id
-    custom_id=${custom_id:-"Csos"}
-
-    # 获取详细地理位置信息
-    local geo_info_json
-    geo_info_json=$(curl -s ip-api.com/json)
-    local country_code
-    country_code=$(echo "$geo_info_json" | jq -r '.countryCode')
-    local region_name
-    region_name=$(echo "$geo_info_json" | jq -r '.regionName' | sed 's/ //g') # 移除州名中的空格
-    if [ -z "$country_code" ]; then country_code="N/A"; fi
-    if [ -z "$region_name" ]; then region_name="N/A"; fi
-    # =====================================================================
-
+    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g' | sed 's/\(.\)/\u\1/'); if [ -z "$location" ]; then location="N/A"; fi
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
-        echo "";
-
-        # 使用新的 Tag 生成逻辑
-        local tag_base="${country_code}-${region_name}-${custom_id}"
-        local base_tag_for_protocol="${tag_base}-${protocol}"
-
-        local tag; tag=$(_get_unique_tag "$base_tag_for_protocol"); log_info "已为此节点分配唯一 Tag: ${tag}"
-
+        echo ""; local tag_base="${location}"; if [ -n "$custom_id" ]; then tag_base+="-${custom_id}"; fi
+        local base_tag_for_protocol="${tag_base}-${protocol}"; local tag; tag=$(_get_unique_tag "$base_tag_for_protocol"); log_info "已为此节点分配唯一 Tag: ${tag}"
         local uuid=$(uuidgen); local password=$(generate_random_password)
         local config=""; local node_link=""; local current_port=${ports[$protocol]}
+
+        # 为不同协议组构建不同的 TLS 配置
         local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-        local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+        local tls_config_udp_hysteria="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+        local tls_config_udp_tuic="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
         case $protocol in
             "VLESS"|"VMess"|"Trojan")
@@ -2555,11 +2488,11 @@ singbox_add_node_orchestrator() {
                 else node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/#${tag}"; fi
                 ;;
             "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
+                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp_hysteria},\"up_mbps\":100,\"down_mbps\":1000}"
                 node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3#${tag}"
                 ;;
             "TUIC")
-                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
+                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp_tuic}}"
                 node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr#${tag}"
                 ;;
         esac
