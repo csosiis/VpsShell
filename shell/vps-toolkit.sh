@@ -80,9 +80,8 @@ _is_port_available() {
 # 验证域名格式是否有效
 _is_domain_valid() {
     local domain_to_check=$1
-    # 此正则表达式检查域名是否由有效的字符、标签和 TLD 组成
-    # 它不允许标签以连字符开头或结尾，并要求 TLD 至少为2个字母。
-    if [[ $domain_to_check =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$ ]]; then
+    # 修正后的正则表达式，兼容多级域名和各种 TLD
+    if [[ $domain_to_check =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]{2,}$ ]]; then
         return 0 # 验证成功
     else
         return 1 # 验证失败
@@ -1478,14 +1477,24 @@ _install_docker_and_compose() {
 }
 # 安装 WordPress (通过 Docker Compose)
 install_wordpress() {
-    # (此函数前面的所有代码保持不变)
     if ! _install_docker_and_compose; then log_error "Docker 环境准备失败。"; press_any_key; return; fi
     clear; log_info "开始使用 Docker Compose 搭建 WordPress..."; echo ""
     local project_dir; while true; do read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir; project_dir=${project_dir:-"/root/wordpress"}; if [ -f "${project_dir}/docker-compose.yml" ]; then log_error "错误：目录 \"${project_dir}\" 下已存在一个 WordPress 站点！"; log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"; echo ""; continue; else break; fi; done
     mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }; log_info "新的 WordPress 将被安装在: $(pwd)"; echo ""
     local db_password; while true; do read -s -p "请输入新的数据库 root 和用户密码: " db_password; echo ""; read -s -p "请再次输入密码以确认: " db_password_confirm; echo ""; if [[ -z "$db_password" ]]; then log_error "密码不能为空！"; elif [[ "$db_password" != "$db_password_confirm" ]]; then log_error "两次输入的密码不一致！"; else break; fi; done
-    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
-    echo ""; local site_url; while true; do read -p "请输入您的网站访问域名 (例如 https://blog.example.com): " site_url; if [[ -z "$site_url" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$site_url"; then log_error "域名格式不正确，或必须以 http(s):// 开头。"; else break; fi; done
+    echo ""; local wp_port; while true; do read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port; if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535。"; elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :; else break; fi; done
+
+    # ==================== 核心修正点 1：简化域名输入并自动补全 ====================
+    echo ""; local domain
+    while true; do
+        read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
+        if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"
+        elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"
+        else break; fi
+    done
+    local site_url="https://${domain}" # 自动在前面加上 https://
+    # ===========================================================================
+
     log_info "正在生成 docker-compose.yml 文件..."; cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -1505,15 +1514,16 @@ EOF
     echo ""; log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."; log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."; docker compose up -d
     echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
 
-    # ==================== 核心修正点：用新的交互式结尾替换旧的 ====================
+    # ==================== 核心修正点 2：全新的无缝反代流程 ====================
     log_info "✅ WordPress 容器已成功启动！"
     echo ""
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
 
     if [[ "$setup_proxy_choice" != "n" && "$setup_proxy_choice" != "N" ]]; then
-        # 如果用户选择是，则调用反代函数，并把当前设置的域名和端口传给它
-        setup_auto_reverse_proxy "$site_url" "$wp_port"
-        log_info "WordPress 配置流程完毕。"
+        # 如果用户选择是，则自动调用反代函数，并把当前设置的域名和端口传给它
+        setup_auto_reverse_proxy "$domain" "$wp_port"
+        echo ""
+        log_info "WordPress 配置流程完毕！您现在应该可以通过 ${site_url} 访问您的网站了。"
     else
         # 如果用户选择否，则显示 IP 访问链接
         log_info "好的，您选择不设置反向代理。"
@@ -1521,12 +1531,8 @@ EOF
         local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
 
-        if [ -n "$ipv4_addr" ]; then
-            log_info "IPv4 地址: http://${ipv4_addr}:${wp_port}"
-        fi
-        if [ -n "$ipv6_addr" ]; then
-            log_info "IPv6 地址: http://[${ipv6_addr}]:${wp_port}"
-        fi
+        if [ -n "$ipv4_addr" ]; then log_info "IPv4 地址: http://${ipv4_addr}:${wp_port}"; fi
+        if [ -n "$ipv6_addr" ]; then log_info "IPv6 地址: http://[${ipv6_addr}]:${wp_port}"; fi
         log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常，建议后续还是配置反代。"
     fi
     press_any_key
@@ -2222,10 +2228,10 @@ _configure_caddy_proxy() {
     log_info "✅ Caddy 反向代理配置成功！Caddy 会自动处理 HTTPS。"
     return 0
 }
-# 主函数：自动设置反向代理 (v3.1 - 支持接收参数)
+# 主函数：自动设置反向代理 (v3.1 - 增强版，默认安装Caddy)
 setup_auto_reverse_proxy() {
     # 接收可选的参数：$1 为域名，$2 为端口
-    local domain="$1"
+    local domain_input="$1"
     local local_port="$2"
 
     clear
@@ -2233,17 +2239,15 @@ setup_auto_reverse_proxy() {
     echo ""
 
     # 1. 获取用户输入 (如果未通过参数传入)
-    if [ -z "$domain" ]; then
+    if [ -z "$domain_input" ]; then
         while true; do
-            read -p "请输入您要设置反代的域名: " domain
-            if [[ -z "$domain" ]]; then log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"
+            read -p "请输入您要设置反代的域名: " domain_input
+            if [[ -z "$domain_input" ]]; then log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain_input"; then log_error "域名格式不正确。"
             else break; fi
         done
     else
-        # 如果域名是通过参数传入的 (可能包含 https://)，则清理一下
-        domain=$(echo "$domain" | sed -E 's#^https?://##; s#/$##')
-        log_info "将为预设域名 ${domain} 进行操作。"
+        log_info "将为预设域名 ${domain_input} 进行操作。"
     fi
 
     if [ -z "$local_port" ]; then
@@ -2259,27 +2263,26 @@ setup_auto_reverse_proxy() {
 
     # 2. 智能环境检测与执行
     if command -v caddy &> /dev/null; then
-        _configure_caddy_proxy "$domain" "$local_port"
+        _configure_caddy_proxy "$domain_input" "$local_port"
     elif command -v nginx &> /dev/null; then
-        if ! apply_ssl_certificate "$domain"; then
+        if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"; press_any_key; return;
         fi
-        _configure_nginx_proxy "$domain" "$local_port"
+        _configure_nginx_proxy "$domain_input" "$local_port"
     elif command -v apache2 &> /dev/null; then
         log_error "Apache 自动配置暂未实现。"
     else
-        log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
-        ensure_dependencies "nginx"
-        if command -v nginx &> /dev/null; then
-             if ! apply_ssl_certificate "$domain"; then
-                log_error "证书处理失败，无法继续配置 Nginx 反代。"; press_any_key; return;
-            fi
-            _configure_nginx_proxy "$domain" "$local_port"
+        # 默认安装 Caddy
+        log_warn "未检测到任何 Web 服务器。将为您自动安装 Caddy..."
+        ensure_dependencies "caddy"
+        if command -v caddy &> /dev/null; then
+            _configure_caddy_proxy "$domain_input" "$local_port"
         else
-            log_error "Nginx 安装失败，无法继续。"
+            log_error "Caddy 安装失败，无法继续。"
         fi
     fi
-    # 如果是从其他函数调用而来，则不暂停
+
+    # 如果是手动进入此功能，则需要暂停
     if [ -z "$1" ]; then
         press_any_key
     fi
