@@ -82,9 +82,7 @@ _is_port_available() {
 # 验证域名格式是否有效
 _is_domain_valid() {
     local domain_to_check=$1
-    # 此正则表达式检查域名是否由有效的字符、标签和 TLD 组成
-    # 它不允许标签以连字符开头或结尾，并要求 TLD 至少为2个字母。
-    if [[ $domain_to_check =^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
+    if [[ $domain_to_check =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$ ]]; then
         return 0 # 验证成功
     else
         return 1 # 验证失败
@@ -2448,7 +2446,7 @@ singbox_add_node_orchestrator() {
     read -p "请输入选项 (1-2): " cert_choice
 
     if [ "$cert_choice" == "1" ]; then
-        while true; do echo ""; read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"; elif ! echo ""; echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then  echo "";log_error "域名格式不正确。"; else break; fi; done
+        while true; do echo ""; read -p "请输入您已解析到本机的域名: " domain; if [[ -z "$domain" ]]; then echo ""; log_error "域名不能为空！"; elif ! echo ""; echo "$domain" | grep -Pq '^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'; then  log_error "域名格式不正确。"; else break; fi; done
         if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
         cert_path="/etc/letsencrypt/live/${domain}/fullchain.pem"; key_path="/etc/letsencrypt/live/${domain}/privkey.pem"; connect_addr="$domain"; sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
