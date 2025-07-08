@@ -1117,31 +1117,28 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点 1：回归手动下载和解压，避免管道问题 ====================
+    # ==================== 核心修正点 1：回归稳定可靠的 FNM 安装方式 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
     # 自动检测架构并下载正确的 fnm 版本
-    local arch
+    local fnm_zip_name
     case $(dpkg --print-architecture) in
         arm64 | aarch64)
-            arch="aarch64"
+            log_info "检测到 ARM64/AArch64 架构..."
+            fnm_zip_name="fnm-linux-aarch64.zip"
             ;;
-        amd64)
-            # 兼容您原始脚本的写法
-            arch=""
-            ;;
-        *)
-            arch=""
+        amd64 | *) # 默认和 amd64 都使用通用版本
+            log_info "检测到 AMD64 (x86_64) 架构..."
+            fnm_zip_name="fnm-linux.zip" # amd64 对应的是不带后缀的通用文件名
             ;;
     esac
-    log_info "检测到系统架构为 $(dpkg --print-architecture)，准备下载 FNM..."
-    # amd64 对应的是不带后缀的通用文件名
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux${arch:+-}${arch}.zip" -o /tmp/fnm.zip
+    log_info "正在下载 FNM: ${fnm_zip_name}..."
+    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
 
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
-    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中
+    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
     export PATH="${FNM_DIR}:$PATH"
     log_info "FNM 安装完成。"
 
