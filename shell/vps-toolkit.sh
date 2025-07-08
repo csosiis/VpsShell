@@ -1108,7 +1108,6 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
-
 # 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
@@ -1117,26 +1116,20 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点：使用官方推荐的 fnm 安装脚本 ====================
     log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
     curl -fsSL https://fnm.vercel.app/install | bash
 
     log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
-    # .bashrc 文件可能不存在于非交互式 shell 的默认路径中，使用 $HOME 更安全
-    # 同时检查 .zshrc 以增加兼容性
     if [ -f "$HOME/.bashrc" ]; then
         source "$HOME/.bashrc"
     elif [ -f "$HOME/.zshrc" ]; then
         source "$HOME/.zshrc"
     fi
     log_info "FNM 安装完成。"
-    # =================================================================================
 
-    # ==================== 核心修正点 2：指定 Node.js 版本为 v20.18.0 ===================
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
     fnm install v20.18.0
     fnm use v20.18.0
-    # =================================================================================
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
@@ -1153,42 +1146,25 @@ substore_do_install() {
     log_info "开始配置系统服务..."; echo ""
     # (API 密钥和端口的交互逻辑保持不变)
     local API_KEY;
-    while true; do
-        local random_api_key
-        random_api_key=$(generate_random_password)
-        read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-        API_KEY=${user_api_key:-$random_api_key}
-        if [ -n "$API_KEY" ]; then break; else log_error "API 密钥不能为空！"; fi
-    done
+    local random_api_key
+    random_api_key=$(generate_random_password)
+    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
+    API_KEY=${user_api_key:-$random_api_key}
+    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
     log_info "最终使用的 API 密钥为: ${API_KEY}"
 
     local FRONTEND_PORT;
-    while true; do
-        read -p "请输入前端访问端口 [默认: 3000]: " port_input
-        FRONTEND_PORT=${port_input:-"3000"}
-        if check_port "$FRONTEND_PORT"; then break; fi
-    done
+    while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
 
     local BACKEND_PORT;
-    while true; do
-        read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input
-        BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then
-            log_error "后端端口不能与前端端口相同!"
-        else
-            if check_port "$BACKEND_PORT"; then break; fi
-        fi
-    done
+    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
-    # ==================== 核心修正点 3：使用 fnm which 获取正确的 node 路径 ====================
-    local NODE_EXEC_PATH
-    NODE_EXEC_PATH=$(fnm which)
-    # ====================================================================================
-
+    # ==================== 核心修正点：回归经典，在 ExecStart 中使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
+Wants=network-online.target
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
@@ -1198,13 +1174,21 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
-Type=simple; User=root; Group=root; Restart=on-failure; RestartSec=5s
-LimitNOFILE=32767; ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal; StandardError=journal
+ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+Type=simple
+User=root
+Group=root
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=32767
+ExecStartPre=/bin/sh -c "ulimit -n 51200"
+StandardOutput=journal
+StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+    # ====================================================================================
+
     log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
     log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
