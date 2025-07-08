@@ -1152,8 +1152,15 @@ substore_do_install() {
     echo "";
     while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi; done
 
-    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1); log_info "生成的 API 密钥为: ${API_KEY}"
+    local random_api_key
+    random_api_key=$(generate_random_password) # 调用我们已有的随机密码函数
+
+    echo ""
+    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
+    local API_KEY=${user_api_key:-$random_api_key}
+    log_info "最终使用的 API 密钥为: ${API_KEY}"
     NODE_EXEC_PATH=$(which node)
+
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
