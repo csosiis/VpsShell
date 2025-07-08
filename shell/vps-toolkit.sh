@@ -1131,8 +1131,8 @@ substore_do_install() {
     # =================================================================================
 
     log_info "正在使用 FNM 安装 Node.js (v20)..."
-    fnm install v20
-    fnm use v20
+    fnm install v20.18.0
+    fnm use v20.18.0
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
