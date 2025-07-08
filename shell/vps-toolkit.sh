@@ -1116,18 +1116,17 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点：使用官方推荐的 fnm 安装脚本 ====================
     log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
     curl -fsSL https://fnm.vercel.app/install | bash
 
-    log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
-    # .bashrc 文件可能不存在于非交互式 shell 的默认路径中，使用 $HOME 更安全
-    # 同时检查 .zshrc 以增加兼容性
-    if [ -f "$HOME/.bashrc" ]; then
-        source "$HOME/.bashrc"
-    elif [ -f "$HOME/.zshrc" ]; then
-        source "$HOME/.zshrc"
-    fi
+    # ==================== 核心修正点：使用最可靠的方式加载 FNM 环境 ====================
+    # 首先，确保 fnm 的可执行文件路径在当前会话的 PATH 中
+    export FNM_DIR="$HOME/.local/share/fnm"
+    export PATH="$FNM_DIR:$PATH"
+
+    # 然后，直接执行 fnm env 的输出，这会为当前会话设置所有必要的变量
+    log_info "正在为当前会话配置 FNM 环境变量..."
+    eval "$(fnm env)"
     log_info "FNM 安装完成。"
     # =================================================================================
 
@@ -1148,19 +1147,29 @@ substore_do_install() {
     log_info "Sub-Store 项目文件准备就绪。"
 
     log_info "开始配置系统服务..."; echo ""
-    while true; do read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT; FRONTEND_PORT=${FRONTEND_PORT:-3000}; check_port "$FRONTEND_PORT" && break; done
-    echo "";
-    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi; done
-
-    local random_api_key
-    random_api_key=$(generate_random_password) # 调用我们已有的随机密码函数
-
-    echo ""
-    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-    local API_KEY=${user_api_key:-$random_api_key}
+    local API_KEY
+    while true; do
+        local random_api_key
+        random_api_key=$(generate_random_password)
+        read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
+        API_KEY=${user_api_key:-$random_api_key}
+        if [ -n "$API_KEY" ]; then break; else log_error "API 密钥不能为空！"; fi
+    done
     log_info "最终使用的 API 密钥为: ${API_KEY}"
-    NODE_EXEC_PATH=$(which node)
 
+    local FRONTEND_PORT
+    while true; do
+        read -p "请输入 WordPress 的外部访问端口 [默认: 8008]: " wp_port
+        wp_port=${wp_port:-"8008"}
+        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :
+        else FRONTEND_PORT=$wp_port; break; fi
+    done
+
+    local BACKEND_PORT
+    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
+
+    NODE_EXEC_PATH=$(which node)
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
