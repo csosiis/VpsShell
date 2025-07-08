@@ -1108,6 +1108,7 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+
 # 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
@@ -1116,21 +1117,27 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
-    curl -fsSL https://fnm.vercel.app/install | bash
+    # ==================== 核心修正点：采用最稳妥的 FNM 安装与环境加载方式 ====================
+    # 步骤 1: 为确保全新安装，先清理可能存在的旧文件和配置
+    log_info "为确保全新安装，正在清理旧的 FNM 配置..."
+    rm -rf "$HOME/.local/share/fnm"
+    sed -i '/# fnm/,/fi/d' "$HOME/.bashrc"
 
-    # ==================== 核心修正点：使用最可靠的方式加载 FNM 环境 ====================
-    # 首先，确保 fnm 的可执行文件路径在当前会话的 PATH 中
+    # 步骤 2: 先下载安装脚本到临时文件，再执行，避免管道导致的环境问题
+    log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
+    local fnm_install_script="/tmp/fnm_install.sh"
+    curl -fsSL https://fnm.vercel.app/install -o "$fnm_install_script"
+    bash "$fnm_install_script"
+
+    # 步骤 3: 使用最明确的方式加载 FNM 环境到当前会话
+    log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
     export FNM_DIR="$HOME/.local/share/fnm"
     export PATH="$FNM_DIR:$PATH"
-
-    # 然后，直接执行 fnm env 的输出，这会为当前会话设置所有必要的变量
-    log_info "正在为当前会话配置 FNM 环境变量..."
     eval "$(fnm env)"
     log_info "FNM 安装完成。"
     # =================================================================================
 
-    log_info "正在使用 FNM 安装 Node.js (v20)..."
+    log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
     fnm install v20.18.0
     fnm use v20.18.0
 
@@ -1139,38 +1146,18 @@ substore_do_install() {
     export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
+    # (后续的 Sub-Store 下载和配置代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-
     log_info "开始配置系统服务..."; echo ""
-    local API_KEY
-    while true; do
-        local random_api_key
-        random_api_key=$(generate_random_password)
-        read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-        API_KEY=${user_api_key:-$random_api_key}
-        if [ -n "$API_KEY" ]; then break; else log_error "API 密钥不能为空！"; fi
-    done
-    log_info "最终使用的 API 密钥为: ${API_KEY}"
-
-    local FRONTEND_PORT
-    while true; do
-        read -p "请输入 WordPress 的外部访问端口 [默认: 8008]: " wp_port
-        wp_port=${wp_port:-"8008"}
-        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"
-        elif ! _is_port_available "$wp_port" "used_ports_for_this_run"; then :
-        else FRONTEND_PORT=$wp_port; break; fi
-    done
-
-    local BACKEND_PORT
-    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
-
-    NODE_EXEC_PATH=$(which node)
-    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
+    local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; log_info "最终使用的 API 密钥为: ${API_KEY}"
+    local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
+    local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
+    local NODE_EXEC_PATH; NODE_EXEC_PATH=$(fnm which); cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
@@ -1196,6 +1183,7 @@ EOF
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
+
 _install_docker_and_compose() {
     if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "Docker 和 Docker Compose V2 已安装。"
