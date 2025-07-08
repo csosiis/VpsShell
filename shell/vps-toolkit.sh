@@ -1108,6 +1108,7 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+
 # 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
@@ -1160,6 +1161,8 @@ substore_do_install() {
     while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
     # ==================== 核心修正点：回归经典，在 ExecStart 中使用 fnm exec ====================
+    # 我们不再需要获取 NODE_EXEC_PATH 变量
+
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
