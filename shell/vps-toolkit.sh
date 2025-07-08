@@ -1108,84 +1108,76 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+# 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
+
     echo ""
-    log_info "开始执行 Sub-Store 安装流程..."
+    log_info "开始执行 Sub-Store 安装流程...";
     set -e
+
+    # ==================== 核心修正点：使用官方推荐的 fnm 安装脚本 ====================
     log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
     curl -fsSL https://fnm.vercel.app/install | bash
+
     log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
+    # .bashrc 文件可能不存在于非交互式 shell 的默认路径中，使用 $HOME 更安全
+    # 同时检查 .zshrc 以增加兼容性
     if [ -f "$HOME/.bashrc" ]; then
         source "$HOME/.bashrc"
     elif [ -f "$HOME/.zshrc" ]; then
         source "$HOME/.zshrc"
     fi
     log_info "FNM 安装完成。"
+    # =================================================================================
+
     log_info "正在使用 FNM 安装 Node.js (v20)..."
     fnm install v20
     fnm use v20
+
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"
-    export PATH="$PNPM_HOME:$PATH"
+    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
+
     log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"
-    cd "$SUBSTORE_INSTALL_DIR"
+    mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务..."
-    echo ""
-    while true; do
-        read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT
-        FRONTEND_PORT=${FRONTEND_PORT:-3000}
-        check_port "$FRONTEND_PORT" && break
-    done
-    echo ""
-    while true; do
-        read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT
-        BACKEND_PORT=${BACKEND_PORT:-3001}
-        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi
-    done
-    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1)
-    log_info "生成的 API 密钥为: $API_KEY"
+
+    log_info "开始配置系统服务..."; echo ""
+    while true; do read -p "请输入前端访问端口 [默认: 3000]: " FRONTEND_PORT; FRONTEND_PORT=${FRONTEND_PORT:-3000}; check_port "$FRONTEND_PORT" && break; done
+    echo "";
+    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " BACKEND_PORT; BACKEND_PORT=${BACKEND_PORT:-3001}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else check_port "$BACKEND_PORT" && break; fi; done
+
+    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1); log_info "生成的 API 密钥为: ${API_KEY}"
     NODE_EXEC_PATH=$(which node)
-    cat <<EOF >"$SUBSTORE_SERVICE_FILE"
+    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
 [Service]
-Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/$API_KEY"
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
-Environment="SUB_STORE_FRONTEND_PATH=$SUBSTORE_INSTALL_DIR/frontend"
+Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=::"
-Environment="SUB_STORE_FRONTEND_PORT=$FRONTEND_PORT"
-Environment="SUB_STORE_DATA_BASE_PATH=$SUBSTORE_INSTALL_DIR"
+Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
+Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
-Environment="SUB_STORE_BACKEND_API_PORT=$BACKEND_PORT"
-ExecStart=$NODE_EXEC_PATH $SUBSTORE_INSTALL_DIR/sub-store.bundle.js
+Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
+ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple; User=root; Group=root; Restart=on-failure; RestartSec=5s
 LimitNOFILE=32767; ExecStartPre=/bin/sh -c "ulimit -n 51200"
 StandardOutput=journal; StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    log_info "正在启动并启用 sub-store 服务..."
-    systemctl daemon-reload
-    systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
-    systemctl start "$SUBSTORE_SERVICE_NAME"
-    log_info "正在检测服务状态 (等待 5 秒)..."
-    sleep 5
-    set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ 服务状态正常 (active)。"
-        substore_view_access_link
-    else log_error "服务启动失败！请使用日志功能排查。"; fi
-    echo ""
-    read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+    log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
+    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
+    echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
 _install_docker_and_compose() {

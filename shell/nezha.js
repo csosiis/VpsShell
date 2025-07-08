@@ -20,9 +20,7 @@
     }
     /* 自定义小人样式 */
     .custom-avatar {
-      position: absolute !important;
-      right: -40px !important;
-      top: -155px !important;
+
       z-index: 10 !important;
       width: 160px !important;
       height: auto !important;
@@ -30,6 +28,9 @@
     .header-timer{
     display: none !important;
     }
+    .hidden.text-sm.font-medium.opacity-40{display: none !important;}
+    .grid.grid-cols-2.gap-4.lg:grid-cols-4.server-overview{display: none !important;}
+
   `;
   document.head.appendChild(style);
 
