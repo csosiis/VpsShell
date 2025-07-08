@@ -1117,7 +1117,7 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点 1：回归 sub-store.sh 中稳定可靠的 FNM 安装方式 ====================
+    # ==================== 核心修正点 1：回归手动下载和解压，避免管道问题 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
