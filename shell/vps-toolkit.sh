@@ -1117,15 +1117,24 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    log_info "正在使用官方安装脚本安装 FNM (Fast Node Manager)..."
-    curl -fsSL https://fnm.vercel.app/install | bash
+    # ==================== 核心修正点：回归 sub-store.sh 中稳定可靠的 FNM 安装方式 ====================
+    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
+    FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
-    log_info "正在加载环境变量以使 fnm 在当前会话中生效..."
-    if [ -f "$HOME/.bashrc" ]; then
-        source "$HOME/.bashrc"
-    elif [ -f "$HOME/.zshrc" ]; then
-        source "$HOME/.zshrc"
-    fi
+    # 自动检测架构并下载正确的 fnm 版本
+    local arch
+    case $(dpkg --print-architecture) in
+        arm64 | aarch64) arch="aarch64";;
+        amd64) arch="x64";;
+        *) arch="x64";;
+    esac
+    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载对应 (${arch}) 版本的 FNM..."
+    curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux-${arch}.zip" -o /tmp/fnm.zip
+
+    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
+
+    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
+    export PATH="${FNM_DIR}:$PATH"
     log_info "FNM 安装完成。"
 
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
@@ -1137,6 +1146,7 @@ substore_do_install() {
     export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
+    # (后续的 Sub-Store 下载和配置代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
@@ -1145,24 +1155,11 @@ substore_do_install() {
     log_info "Sub-Store 项目文件准备就绪。"
 
     log_info "开始配置系统服务..."; echo ""
-    # (API 密钥和端口的交互逻辑保持不变)
-    local API_KEY;
-    local random_api_key
-    random_api_key=$(generate_random_password)
-    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
-    log_info "最终使用的 API 密钥为: ${API_KEY}"
+    local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
+    local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
+    local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
-    local FRONTEND_PORT;
-    while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
-
-    local BACKEND_PORT;
-    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
-
-    # ==================== 核心修正点：回归经典，在 ExecStart 中使用 fnm exec ====================
-    # 我们不再需要获取 NODE_EXEC_PATH 变量
-
+    # 在服务文件中使用 fnm exec 的绝对路径，确保 systemd 能找到它
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
