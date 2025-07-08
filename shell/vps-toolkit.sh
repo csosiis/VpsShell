@@ -1117,31 +1117,29 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
+    # ==================== 核心修正点 1：回归手动下载和解压，避免管道问题 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
-    # ==================== 核心修正点：根据架构选择正确的 fnm 下载文件名 ====================
-    local fnm_zip_name
+    # 自动检测架构并下载正确的 fnm 版本
+    local arch
     case $(dpkg --print-architecture) in
         arm64 | aarch64)
-            log_info "检测到 ARM64/AArch64 架构..."
-            fnm_zip_name="fnm-linux-aarch64.zip"
+            arch="aarch64"
             ;;
         amd64)
-            log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip" # amd64 对应的是不带后缀的通用文件名
+            arch="x64"
             ;;
         *)
-            log_warn "未知的架构，将尝试使用通用的 x64 版本。"
-            fnm_zip_name="fnm-linux.zip"
+            arch="x64"
             ;;
     esac
-    log_info "正在下载 FNM: ${fnm_zip_name}..."
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
-    # ====================================================================================
+    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载对应 (${arch}) 版本的 FNM..."
+    curl -L "https://github.com/Schniz/fnm/releases/latest/download/fnm-linux-${arch}.zip" -o /tmp/fnm.zip
 
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
+    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
     export PATH="${FNM_DIR}:$PATH"
     log_info "FNM 安装完成。"
 
@@ -1167,7 +1165,7 @@ substore_do_install() {
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
     local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
-    # 在服务文件中使用 fnm exec 的绝对路径，确保 systemd 能找到它
+    # ==================== 核心修正点 2：ExecStart 回归使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
@@ -1195,6 +1193,7 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+    # ====================================================================================
 
     log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
     log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
