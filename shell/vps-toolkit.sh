@@ -2034,45 +2034,75 @@ substore_manage_menu() {
 substore_main_menu() {
     while true; do
         clear
-        echo ""
-        echo -e "${WHITE}=============================${NC}"
-        echo ""
-        echo -e "${WHITE}      Sub-Store 管理菜单      ${NC}"
-        echo ""
-        echo -e "${WHITE}=============================${NC}"
-        echo ""
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         if is_substore_installed; then
-            echo "1. 管理 Sub-Store"
-            echo ""
-            echo -e "2. ${GREEN}更新 Sub-Store 应用${NC}"
-            echo ""
-            echo -e "3. ${RED}卸载 Sub-Store${NC}"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo "-----------------------------"
+            # (已安装时的菜单保持不变)
+            local status_text
+            if [ -f "/etc/vps-toolkit/substore.conf" ]; then
+                source "/etc/vps-toolkit/substore.conf"
+                if [[ "$INSTALL_TYPE" == "docker" ]]; then
+                    if docker ps -a --format '{{.Names}}' | grep -q "sub-store"; then
+                        status_text="${GREEN}● 活动 (Docker)${NC}"
+                    else
+                        status_text="${RED}● 不活动 (Docker)${NC}"
+                    fi
+                else
+                    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+                        status_text="${GREEN}● 活动 (直装)${NC}"
+                    else
+                        status_text="${RED}● 不活动 (直装)${NC}"
+                    fi
+                fi
+            else
+                status_text="${YELLOW}● 状态未知${NC}"
+            fi
+            echo -e "$CYAN║$NC  当前状态: $status_text                                ${CYAN}║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. ${GREEN}更新 Sub-Store 应用${NC}                         ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. ${RED}卸载 Sub-Store${NC}                              ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝${NC}"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_manage_menu ;; 2) update_sub_store_app ;;
-                3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+                3) substore_do_uninstall ;; 0) break ;; *)
+                    log_warn "无效选项！"
+                    sleep 1
+                    ;;
             esac
         else
-            echo -e "1. ${GREEN}安装 Sub-Store (直装模式)${NC}"
-            echo ""
-            echo -e "2. ${WHITE}安装 Sub-Store (Docker模式)${NC}"
-            echo ""
-            echo "0. 返回主菜单"
-            echo ""
-            echo "-----------------------------"
+            # ==================== 核心修正点：增加 Docker 模式安装选项 ====================
+            echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (直装模式)${NC}                ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. ${BLUE}安装 Sub-Store (Docker模式)${NC}               ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  ${CYAN}║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝${NC}"
             echo ""
             read -p "请输入选项: " choice
             case $choice in
                 1) substore_do_install ;;
                 2) substore_do_install_docker ;;
                 0) break ;;
-                *) log_warn "无效选项！"; sleep 1 ;;
+                *)
+                    log_warn "无效选项！"
+                    sleep 1
+                    ;;
             esac
+            # ===========================================================================
         fi
     done
 }
