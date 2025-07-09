@@ -925,7 +925,7 @@ view_node_info() {
         # =================================================================================
 
         # 在菜单中保留“生成临时订阅链接”的选项
-        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}\n\n5. ${YELLOW}[诊断] 为 TUIC 节点生成客户端配置${NC}\n\n0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点 3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}    0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -2335,49 +2335,26 @@ singbox_add_node_orchestrator() {
         local current_port=${ports[$protocol]}
         local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
         local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-        # ==================== 核心修正点：为自签证书模式生成正确的分享链接 ====================
-        local insecure_param=""
-        # 如果用户选择的是自签名证书 (选项2)
-        if [ "$cert_choice" == "2" ]; then
-            insecure_param="&allowInsecure=1" # 为 VLESS 和 Trojan 准备
-        fi
-
-        # ==================== 核心修正点：为所有自签证书模式生成正确的分享链接 ====================
-        local insecure_param=""
-        if [ "$cert_choice" == "2" ]; then
-            # VLESS, Trojan, VMess 使用 allowInsecure=1
-            # Hysteria2, TUIC 使用 insecure=1
-            if [[ "$protocol" == "Hysteria2" || "$protocol" == "TUIC" ]]; then
-                insecure_param="&insecure=1"
-            else
-                insecure_param="&allowInsecure=1"
-            fi
-        fi
-
         case $protocol in
-            "VLESS"|"VMess"|"Trojan")
-                config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[$(if [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]; then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":${tls_config_tcp},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                if [[ "$protocol" == "VLESS" ]]; then
-                    node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F${insecure_param}#${tag}"
-                elif [[ "$protocol" == "VMess" ]]; then
-                    local vmess_json_obj
-                    vmess_json_obj=$(jq -n --arg ps "$tag" --arg add "$connect_addr" --arg port "$current_port" --arg id "$uuid" --arg host "$sni_domain" '{v:"2", ps:$ps, add:$add, port:$port, id:$id, aid:"0", net:"ws", type:"none", host:$host, path:"/", tls:"tls"}')
-                    if [ "$cert_choice" == "2" ]; then
-                        vmess_json_obj=$(echo "$vmess_json_obj" | jq '. + {"skip-cert-verify": true}')
-                    fi
-                    node_link="vmess://$(echo -n "$vmess_json_obj" | base64 -w 0)"
-                else
-                    node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/${insecure_param}#${tag}"
-                fi
-                ;;
-            "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
-                node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3${insecure_param}#${tag}"
-                ;;
-            "TUIC")
-                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
-                node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr${insecure_param}#${tag}"
-                ;;
+        "VLESS" | "VMess" | "Trojan")
+            config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
+                [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
+            then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+            if [[ "$protocol" == "VLESS" ]]; then
+                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F#$tag"
+            elif [[ "$protocol" == "VMess" ]]; then
+                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+            else node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"; fi
+            ;;
+        "Hysteria2")
+            config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
+            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
+            ;;
+        "TUIC")
+            config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
+            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
+            ;;
         esac
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
             ((success_count++))
