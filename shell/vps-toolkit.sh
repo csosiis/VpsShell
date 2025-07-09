@@ -1118,24 +1118,13 @@ is_substore_installed() {
 substore_do_install_docker() {
     if ! _install_docker_and_compose; then log_error "Docker 环境准备失败。"; press_any_key; return; fi
     clear; log_info "开始使用 Docker Compose 搭建 Sub-Store..."; echo ""
-    local project_dir;
-    while true; do
-        read -p "请输入 Sub-Store (Docker) 的安装目录 [默认: /root/sub-store-docker]: " project_dir
-        project_dir=${project_dir:-"/root/sub-store-docker"}
-        if [ -d "$project_dir" ] && [ "$(ls -A "$project_dir")" ]; then
-            log_error "错误：目录 \"${project_dir}\" 已存在且不为空！"
-            log_warn "请为新的 Sub-Store 站点选择一个不同的或空的目录。"
-            echo ""
-            continue
-        else break; fi
-    done
-    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
-    log_info "Sub-Store (Docker) 将被安装在: $(pwd)"
-
+    local project_dir; while true; do read -p "请输入 Sub-Store (Docker) 的安装目录 [默认: /root/sub-store]: " project_dir; project_dir=${project_dir:-"/root/sub-store"}; if [ -f "${project_dir}/docker-compose.yml" ]; then log_error "错误：目录 \"${project_dir}\" 下已存在一个 Docker Compose 项目！"; log_warn "请为新的 Sub-Store 站点选择一个不同的目录，或先卸载旧版本。"; echo ""; continue; else break; fi; done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }; log_info "Sub-Store (Docker) 将被安装在: $(pwd)";
     local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; log_info "最终使用的 API 密钥为: ${API_KEY}"
     local SUB_PORT; while true; do read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input; SUB_PORT=${port_input:-"3000"}; if _is_port_available "$SUB_PORT" "used_ports_for_this_run"; then break; fi; done
 
     log_info "正在生成 docker-compose.yml 文件..."
+    # ==================== 核心修正点 1：修正 ports 映射，使其能被公网访问 ====================
     cat > docker-compose.yml <<EOF
 version: "3.8"
 services:
@@ -1148,14 +1137,14 @@ services:
     environment:
       - SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}
     ports:
-      - "127.0.0.1:${SUB_PORT}:3000"
+      - "${SUB_PORT}:3000"
     stdin_open: true
     tty: true
 EOF
+    # ======================================================================================
+
     log_info "正在启动 Sub-Store 服务..."; docker compose up -d
     echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
-
-    # ==================== 核心修正点 1：创建总配置文件 ====================
     mkdir -p /etc/vps-toolkit
     cat > /etc/vps-toolkit/substore.conf << EOF
 INSTALL_TYPE="docker"
@@ -1164,73 +1153,31 @@ API_KEY="${API_KEY}"
 HOST_PORT="${SUB_PORT}"
 EOF
     log_info "已创建 Sub-Store 配置文件。"
-    # ===================================================================
-
-    log_info "✅ WordPress 搭建流程已启动！"
-
-    # ==================== 核心修正点 2：调用显示链接函数 ====================
+    log_info "✅ Sub-Store (Docker) 搭建流程已启动！"
     substore_view_access_link
-    # ====================================================================
-
     press_any_key
 }
-# 安装 Sub-Store
+# 安装 Sub-Store (直装模式)
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
-
-    echo ""
-    log_info "开始执行 Sub-Store 安装流程...";
-    set -e
-
-    # ==================== 核心修正点 1：回归稳定可靠的 FNM 安装方式 ====================
+    echo ""; log_info "开始执行 Sub-Store 安装流程..."; set -e
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
-
-    # 自动检测架构并下载正确的 fnm 版本
-    local fnm_zip_name
-    case $(dpkg --print-architecture) in
-        arm64 | aarch64)
-            log_info "检测到 ARM64/AArch64 架构..."
-            fnm_zip_name="fnm-linux-aarch64.zip"
-            ;;
-        amd64 | *) # 默认和 amd64 都使用通用版本
-            log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip"
-            ;;
-    esac
-    log_info "正在下载 FNM: ${fnm_zip_name}..."
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
-
+    local fnm_zip_name; case $(dpkg --print-architecture) in arm64|aarch64) fnm_zip_name="fnm-linux-aarch64.zip";; amd64|*) fnm_zip_name="fnm-linux.zip";; esac
+    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载 FNM: ${fnm_zip_name}..."; curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
-
-    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
-    export PATH="${FNM_DIR}:$PATH"
-    # 立即评估 fnm 的环境变量，使其在当前会话中生效
-    eval "$(fnm env)"
-    log_info "FNM 安装完成。"
-
-    log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
-    fnm install v20.18.0
-    fnm use v20.18.0
-
-    log_info "正在安装 pnpm..."
-    curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 PNPM 环境准备就绪。"
-
-    # (后续的 Sub-Store 下载和配置代码保持不变)
-    log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
+    export PATH="${FNM_DIR}:$PATH"; log_info "FNM 安装完成。"
+    log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."; fnm install v20.18.0; fnm use v20.18.0
+    log_info "正在安装 pnpm..."; curl -fsSL https://get.pnpm.io/install.sh | sh -
+    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"; log_info "Node.js 和 PNPM 环境准备就绪。"
+    log_info "正在下载并设置 Sub-Store 项目文件..."; mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
-    log_info "Sub-Store 项目文件准备就绪。"
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip; log_info "Sub-Store 项目文件准备就绪。"
     log_info "开始配置系统服务..."; echo ""
     local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
     local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
-
-    # ==================== 核心修正点 2：ExecStart 回归使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
@@ -1246,27 +1193,31 @@ Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
 ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
-Type=simple
-User=root
-Group=root
-Restart=on-failure
-RestartSec=5s
-LimitNOFILE=32767
-ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal
-StandardError=journal
+Type=simple; User=root; Group=root; Restart=on-failure; RestartSec=5s
+LimitNOFILE=32767; ExecStartPre=/bin/sh -c "ulimit -n 51200"
+StandardOutput=journal; StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    # ====================================================================================
-
     log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
     log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
+
+    # ==================== 核心修正点：在直装模式成功后，也创建总配置文件 ====================
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        mkdir -p /etc/vps-toolkit
+        cat > /etc/vps-toolkit/substore.conf << EOF
+INSTALL_TYPE="direct"
+PROJECT_DIR="${SUBSTORE_INSTALL_DIR}"
+API_KEY="${API_KEY}"
+HOST_PORT="${FRONTEND_PORT}"
+EOF
+        log_info "✅ 服务状态正常 (active)。"; substore_view_access_link;
+    else log_error "服务启动失败！请使用日志功能排查。"; fi
+    # ====================================================================================
+
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
-
 _install_docker_and_compose() {
     if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "Docker 和 Docker Compose V2 已安装。"
@@ -1512,39 +1463,39 @@ update_sub_store_app() {
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
 }
-# 查看访问链接 (v3.0 - 智能判断模式)
+# 查看访问链接 (v3.1 - 修正 Docker 链接格式)
 substore_view_access_link() {
     echo ""; log_info "正在读取配置并生成访问链接...";
-    if ! is_substore_installed; then echo ""; log_error "Sub-Store尚未安装。"; press_any_key; return; fi
+    if ! is_substore_installed; then echo ""; log_error "Sub-Store尚未安装。"; return; fi
 
-    local config_file="/etc/vps-toolkit/substore.conf"
-    # 检查新的总配置文件是否存在，并加载它
-    if [ ! -f "$config_file" ]; then
-        # 为兼容旧的直装模式，如果总配置文件不存在，则尝试从 systemd 文件读取
-        REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-        API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"/')
-        FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    local config_file="/etc/vps-toolkit/substore.conf"; local install_type
+    source "$config_file" # 加载配置文件以获取所有变量
+
+    echo -e "\n===================================================================="
+    if [[ "$install_type" == "direct" ]] && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+        # 仅在直装模式下检查并使用反代域名
+        local reverse_proxy_domain
+        reverse_proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        local access_url="https://${reverse_proxy_domain}/?api=https://${reverse_proxy_domain}/${API_KEY}"
+        echo -e "\n您的 Sub-Store 反代访问链接如下：\n\n${YELLOW}${access_url}${NC}\n"
     else
-        # 从总配置文件加载变量
-        source "$config_file"
-        # Docker 模式下没有反代，所以 REVERSE_PROXY_DOMAIN 为空
-        REVERSE_PROXY_DOMAIN=""
-        FRONTEND_PORT="$HOST_PORT"
-    fi
+        # Docker 模式或无反代的直装模式，都显示 IP 链接
+        log_info "您可以通过以下 IP 地址访问您的 Sub-Store："
+        local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+        local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
 
-    echo -e "\n===================================================================="
-    # Docker 模式下，总是显示 IP 链接
-    log_info "您可以通过以下 IP 地址访问您的 Sub-Store："
-    local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-    local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
-
-    if [ -n "$ipv4_addr" ]; then
-        echo -e "\nIPv4 访问链接:\n${YELLOW}http://${ipv4_addr}:${FRONTEND_PORT}/?api=/${API_KEY}${NC}"
+        # ==================== 核心修正点 2：修正 API 链接的格式 ====================
+        if [ -n "$ipv4_addr" ]; then
+            local api_url_v4="http://${ipv4_addr}:${HOST_PORT}/${API_KEY}"
+            echo -e "\nIPv4 访问链接:\n${YELLOW}http://${ipv4_addr}:${HOST_PORT}/?api=${api_url_v4}${NC}"
+        fi
+        if [ -n "$ipv6_addr" ]; then
+            local api_url_v6="http://[${ipv6_addr}]:${HOST_PORT}/${API_KEY}"
+            echo -e "\nIPv6 访问链接:\n${YELLOW}http://[${ipv6_addr}]:${HOST_PORT}/?api=${api_url_v6}${NC}"
+        fi
+        # ========================================================================
     fi
-    if [ -n "$ipv6_addr" ]; then
-        echo -e "\nIPv6 访问链接:\n${YELLOW}http://[${ipv6_addr}]:${FRONTEND_PORT}/?api=/${API_KEY}${NC}"
-    fi
-    echo -e "\n===================================================================="
+    echo -e "===================================================================="
 }
 substore_reset_ports() {
     log_info "开始重置 Sub-Store 端口..."
