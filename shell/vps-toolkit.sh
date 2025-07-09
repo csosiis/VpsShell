@@ -684,13 +684,11 @@ select_nodes_for_push() {
         log_warn "没有可推送的节点。"
         return 1
     fi
+    clear
     echo -e "\n请选择要推送的节点：\n"
-    echo "1. 推送所有节点"
-    echo ""
-    echo "2. 推送单个/多个节点"
-    echo ""
-    echo "0. 返回"
-    echo ""
+    echo -e "1. 推送所有节点\n"
+    echo -e "2. 推送单个/多个节点\n"
+    echo -e "0. 返回\n"
     read -p "请输入选项: " push_choice
     selected_links=()
     case $push_choice in
@@ -2169,7 +2167,7 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
     clear
     echo -e "$CYAN-------------------------------------$NC\n "
-    echo -e "           请选择要搭建的节点类型"
+    echo -e "     请选择要搭建的节点类型"
     echo -e "\n$CYAN-------------------------------------$NC\n"
     echo -e "1. VLESS + WSS\n"
     echo -e "2. VMess + WSS\n"
@@ -2203,6 +2201,11 @@ singbox_add_node_orchestrator() {
     echo -e "$GREEN您选择了 [${protocols_to_create[*]}] 协议。$NC"
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)$NC\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
+
+    # ##############【修改点 1】##############
+    # 定义一个变量来存放 allowInsecure 参数
+    local insecure_param=""
+
     if [ "$cert_choice" == "1" ]; then
         echo ""
         while true; do
@@ -2226,6 +2229,10 @@ singbox_add_node_orchestrator() {
         connect_addr="$domain"
         sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
+        # ##############【修改点 2】##############
+        # 如果是自签名证书，则设置 insecure 参数
+        insecure_param="&allowInsecure=1"
+
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
@@ -2341,11 +2348,15 @@ singbox_add_node_orchestrator() {
                 [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
             then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
             if [[ "$protocol" == "VLESS" ]]; then
-                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F#$tag"
+                # ##############【修改点 3】##############
+                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_param}#$tag"
             elif [[ "$protocol" == "VMess" ]]; then
                 local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
                 node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
-            else node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"; fi
+            else
+                # ##############【修改点 4】##############
+                node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_param}#$tag"
+            fi
             ;;
         "Hysteria2")
             config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
