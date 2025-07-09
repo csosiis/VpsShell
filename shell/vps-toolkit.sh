@@ -1553,7 +1553,7 @@ substore_view_access_link() {
     local config_file="/etc/vps-toolkit/substore.conf"; local install_type
     source "$config_file" # 加载配置文件以获取所有变量
 
-    echo -e "\n===================================================================="
+    echo -e "\n====================================================================\n"
     if [[ "$install_type" == "direct" ]] && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
         # 仅在直装模式下检查并使用反代域名
         local reverse_proxy_domain
@@ -1569,7 +1569,7 @@ substore_view_access_link() {
         # ==================== 核心修正点 2：修正 API 链接的格式 ====================
         if [ -n "$ipv4_addr" ]; then
             local api_url_v4="http://${ipv4_addr}:${HOST_PORT}/${API_KEY}"
-            echo -e "\nIPv4 访问链接:\n${YELLOW}http://${ipv4_addr}:${HOST_PORT}/?api=${api_url_v4}${NC}"
+            echo -e "\nIPv4 访问链接:\n\n${YELLOW}http://${ipv4_addr}:${HOST_PORT}/?api=${api_url_v4}${NC}"
         fi
         if [ -n "$ipv6_addr" ]; then
             local api_url_v6="http://[${ipv6_addr}]:${HOST_PORT}/${API_KEY}"
@@ -1577,7 +1577,7 @@ substore_view_access_link() {
         fi
         # ========================================================================
     fi
-    echo -e "===================================================================="
+    echo -e "\n===================================================================="
 }
 substore_reset_ports() {
     log_info "开始重置 Sub-Store 端口..."
@@ -2060,7 +2060,7 @@ substore_main_menu() {
         else
             echo -e "1. ${GREEN}安装 Sub-Store (直装模式)${NC}"
             echo ""
-            echo -e "2. ${BLUE}安装 Sub-Store (Docker模式)${NC}"
+            echo -e "2. ${WHITE}安装 Sub-Store (Docker模式)${NC}"
             echo ""
             echo "0. 返回主菜单"
             echo ""
