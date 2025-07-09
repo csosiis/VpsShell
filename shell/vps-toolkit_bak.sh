@@ -1130,7 +1130,7 @@ substore_do_install() {
             ;;
         amd64 | *) # 默认和 amd64 都使用通用版本
             log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip" # amd64 对应的是不带后缀的通用文件名
+            fnm_zip_name="fnm-linux.zip"
             ;;
     esac
     log_info "正在下载 FNM: ${fnm_zip_name}..."
@@ -1140,6 +1140,8 @@ substore_do_install() {
 
     # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
     export PATH="${FNM_DIR}:$PATH"
+    # 立即评估 fnm 的环境变量，使其在当前会话中生效
+    eval "$(fnm env)"
     log_info "FNM 安装完成。"
 
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."

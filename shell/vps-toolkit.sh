@@ -1108,7 +1108,75 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+# 安装 Sub-Store (通过 Docker Compose)
+substore_do_install_docker() {
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 Sub-Store。"
+        press_any_key
+        return
+    fi
+    clear
+    log_info "开始使用 Docker Compose 搭建 Sub-Store..."
+    echo ""
 
+    local project_dir
+    read -p "请输入 Sub-Store 的安装目录 [默认: /root/sub-store]: " project_dir
+    project_dir=${project_dir:-"/root/sub-store"}
+
+    if [ -f "${project_dir}/docker-compose.yml" ]; then
+        log_error "错误：目录 \"${project_dir}\" 下已存在一个 docker-compose.yml 文件！"
+        log_warn "请为新的 Sub-Store 站点选择一个不同的目录，或先卸载旧版本。"
+        press_any_key
+        return
+    fi
+
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
+    log_info "Sub-Store (Docker) 将被安装在: $(pwd)"
+
+    local API_KEY; local random_api_key; random_api_key=$(generate_random_password)
+    read -p "请输入 API 密钥 (20位随机字符串) [回车则随机生成]: " user_api_key
+    API_KEY=${user_api_key:-$random_api_key}
+    log_info "最终使用的 API 密钥为: ${API_KEY}"
+
+    local SUB_PORT;
+    while true; do
+        read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input
+        SUB_PORT=${port_input:-"3000"}
+        if _is_port_available "$SUB_PORT" "used_ports_for_this_run"; then
+            break
+        fi
+    done
+
+    log_info "正在生成 docker-compose.yml 文件..."
+    cat > docker-compose.yml <<EOF
+version: "3.8"
+services:
+  sub-store:
+    image: xream/sub-store:latest
+    container_name: sub-store
+    restart: always
+    volumes:
+      - ./data:/opt/app/data
+    environment:
+      - SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}
+    ports:
+      - "127.0.0.1:${SUB_PORT}:3000"
+    stdin_open: true
+    tty: true
+EOF
+
+    log_info "正在使用 Docker Compose 启动 Sub-Store 服务...";
+    docker compose up -d
+
+    echo ""
+    log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
+
+    log_info "✅ Sub-Store (Docker) 搭建流程已启动！"
+    log_info "您现在可以通过 http://<服务器IP>:${SUB_PORT} 访问 Sub-Store。"
+    log_warn "如果需要公网域名访问，请使用主菜单的“反向代理”功能进行设置。"
+    press_any_key
+}
 # 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
@@ -1372,32 +1440,48 @@ EOF
     press_any_key
 }
 substore_do_uninstall() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装。"
+    clear
+    log_info "开始执行 Sub-Store 卸载流程..."
+    read -p "请输入您要卸载的 Sub-Store 项目的安装目录: " project_dir
+
+    if [[ -z "$project_dir" ]] || [[ ! -d "$project_dir" ]]; then
+        log_error "目录不存在或未提供！操作中止。"
         press_any_key
         return
     fi
-    echo ""
-    log_warn "你确定要卸载 Sub-Store 吗？此操作不可逆！"
-    echo ""
-    read -p "请输入 Y 确认: " choice
-    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
-        log_info "取消卸载。"
-        press_any_key
-        return
+
+    echo ""; log_warn "警告：此操作将永久删除位于 ${project_dir} 的 Sub-Store！"
+    log_warn "如果这是 Docker 模式，相关的数据卷也将被一并移除！"
+    read -p "如果您确定要继续，请输入大写的 'YES': " confirmation
+
+    if [[ "$confirmation" != "YES" ]]; then
+        log_info "操作已取消。"; press_any_key; return;
     fi
-    log_info "正在停止并禁用服务..."
-    systemctl stop "$SUBSTORE_SERVICE_NAME" || true
-    systemctl disable "$SUBSTORE_SERVICE_NAME" || true
-    log_info "正在删除服务文件..."
-    rm -f "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    log_info "正在删除项目文件和 Node.js 环境..."
-    rm -rf "$SUBSTORE_INSTALL_DIR"
-    rm -rf "/root/.local"
-    rm -rf "/root/.pnpm-state.json"
-    log_info "✅ Sub-Store 已成功卸载。"
-    press_any_key
+
+    # 智能判断卸载模式
+    if [ -f "${project_dir}/docker-compose.yml" ]; then
+        # Docker 模式卸载
+        log_info "检测到 Docker 模式，正在关闭并移除容器和数据卷..."
+        cd "$project_dir" && docker compose down -v
+        if [ $? -eq 0 ]; then
+            log_info "✅ Docker 容器、网络和数据卷已成功移除。"
+        else
+            log_error "执行 'docker compose down -v' 失败！可能需要您手动检查。"
+        fi
+        read -p "是否要删除主机上的项目目录 ${project_dir} 本身？(y/N): " delete_dir_choice
+        if [[ "$delete_dir_choice" =~ ^[Yy]$ ]]; then
+            rm -rf "$project_dir"
+            log_info "✅ 项目目录已删除。"
+        fi
+    else
+        # 直装模式卸载
+        log_info "检测到直装模式，正在执行清理..."
+        log_info "正在停止并禁用服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME" || true; systemctl disable "$SUBSTORE_SERVICE_NAME" || true
+        log_info "正在删除服务文件..."; rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
+        log_info "正在删除项目文件和 Node.js 环境..."; rm -rf "$project_dir" "$HOME/.local/share/fnm" "$HOME/.local/share/pnpm" "$HOME/.pnpm-state.json"
+    fi
+
+    log_info "✅ Sub-Store 卸载完成。"; press_any_key
 }
 update_sub_store_app() {
     ensure_dependencies "curl" "unzip"
@@ -1904,46 +1988,44 @@ substore_manage_menu() {
 substore_main_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo ""
+        echo -e "${WHITE}=============================${NC}"
+        echo ""
+        echo -e "${WHITE}      Sub-Store 管理菜单      ${NC}"
+        echo ""
+        echo -e "${WHITE}=============================${NC}"
+        echo ""
         if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            echo "1. 管理 Sub-Store"
+            echo ""
+            echo -e "2. ${GREEN}更新 Sub-Store 应用${NC}"
+            echo ""
+            echo -e "3. ${RED}卸载 Sub-Store${NC}"
+            echo ""
+            echo "0. 返回主菜单"
+            echo ""
+            echo "-----------------------------"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *)
-                log_warn "无效选项！"
-                sleep 1
-                ;;
+                1) substore_manage_menu ;; 2) update_sub_store_app ;;
+                3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            echo -e "1. ${GREEN}安装 Sub-Store (直装模式)${NC}"
+            echo ""
+            echo -e "2. ${BLUE}安装 Sub-Store (Docker模式)${NC}"
+            echo ""
+            echo "0. 返回主菜单"
+            echo ""
+            echo "-----------------------------"
+            echo ""
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *)
-                log_warn "无效选项！"
-                sleep 1
-                ;;
+                1) substore_do_install ;;
+                2) substore_do_install_docker ;;
+                0) break ;;
+                *) log_warn "无效选项！"; sleep 1 ;;
             esac
         fi
     done
