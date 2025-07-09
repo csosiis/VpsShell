@@ -684,6 +684,7 @@ select_nodes_for_push() {
         log_warn "没有可推送的节点。"
         return 1
     fi
+    clear;
     echo -e "\n请选择要推送的节点：\n"
     echo "1. 推送所有节点"
     echo ""
@@ -702,9 +703,9 @@ select_nodes_for_push() {
         done
         ;;
     2)
+        clear
         echo ""
-        log_info "请选择要推送的节点 (可多选，用空格分隔):"
-        echo ""
+        echo -e "${WHITE}请选择要推送的节点 (可多选，用空格分隔):${NC}\N"
         for i in "${!node_lines[@]}"; do
             line="${node_lines[$i]}"
             node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
@@ -882,6 +883,7 @@ generate_subscription_link() {
     local sub_url="http://$host/$sub_filename"
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
+    echo ""
     log_warn "此链接将在您按键返回后被自动删除。"
     echo -e "$CYAN--------------------------------------------------------------$NC"
     echo -e "\n$YELLOW$sub_url$NC\n"
@@ -925,7 +927,7 @@ view_node_info() {
         # =================================================================================
 
         # 在菜单中保留“生成临时订阅链接”的选项
-        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}\n\n5. ${YELLOW}[诊断] 为 TUIC 节点生成客户端配置${NC}\n\n0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点\n\n3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}  0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
         case $choice in
