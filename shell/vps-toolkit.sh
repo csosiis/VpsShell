@@ -1117,7 +1117,7 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点 1：回归稳定可靠的 FNM 安装方式 ====================
+    # ==================== 核心修正点：回归稳定可靠的 FNM 安装方式 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
@@ -1128,9 +1128,9 @@ substore_do_install() {
             log_info "检测到 ARM64/AArch64 架构..."
             fnm_zip_name="fnm-linux-aarch64.zip"
             ;;
-        amd64 | *) # 默认和 amd64 都使用通用版本
+        amd64 | *) # 默认和 amd64 都使用不带后缀的通用版本
             log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip" # amd64 对应的是不带后缀的通用文件名
+            fnm_zip_name="fnm-linux.zip"
             ;;
     esac
     log_info "正在下载 FNM: ${fnm_zip_name}..."
@@ -1163,7 +1163,7 @@ substore_do_install() {
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
     local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
-    # ==================== 核心修正点 2：ExecStart 回归使用 fnm exec ====================
+    # ==================== 核心修正点：ExecStart 回归使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
