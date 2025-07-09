@@ -1202,18 +1202,31 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
+    # ==================== 核心修正点 1：回归稳定可靠的 FNM 安装方式 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
+    # 自动检测架构并下载正确的 fnm 版本
     local fnm_zip_name
     case $(dpkg --print-architecture) in
-        arm64 | aarch64) fnm_zip_name="fnm-linux-aarch64.zip";;
-        amd64 | *) fnm_zip_name="fnm-linux.zip";;
+        arm64 | aarch64)
+            log_info "检测到 ARM64/AArch64 架构..."
+            fnm_zip_name="fnm-linux-aarch64.zip"
+            ;;
+        amd64 | *) # 默认和 amd64 都使用通用版本
+            log_info "检测到 AMD64 (x86_64) 架构..."
+            fnm_zip_name="fnm-linux.zip"
+            ;;
     esac
-    log_info "检测到系统架构为 $(dpkg --print-architecture)，将下载 FNM: ${fnm_zip_name}..."
+    log_info "正在下载 FNM: ${fnm_zip_name}..."
     curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
+
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
+
+    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
     export PATH="${FNM_DIR}:$PATH"
+    # 立即评估 fnm 的环境变量，使其在当前会话中生效
+    eval "$(fnm env)"
     log_info "FNM 安装完成。"
 
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
@@ -1225,18 +1238,19 @@ substore_do_install() {
     export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
+    # (后续的 Sub-Store 下载和配置代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-
     log_info "开始配置系统服务..."; echo ""
     local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
     local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
+    # ==================== 核心修正点 2：ExecStart 回归使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
@@ -1264,39 +1278,11 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # ==================== 核心修正点：使用最稳健的方式启动并验证服务 ====================
-    log_info "正在启动并启用 sub-store 服务..."
-    systemctl daemon-reload
-    systemctl enable "$SUBSTORE_SERVICE_NAME"
-    systemctl start "$SUBSTORE_SERVICE_NAME"
-
-    log_info "正在检测服务状态 (最多等待10秒)..."
-    local service_active=false
-    for i in {1..5}; do
-        if systemctl status "$SUBSTORE_SERVICE_NAME" | grep -q "Active: active (running)"; then
-            service_active=true
-            break
-        fi
-        sleep 2
-    done
-    set +e
-
-    if $service_active; then
-        mkdir -p /etc/vps-toolkit
-        cat > /etc/vps-toolkit/substore.conf << EOF
-INSTALL_TYPE="direct"
-PROJECT_DIR="${SUBSTORE_INSTALL_DIR}"
-API_KEY="${API_KEY}"
-HOST_PORT="${FRONTEND_PORT}"
-EOF
-        log_info "✅ 服务状态正常 (active)。"
-        substore_view_access_link
-    else
-        log_error "服务启动失败！请使用日志功能排查。"
-    fi
     # ====================================================================================
 
+    log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
+    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
@@ -2084,9 +2070,9 @@ substore_main_menu() {
             echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (直装模式)${NC}                ${CYAN}║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (直装模式)${NC}                    ${CYAN}║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. ${BLUE}安装 Sub-Store (Docker模式)${NC}               ${CYAN}║$NC"
+            echo -e "$CYAN║$NC   2. ${BLUE}安装 Sub-Store (Docker模式)${NC}                 ${CYAN}║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  ${CYAN}║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
