@@ -2342,35 +2342,43 @@ singbox_add_node_orchestrator() {
             insecure_param="&allowInsecure=1" # 为 VLESS 和 Trojan 准备
         fi
 
+        # ==================== 核心修正点：为所有自签证书模式生成正确的分享链接 ====================
+        local insecure_param=""
+        if [ "$cert_choice" == "2" ]; then
+            # VLESS, Trojan, VMess 使用 allowInsecure=1
+            # Hysteria2, TUIC 使用 insecure=1
+            if [[ "$protocol" == "Hysteria2" || "$protocol" == "TUIC" ]]; then
+                insecure_param="&insecure=1"
+            else
+                insecure_param="&allowInsecure=1"
+            fi
+        fi
+
         case $protocol in
             "VLESS"|"VMess"|"Trojan")
-                # 服务器端 config 的生成逻辑保持不变
                 config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[$(if [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]; then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":${tls_config_tcp},\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-
-                # 在生成分享链接时，加入 insecure 参数
                 if [[ "$protocol" == "VLESS" ]]; then
                     node_link="vless://${uuid}@${connect_addr}:${current_port}?type=ws&security=tls&sni=${sni_domain}&host=${sni_domain}&path=%2F${insecure_param}#${tag}"
                 elif [[ "$protocol" == "VMess" ]]; then
-                    # 对于 VMess，我们直接修改 JSON 对象来添加 "skip-cert-verify": true
                     local vmess_json_obj
                     vmess_json_obj=$(jq -n --arg ps "$tag" --arg add "$connect_addr" --arg port "$current_port" --arg id "$uuid" --arg host "$sni_domain" '{v:"2", ps:$ps, add:$add, port:$port, id:$id, aid:"0", net:"ws", type:"none", host:$host, path:"/", tls:"tls"}')
                     if [ "$cert_choice" == "2" ]; then
                         vmess_json_obj=$(echo "$vmess_json_obj" | jq '. + {"skip-cert-verify": true}')
                     fi
                     node_link="vmess://$(echo -n "$vmess_json_obj" | base64 -w 0)"
-                else # Trojan
+                else
                     node_link="trojan://${password}@${connect_addr}:${current_port}?security=tls&sni=${sni_domain}&type=ws&host=${sni_domain}&path=/${insecure_param}#${tag}"
                 fi
                 ;;
             "Hysteria2")
-                # 为 Hysteria2 单独处理 insecure 参数
-                if [ "$cert_choice" == "2" ]; then insecure_param="&insecure=1"; fi
-                # 服务器端 config 的生成逻辑保持不变
                 config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"password\":\"$password\"}],\"tls\":${tls_config_udp},\"up_mbps\":100,\"down_mbps\":1000}"
                 node_link="hysteria2://${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3${insecure_param}#${tag}"
                 ;;
+            "TUIC")
+                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":${current_port},\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":${tls_config_udp}}"
+                node_link="tuic://${uuid}:${password}@${connect_addr}:${current_port}?sni=${sni_domain}&alpn=h3&congestion_control=bbr${insecure_param}#${tag}"
+                ;;
         esac
-        # ================================================================================
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
             ((success_count++))
             final_node_link="$node_link"
