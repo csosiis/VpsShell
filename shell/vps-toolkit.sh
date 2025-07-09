@@ -1105,48 +1105,35 @@ singbox_do_uninstall() {
     fi
     press_any_key
 }
+# 检查 Sub-Store 是否已安装 (v3.0 - 统一检查配置文件)
 is_substore_installed() {
-    if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
+    # 只要总配置文件存在，就认为已安装
+    if [ -f "/etc/vps-toolkit/substore.conf" ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 # 安装 Sub-Store (通过 Docker Compose)
 substore_do_install_docker() {
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建 Sub-Store。"
-        press_any_key
-        return
-    fi
-    clear
-    log_info "开始使用 Docker Compose 搭建 Sub-Store..."
-    echo ""
-
-    local project_dir
-    read -p "请输入 Sub-Store 的安装目录 [默认: /root/sub-store]: " project_dir
-    project_dir=${project_dir:-"/root/sub-store"}
-
-    if [ -f "${project_dir}/docker-compose.yml" ]; then
-        log_error "错误：目录 \"${project_dir}\" 下已存在一个 docker-compose.yml 文件！"
-        log_warn "请为新的 Sub-Store 站点选择一个不同的目录，或先卸载旧版本。"
-        press_any_key
-        return
-    fi
-
-    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
-    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
+    if ! _install_docker_and_compose; then log_error "Docker 环境准备失败。"; press_any_key; return; fi
+    clear; log_info "开始使用 Docker Compose 搭建 Sub-Store..."; echo ""
+    local project_dir;
+    while true; do
+        read -p "请输入 Sub-Store (Docker) 的安装目录 [默认: /root/sub-store-docker]: " project_dir
+        project_dir=${project_dir:-"/root/sub-store-docker"}
+        if [ -d "$project_dir" ] && [ "$(ls -A "$project_dir")" ]; then
+            log_error "错误：目录 \"${project_dir}\" 已存在且不为空！"
+            log_warn "请为新的 Sub-Store 站点选择一个不同的或空的目录。"
+            echo ""
+            continue
+        else break; fi
+    done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }; cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
     log_info "Sub-Store (Docker) 将被安装在: $(pwd)"
 
-    local API_KEY; local random_api_key; random_api_key=$(generate_random_password)
-    read -p "请输入 API 密钥 (20位随机字符串) [回车则随机生成]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    log_info "最终使用的 API 密钥为: ${API_KEY}"
-
-    local SUB_PORT;
-    while true; do
-        read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input
-        SUB_PORT=${port_input:-"3000"}
-        if _is_port_available "$SUB_PORT" "used_ports_for_this_run"; then
-            break
-        fi
-    done
+    local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; log_info "最终使用的 API 密钥为: ${API_KEY}"
+    local SUB_PORT; while true; do read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input; SUB_PORT=${port_input:-"3000"}; if _is_port_available "$SUB_PORT" "used_ports_for_this_run"; then break; fi; done
 
     log_info "正在生成 docker-compose.yml 文件..."
     cat > docker-compose.yml <<EOF
@@ -1165,16 +1152,26 @@ services:
     stdin_open: true
     tty: true
 EOF
+    log_info "正在启动 Sub-Store 服务..."; docker compose up -d
+    echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
 
-    log_info "正在使用 Docker Compose 启动 Sub-Store 服务...";
-    docker compose up -d
+    # ==================== 核心修正点 1：创建总配置文件 ====================
+    mkdir -p /etc/vps-toolkit
+    cat > /etc/vps-toolkit/substore.conf << EOF
+INSTALL_TYPE="docker"
+PROJECT_DIR="${project_dir}"
+API_KEY="${API_KEY}"
+HOST_PORT="${SUB_PORT}"
+EOF
+    log_info "已创建 Sub-Store 配置文件。"
+    # ===================================================================
 
-    echo ""
-    log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
+    log_info "✅ WordPress 搭建流程已启动！"
 
-    log_info "✅ Sub-Store (Docker) 搭建流程已启动！"
-    log_info "您现在可以通过 http://<服务器IP>:${SUB_PORT} 访问 Sub-Store。"
-    log_warn "如果需要公网域名访问，请使用主菜单的“反向代理”功能进行设置。"
+    # ==================== 核心修正点 2：调用显示链接函数 ====================
+    substore_view_access_link
+    # ====================================================================
+
     press_any_key
 }
 # 安装 Sub-Store
@@ -1439,48 +1436,55 @@ EOF
     fi
     press_any_key
 }
+# 卸载 Sub-Store (v3.0 - 智能判断模式)
 substore_do_uninstall() {
     clear
     log_info "开始执行 Sub-Store 卸载流程..."
-    read -p "请输入您要卸载的 Sub-Store 项目的安装目录: " project_dir
 
-    if [[ -z "$project_dir" ]] || [[ ! -d "$project_dir" ]]; then
-        log_error "目录不存在或未提供！操作中止。"
-        press_any_key
-        return
+    # 统一的配置文件路径
+    local config_file="/etc/vps-toolkit/substore.conf"
+
+    if [ ! -f "$config_file" ]; then
+        # 兼容旧的直装模式卸载
+        log_warn "未找到 Sub-Store 统一配置文件，将尝试按旧的直装模式卸载..."
+        if [ ! -f "$SUBSTORE_SERVICE_FILE" ]; then
+            log_error "未找到任何 Sub-Store 安装迹象。"; press_any_key; return;
+        fi
+        read -p "请输入直装模式的安装目录 [默认: /root/sub-store]: " project_dir
+        project_dir=${project_dir:-"/root/sub-store"}
+    else
+        # 从配置文件读取安装信息
+        source "$config_file"
+        project_dir="$PROJECT_DIR"
     fi
 
     echo ""; log_warn "警告：此操作将永久删除位于 ${project_dir} 的 Sub-Store！"
-    log_warn "如果这是 Docker 模式，相关的数据卷也将被一并移除！"
     read -p "如果您确定要继续，请输入大写的 'YES': " confirmation
-
-    if [[ "$confirmation" != "YES" ]]; then
-        log_info "操作已取消。"; press_any_key; return;
-    fi
+    if [[ "$confirmation" != "YES" ]]; then log_info "操作已取消。"; press_any_key; return; fi
 
     # 智能判断卸载模式
     if [ -f "${project_dir}/docker-compose.yml" ]; then
         # Docker 模式卸载
         log_info "检测到 Docker 模式，正在关闭并移除容器和数据卷..."
         cd "$project_dir" && docker compose down -v
-        if [ $? -eq 0 ]; then
-            log_info "✅ Docker 容器、网络和数据卷已成功移除。"
-        else
-            log_error "执行 'docker compose down -v' 失败！可能需要您手动检查。"
-        fi
-        read -p "是否要删除主机上的项目目录 ${project_dir} 本身？(y/N): " delete_dir_choice
-        if [[ "$delete_dir_choice" =~ ^[Yy]$ ]]; then
-            rm -rf "$project_dir"
-            log_info "✅ 项目目录已删除。"
-        fi
+        if [ $? -eq 0 ]; then log_info "✅ Docker 容器、网络和数据卷已成功移除。"; else log_error "执行 'docker compose down -v' 失败！"; fi
     else
         # 直装模式卸载
         log_info "检测到直装模式，正在执行清理..."
-        log_info "正在停止并禁用服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME" || true; systemctl disable "$SUBSTORE_SERVICE_NAME" || true
-        log_info "正在删除服务文件..."; rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
-        log_info "正在删除项目文件和 Node.js 环境..."; rm -rf "$project_dir" "$HOME/.local/share/fnm" "$HOME/.local/share/pnpm" "$HOME/.pnpm-state.json"
+        systemctl stop "$SUBSTORE_SERVICE_NAME" &>/dev/null; systemctl disable "$SUBSTORE_SERVICE_NAME" &>/dev/null
+        rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
+        log_info "✅ Systemd 服务已移除。"
     fi
 
+    read -p "是否要删除主机上的项目目录 ${project_dir} 本身？(y/N): " delete_dir_choice
+    if [[ "$delete_dir_choice" =~ ^[Yy]$ ]]; then
+        rm -rf "$project_dir"
+        log_info "✅ 项目目录已删除。"
+    fi
+
+    # 清理总配置文件
+    rm -f "$config_file"
+    log_info "✅ Sub-Store 配置文件已清理。"
     log_info "✅ Sub-Store 卸载完成。"; press_any_key
 }
 update_sub_store_app() {
@@ -1508,30 +1512,39 @@ update_sub_store_app() {
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！"; else log_error "Sub-Store 更新后重启失败！请使用 '查看日志' 功能进行排查。"; fi
     press_any_key
 }
+# 查看访问链接 (v3.0 - 智能判断模式)
 substore_view_access_link() {
-    echo ""
-    log_info "正在读取配置并生成访问链接..."
-    if ! is_substore_installed; then
-        echo ""
-        log_error "Sub-Store尚未安装。"
-        press_any_key
-        return
-    fi
-    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    echo -e "\n===================================================================="
-    if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
-        ACCESS_URL="https://$REVERSE_PROXY_DOMAIN/subs?api=https://$REVERSE_PROXY_DOMAIN$API_KEY"
-        echo -e "\n您的 Sub-Store 反代访问链接如下：\n\n$YELLOW$ACCESS_URL$NC\n"
+    echo ""; log_info "正在读取配置并生成访问链接...";
+    if ! is_substore_installed; then echo ""; log_error "Sub-Store尚未安装。"; press_any_key; return; fi
+
+    local config_file="/etc/vps-toolkit/substore.conf"
+    # 检查新的总配置文件是否存在，并加载它
+    if [ ! -f "$config_file" ]; then
+        # 为兼容旧的直装模式，如果总配置文件不存在，则尝试从 systemd 文件读取
+        REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"/')
+        FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
     else
-        SERVER_IP_V4=$(curl -s http://ipv4.icanhazip.com)
-        if [ -n "$SERVER_IP_V4" ]; then
-            ACCESS_URL_V4="http://$SERVER_IP_V4:$FRONTEND_PORT/subs?api=http://$SERVER_IP_V4:$FRONTEND_PORT$API_KEY"
-            echo -e "\n您的 Sub-Store IPv4 访问链接如下：\n\n$YELLOW$ACCESS_URL_V4$NC\n"
-        fi
+        # 从总配置文件加载变量
+        source "$config_file"
+        # Docker 模式下没有反代，所以 REVERSE_PROXY_DOMAIN 为空
+        REVERSE_PROXY_DOMAIN=""
+        FRONTEND_PORT="$HOST_PORT"
     fi
-    echo -e "===================================================================="
+
+    echo -e "\n===================================================================="
+    # Docker 模式下，总是显示 IP 链接
+    log_info "您可以通过以下 IP 地址访问您的 Sub-Store："
+    local ipv4_addr; ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+    local ipv6_addr; ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
+
+    if [ -n "$ipv4_addr" ]; then
+        echo -e "\nIPv4 访问链接:\n${YELLOW}http://${ipv4_addr}:${FRONTEND_PORT}/?api=/${API_KEY}${NC}"
+    fi
+    if [ -n "$ipv6_addr" ]; then
+        echo -e "\nIPv6 访问链接:\n${YELLOW}http://[${ipv6_addr}]:${FRONTEND_PORT}/?api=/${API_KEY}${NC}"
+    fi
+    echo -e "\n===================================================================="
 }
 substore_reset_ports() {
     log_info "开始重置 Sub-Store 端口..."
