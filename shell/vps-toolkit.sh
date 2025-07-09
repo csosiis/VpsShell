@@ -1282,7 +1282,21 @@ EOF
 
     log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
     log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
+    if systemctl status "$SERVICE_NAME" | grep -q "Active: active (running)"; then
+        # -------------------- 核心修正点：在这里创建总配置文件 --------------------
+        mkdir -p /etc/vps-toolkit
+        cat > /etc/vps-toolkit/substore.conf << EOF
+INSTALL_TYPE="direct"
+PROJECT_DIR="${SUBSTORE_INSTALL_DIR}"
+API_KEY="${API_KEY}"
+HOST_PORT="${FRONTEND_PORT}"
+EOF
+        # --------------------------------------------------------------------------
+        log_info "✅ 服务状态正常 (active)。"
+        substore_view_access_link
+    else
+        log_error "服务启动失败！请使用日志功能排查。"
+    fi
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
@@ -2070,7 +2084,7 @@ substore_main_menu() {
             echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装${NC}                              ${CYAN}║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (直装模式)${NC}                    ${CYAN}║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (直装模式)${NC}                   ${CYAN}║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   2. ${BLUE}安装 Sub-Store (Docker模式)${NC}                 ${CYAN}║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
