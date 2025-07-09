@@ -2170,7 +2170,7 @@ singbox_add_node_orchestrator() {
     # ##############【修改点 1 - 菜单风格替换】##############
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择            $CYAN║$NC"
+    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择                $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
