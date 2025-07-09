@@ -93,34 +93,6 @@ ensure_dependencies() {
     fi
     echo ""
 }
-ensure_dependencies() {
-    local dependencies=("$@")
-    local missing_dependencies=()
-    if [ ${#dependencies[@]} -eq 0 ]; then
-        return 0
-    fi
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
-    for pkg in "${dependencies[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-            missing_dependencies+=("$pkg")
-        fi
-    done
-    if [ ${#missing_dependencies[@]} -gt 0 ]; then
-        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并开始安装..."
-        set -e
-        apt-get update -y
-        for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装 $pkg..."
-            apt-get install -y "$pkg"
-        done
-        set +e
-        log_info "按需依赖已安装完毕。"
-    else
-        log_info "所需依赖均已安装。"
-    fi
-    echo ""
-}
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
@@ -821,25 +793,6 @@ push_to_telegram() {
     echo "tg_chat_id=$tg_chat_id" >>"$tg_config_file"
     log_info "✅ 节点信息已成功推送到 Telegram！"
     press_any_key
-}
-push_nodes() {
-    ensure_dependencies "jq" "curl"
-    clear
-    echo -e "$WHITE--- 推送节点 ---$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo "2. 推送到 Telegram Bot"
-    echo ""
-    echo "0. 返回"
-    read -p "请选择推送方式: " push_choice
-    case $push_choice in
-    1) push_to_sub_store ;;
-    2) push_to_telegram ;;
-    0) return ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        ;;
-    esac
 }
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
@@ -2104,6 +2057,8 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   11. $YELLOW哪吒探针V0V1 $NC                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2125,6 +2080,16 @@ main_menu() {
         7) setup_auto_reverse_proxy ;;
         8) do_update_script ;;
         9) setup_shortcut ;;
+        11)
+            isolate_nezha_v1
+            # $? 变量会保存上一个命令（也就是我们的函数）的返回值
+            if [ $? -eq 0 ]; then
+                log_info "V1 隔离操作成功完成！"
+            else
+                log_error "V1 隔离操作失败，请检查上面的日志。"
+            fi
+            press_any_key # 等待用户按键后才返回主菜单
+            ;;
         0) exit 0 ;;
         *)
             log_error "无效选项！"
@@ -2133,6 +2098,73 @@ main_menu() {
         esac
     done
 }
+isolate_nezha_v1() {
+  # --- 使用 local 声明局部变量，避免污染主脚本 ---
+  local DEFAULT_SERVICE_NAME="nezha-agent"
+  local V1_SERVICE_NAME="nezha-agent-v1"
+  local DEFAULT_PATH="/opt/nezha/agent/" # 注意末尾的斜杠
+  local V1_PATH="/opt/nezha/agent-v1/"   # 注意末尾的斜杠
+  local SERVICE_FILE_PATH="/etc/systemd/system"
+  local DEFAULT_PATH_NO_SLASH
+
+  # --- 函数主体逻辑 ---
+  echo "✅ 开始执行哪吒 V1 探针隔离函数..."
+  echo "-------------------------------------------"
+
+  # 检查是否以 root 权限运行
+  if [ "$EUID" -ne 0 ]; then
+    echo "错误：此函数需要以 sudo/root 权限运行。"
+    return 1 # 返回失败状态码
+  fi
+
+  # 检查原始服务是否存在
+  if ! systemctl list-units --full -all | grep -Fq "${DEFAULT_SERVICE_NAME}.service"; then
+    echo "错误：未找到原始服务 ${DEFAULT_SERVICE_NAME}.service。请确认 V1 探针已正确安装且未被处理过。"
+    return 1
+  fi
+
+  echo "➡️ [1/7] 正在停止当前的 ${DEFAULT_SERVICE_NAME} 服务..."
+  systemctl stop "${DEFAULT_SERVICE_NAME}.service" || { echo "停止服务失败"; return 1; }
+
+  echo "➡️ [2/7] 正在将服务文件重命名为 ${V1_SERVICE_NAME}.service..."
+  mv "${SERVICE_FILE_PATH}/${DEFAULT_SERVICE_NAME}.service" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [3/7] 正在为 V1 创建专属目录 ${V1_PATH}..."
+  mkdir -p "${V1_PATH}"
+
+  echo "➡️ [4/7] 正在移动 V1 程序文件..."
+  DEFAULT_PATH_NO_SLASH=$(echo "$DEFAULT_PATH" | sed 's:/*$::')
+  if [ -d "$DEFAULT_PATH_NO_SLASH" ] && [ "$(ls -A ${DEFAULT_PATH_NO_SLASH} 2>/dev/null)" ]; then
+      mv ${DEFAULT_PATH_NO_SLASH}/* "${V1_PATH}"
+  else
+      echo "   - 警告：原始目录 ${DEFAULT_PATH_NO_SLASH} 为空或不存在，可能已被处理。继续..."
+  fi
+
+  echo "➡️ [5/7] 正在自动修改服务文件中的所有相关路径..."
+  sed -i "s|${DEFAULT_PATH}|${V1_PATH}|g" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [6/7] 正在重新加载 systemd 配置、设置开机自启并重启服务..."
+  systemctl daemon-reload
+  systemctl enable "${V1_SERVICE_NAME}.service"
+  systemctl restart "${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [7/7] 操作完成！正在检查 ${V1_SERVICE_NAME} 的最终状态..."
+  sleep 2
+
+  # 检查服务最终是否成功运行
+  if ! systemctl is-active --quiet "${V1_SERVICE_NAME}.service"; then
+      echo "错误：${V1_SERVICE_NAME}.service 未能成功启动。请检查日志。"
+      systemctl status "${V1_SERVICE_NAME}.service" --no-pager
+      return 1
+  fi
+
+  systemctl status "${V1_SERVICE_NAME}.service" --no-pager
+  echo "-------------------------------------------"
+  echo "✅ 函数执行成功！${V1_SERVICE_NAME} 服务已独立运行。"
+
+  return 0 # 返回成功状态码
+}
+
 post_add_node_menu() {
     while true; do
         echo ""
