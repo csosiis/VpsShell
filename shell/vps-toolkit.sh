@@ -1114,85 +1114,86 @@ is_substore_installed() {
         return 1
     fi
 }
-# 安装 Sub-Store (通过 Docker Compose)
-substore_do_install_docker() {
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建 Sub-Store。"
-        press_any_key
-        return
+# 安装 Sub-Store (直装模式)
+substore_do_install() {
+    ensure_dependencies "curl" "unzip" "git"
+    echo ""; log_info "开始执行 Sub-Store (直装模式) 安装流程...";
+    if [ -f "$SUBSTORE_CONFIG_FILE" ]; then
+        log_error "错误：检测到已存在的 Sub-Store 安装！"
+        log_warn "请先使用卸载功能，或手动删除 /etc/vps-toolkit/substore.conf 文件后再试。"
+        press_any_key; return;
     fi
-    clear
-    log_info "开始使用 Docker Compose 搭建 Sub-Store..."
-    echo ""
+    set -e
+    log_info "正在安装 FNM, Node.js 和 PNPM...";
+    FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
+    local fnm_zip_name; case $(dpkg --print-architecture) in arm64|aarch64) fnm_zip_name="fnm-linux-aarch64.zip";; amd64|*) fnm_zip_name="fnm-linux.zip";; esac
+    log_info "检测到架构 $(dpkg --print-architecture)，下载 FNM: ${fnm_zip_name}..."; curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
+    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
+    export PATH="${FNM_DIR}:$PATH"; eval "$(fnm env)"; log_info "FNM 安装完成。"
+    log_info "正在安装 Node.js (v20.18.0)..."; fnm install v20.18.0; fnm use v20.18.0
+    log_info "正在安装 pnpm..."; curl -fsSL https://get.pnpm.io/install.sh | sh -
+    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"; log_info "Node.js 和 PNPM 环境准备就绪。"
+    log_info "正在下载并设置 Sub-Store 项目文件..."; mkdir -p "/root/sub-store"; cd "/root/sub-store"
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip; log_info "Sub-Store 项目文件准备就绪。"
+    log_info "开始配置系统服务..."; echo ""
+    local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 API 密钥 [回车则随机]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终 API 密钥为: ${API_KEY}"
+    local FRONTEND_PORT; while true; do read -p "请输入前端端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
+    local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
+    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
+[Unit]
+Description=Sub-Store Service
+After=network-online.target
+[Service]
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
+Environment="SUB_STORE_FRONTEND_PATH=/root/sub-store/frontend"
+Environment="SUB_STORE_HOST=::"
+Environment="SUB_STORE_PORT=${FRONTEND_PORT}"
+Environment="SUB_STORE_DATA_BASE_PATH=/root/sub-store"
+Environment="SUB_STORE_API_HOST=127.0.0.1"
+Environment="SUB_STORE_API_PORT=${BACKEND_PORT}"
+ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node /root/sub-store/sub-store.bundle.js
+Type=simple; User=root; Group=root; Restart=on-failure; RestartSec=5s
+StandardOutput=journal; StandardError=journal
+[Install]
+WantedBy=multi-user.target
+EOF
 
-    local project_dir
-    while true; do
-        read -p "请输入 Sub-Store (Docker) 的安装目录 [默认: /root/sub-store]: " project_dir
-        project_dir=${project_dir:-"/root/sub-store"}
-        if [ -f "${project_dir}/docker-compose.yml" ]; then
-            log_error "错误：目录 \"${project_dir}\" 下已存在一个 docker-compose.yml 文件！"
-            log_warn "请为新的 Sub-Store 站点选择一个不同的目录，或先卸载旧版本。"
-            echo ""
-            continue
-        else break; fi
-    done
+    # ==================== 核心修正点：使用硬编码的服务名和循环检查 ====================
+    log_info "正在启动并启用 sub-store.service ..."
+    systemctl daemon-reload
+    systemctl enable sub-store.service
+    systemctl start sub-store.service
 
-    mkdir -p "$project_dir" || { log_error "无法创建目录 ${project_dir}！"; press_any_key; return 1; }
-    cd "$project_dir" || { log_error "无法进入目录 ${project_dir}！"; press_any_key; return 1; }
-    log_info "Sub-Store (Docker) 将被安装在: $(pwd)"
-
-    local API_KEY; local random_api_key; random_api_key=$(generate_random_password)
-    read -p "请输入 API 密钥 [默认: 20位随机字符串]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    log_info "最终使用的 API 密钥为: ${API_KEY}"
-
-    local SUB_PORT;
-    while true; do
-        read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input
-        SUB_PORT=${port_input:-"3000"}
-        if _is_port_available "$SUB_PORT" "used_ports_for_this_run"; then
+    log_info "正在检测服务状态 (最多等待10秒)..."
+    local service_active=false
+    for i in {1..5}; do
+        if systemctl status sub-store.service | grep -q "Active: active (running)"; then
+            service_active=true
             break
         fi
+        sleep 2
     done
+    set +e
 
-    log_info "正在生成 docker-compose.yml 文件..."
-    # ==================== 核心修正点：增加 SUB_STORE_FRONTEND_PATH 环境变量 ====================
-    cat > docker-compose.yml <<EOF
-version: "3.8"
-services:
-  sub-store:
-    image: xream/sub-store:latest
-    container_name: sub-store
-    restart: always
-    volumes:
-      - ./data:/opt/app/data
-    environment:
-      - SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}
-      - SUB_STORE_FRONTEND_PATH=/opt/app/frontend
-    ports:
-      - "${SUB_PORT}:3000"
-    stdin_open: true
-    tty: true
-EOF
-    # =======================================================================================
-
-    log_info "正在使用 Docker Compose 启动 Sub-Store 服务...";
-    docker compose up -d
-
-    echo ""; log_info "正在检查服务状态..."; sleep 5; docker compose ps; echo ""
-
-    mkdir -p /etc/vps-toolkit
-    cat > /etc/vps-toolkit/substore.conf << EOF
-INSTALL_TYPE="docker"
-PROJECT_DIR="${project_dir}"
+    if $service_active; then
+        mkdir -p /etc/vps-toolkit
+        cat > "$SUBSTORE_CONFIG_FILE" << EOF
+INSTALL_TYPE="direct"
+PROJECT_DIR="/root/sub-store"
 API_KEY="${API_KEY}"
-HOST_PORT="${SUB_PORT}"
+HOST_PORT="${FRONTEND_PORT}"
 EOF
-    log_info "已创建 Sub-Store 配置文件。"
-    log_info "✅ Sub-Store (Docker) 搭建流程已启动！"
+        log_info "✅ 服务状态正常 (active)。"
+        substore_view_access_link
+    else
+        log_error "服务启动失败！请使用日志功能排查。"
+    fi
+    # ====================================================================================
 
-    substore_view_access_link
-    press_any_key
+    echo ""; read -p "安装已完成，是否立即设置反向代理? (y/N): " choice
+    if [[ "$choice" == "y" || "$choice" == "Y" ]]; then setup_auto_reverse_proxy; else press_any_key; fi
 }
 # 安装 Sub-Store
 substore_do_install() {
