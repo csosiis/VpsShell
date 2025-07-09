@@ -890,57 +890,52 @@ generate_subscription_link() {
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
 }
+# 显示/管理节点信息
 view_node_info() {
     while true; do
-        clear
-        echo ""
+        clear; echo "";
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
             read -p "请输入选项: " choice
-            if [[ "$choice" == "1" ]]; then
-                singbox_add_node_orchestrator
-                continue
-            else return; fi
+            if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
         fi
+
         log_info "当前已配置的节点链接信息："
-        echo -e "$CYAN--------------------------------------------------------------$NC"
-        mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
-        all_links=""
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        # 读取节点文件
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+
+        # 循环打印每个节点的信息
         for i in "${!node_lines[@]}"; do
-            line="${node_lines[$i]}"
+            local line="${node_lines[$i]}"
+            local node_name
             node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-            if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"'); fi
-            echo -e "\n$GREEN$((i + 1)). $WHITE$node_name$NC\n\n$line"
-            echo -e "\n$CYAN--------------------------------------------------------------$NC"
-            all_links+="$line"$'\n'
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
+            fi
+            echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
+            echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
-        aggregated_link=$(echo -n "$all_links" | base64 -w0)
-        echo -e "\n$GREEN聚合订阅内容 (Base64):$NC\n\n$YELLOW$aggregated_link$NC\n\n$CYAN--------------------------------------------------------------$NC"
-        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. $YELLOW生成临时订阅链接 (需Nginx)$NC\n\n0. 返回上一级菜单\n"
+
+        # ==================== 核心修正点：移除了聚合 Base64 内容的显示 ====================
+        # aggregated_link=$(echo -n "$all_links" | base64 -w0)
+        # echo -e "\n${GREEN}聚合订阅内容 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
+        # =================================================================================
+
+        # 在菜单中保留“生成临时订阅链接”的选项
+        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}\n\n5. ${YELLOW}[诊断] 为 TUIC 节点生成客户端配置${NC}\n\n0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
+
         case $choice in
-        1)
-            singbox_add_node_orchestrator
-            continue
-            ;;
-        2)
-            delete_nodes
-            continue
-            ;;
-        3)
-            push_nodes
-            continue
-            ;;
-        4)
-            generate_subscription_link
-            continue
-            ;;
-        0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+            1) singbox_add_node_orchestrator; continue ;;
+            2) delete_nodes; continue ;;
+            3) push_nodes; continue ;;
+            4) generate_subscription_link; continue ;;
+            5) generate_tuic_client_config; continue ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
@@ -1783,6 +1778,7 @@ _create_self_signed_cert() {
     cert_path="$cert_dir/$domain_name.cert.pem"
     key_path="$cert_dir/$domain_name.key.pem"
     if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
+        echo ""
         log_info "检测到已存在的自签名证书，将直接使用。"
         return 0
     fi
@@ -2250,6 +2246,7 @@ singbox_add_node_orchestrator() {
             press_any_key
             return
         fi
+        echo ""
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
         sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then
