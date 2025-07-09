@@ -2164,22 +2164,31 @@ singbox_add_node_orchestrator() {
     local cert_path key_path
     declare -A ports
     local protocols_to_create=()
+    local protocols_with_self_signed=() # 用于记录使用了自签证书的协议
     local is_one_click=false
+
+    # ##############【修改点 1 - 菜单风格替换】##############
     clear
-    echo -e "$CYAN-------------------------------------$NC\n "
-    echo -e "     请选择要搭建的节点类型"
-    echo -e "\n$CYAN-------------------------------------$NC\n"
-    echo -e "1. VLESS + WSS\n"
-    echo -e "2. VMess + WSS\n"
-    echo -e "3. Trojan + WSS\n"
-    echo -e "4. Hysteria2 (UDP)\n"
-    echo -e "5. TUIC v5 (UDP)\n"
-    echo -e "$CYAN-------------------------------------$NC\n"
-    echo -e "6. $GREEN一键生成以上全部 5 种协议节点$NC"
-    echo -e "\n$CYAN-------------------------------------$NC\n"
-    echo -e "0. 返回上一级菜单\n"
-    echo -e "$CYAN-------------------------------------$NC\n"
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    echo -e "$CYAN║$WHITE                 Sing-Box 节点协议选择            $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    echo ""
     read -p "请输入选项: " protocol_choice
+
     case $protocol_choice in
     1) protocols_to_create=("VLESS") ;;
     2) protocols_to_create=("VMess") ;;
@@ -2202,9 +2211,10 @@ singbox_add_node_orchestrator() {
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)$NC\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
-    # ##############【修改点 1】##############
-    # 定义一个变量来存放 allowInsecure 参数
     local insecure_param=""
+    local vmess_insecure_json_part=""
+    local hy2_insecure_param=""
+    local tuic_insecure_param=""
 
     if [ "$cert_choice" == "1" ]; then
         echo ""
@@ -2229,9 +2239,11 @@ singbox_add_node_orchestrator() {
         connect_addr="$domain"
         sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        # ##############【修改点 2】##############
-        # 如果是自签名证书，则设置 insecure 参数
+        protocols_with_self_signed=("${protocols_to_create[@]}")
         insecure_param="&allowInsecure=1"
+        vmess_insecure_json_part=", \"skip-cert-verify\": true"
+        hy2_insecure_param="&insecure=1"
+        tuic_insecure_param="&allow_insecure=1"
 
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
@@ -2348,23 +2360,21 @@ singbox_add_node_orchestrator() {
                 [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
             then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
             if [[ "$protocol" == "VLESS" ]]; then
-                # ##############【修改点 3】##############
                 node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_param}#$tag"
             elif [[ "$protocol" == "VMess" ]]; then
-                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${vmess_insecure_json_part}}"
                 node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
             else
-                # ##############【修改点 4】##############
                 node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_param}#$tag"
             fi
             ;;
         "Hysteria2")
             config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
+            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${hy2_insecure_param}#$tag"
             ;;
         "TUIC")
             config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
+            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${tuic_insecure_param}#$tag"
             ;;
         esac
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
@@ -2384,12 +2394,35 @@ singbox_add_node_orchestrator() {
                 echo -e "$CYAN--------------------------------------------------------------$NC"
                 echo -e "\n$YELLOW$final_node_link$NC\n"
                 echo -e "$CYAN--------------------------------------------------------------$NC"
-                press_any_key
             else
-                log_info "正在显示所有节点信息..."
+                log_info "正在跳转到节点管理页面..."
                 sleep 1
-                view_node_info
             fi
+
+            # ##############【修改点 2 - 添加操作提示】##############
+            if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                for p in "${protocols_with_self_signed[@]}"; do
+                    if [[ "$p" == "VMess" ]]; then
+                        echo -e "\n${YELLOW}[VMess 节点]$NC"
+                        log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
+                        log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
+                    fi
+                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                        echo -e "\n${YELLOW}[$p 节点]$NC"
+                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                    fi
+                done
+                echo -e "\n$YELLOW==============================================================$NC"
+            fi
+
+            if [ "$success_count" -gt 1 ] || $is_one_click; then
+                view_node_info
+            else
+                press_any_key
+            fi
+
         else
             log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
             press_any_key
