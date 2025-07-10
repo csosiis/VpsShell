@@ -732,6 +732,8 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. $GREEN应用安装与管理$NC                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. $GREEN更新此脚本$NC                                  $CYAN║$NC"
@@ -746,6 +748,7 @@ main_menu() {
         case $choice in
         1) sys_manage_menu ;;
         2) app_management_menu ;;
+        3) setup_auto_reverse_proxy ;;
         8) do_update_script ;;
         9) setup_shortcut ;;
         0) exit 0 ;;
