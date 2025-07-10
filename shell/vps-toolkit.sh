@@ -1694,26 +1694,13 @@ uninstall_nezha_agent_v0_silent() {
     rm -rf /opt/nezha/agent-v0
 }
 install_nezha_agent_v0() {
-    # 强制清理旧版，确保环境干净
+    # 强制清理旧版
     uninstall_nezha_agent_v0_silent
     systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针 (使用改造脚本模式)..."
-    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
-    server_addr=${server_addr:-"nz.wiitwo.eu.org"}
-    read -p "请输入面板服务器端口 [默认: 443]: " server_port
-    server_port=${server_port:-"443"}
-    read -p "请输入面板密钥: " server_key
-    if [ -z "$server_key" ]; then
-        log_error "面板密钥不能为空！"; press_any_key; return
-    fi
-
-    local tls_option="--tls"
-    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
-        tls_option=""; log_warn "端口为 $server_port，将不使用 TLS 加密。"
-    fi
+    log_info "开始安装 Nezha V0 探针 (最终调试模式)..."
 
     local SCRIPT_PATH_TMP="/tmp/nezha_v0_install_mod.sh"
 
@@ -1722,10 +1709,7 @@ install_nezha_agent_v0() {
         log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
-    # 在子脚本开头插入 set -e，确保任何错误都会立即终止脚本
-    sed -i '1s/^/#!\/bin\/bash\nset -e\n/' "$SCRIPT_PATH_TMP"
-
-    log_info "正在对官方脚本进行改造以实现共存..."
+    log_info "正在对官方脚本进行改造..."
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' "$SCRIPT_PATH_TMP"
     sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
@@ -1736,34 +1720,29 @@ install_nezha_agent_v0() {
 
     chmod +x "$SCRIPT_PATH_TMP"
 
+    log_info "改造后的脚本已生成在: $SCRIPT_PATH_TMP"
     echo ""
-    log_warn "即将执行改造后的官方脚本，它的所有输出将被完整显示以供调试..."
-    echo -e "${WHITE}===================== 子脚本输出开始 =====================${NC}"
-
-    # 执行脚本，并捕获其退出码
-    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
-    local exit_code=$?
-
-    echo -e "${WHITE}===================== 子脚本输出结束 =====================${NC}"
+    log_warn "!!!!!!!!!!!!!!!!!! 重要操作 !!!!!!!!!!!!!!!!!! "
+    log_warn "脚本已暂停，需要您手动执行以下命令来完成最后一步的调试。"
+    echo ""
+    log_info "请复制下面这整条命令，粘贴到您的SSH终端中，然后按回车执行："
+    echo -e "$YELLOW"
+    # 这里直接使用默认值，因为用户只是复制粘贴，不再需要输入
+    echo "bash $SCRIPT_PATH_TMP install_agent nz.wiitwo.eu.org 443 AXLAsTNla6zn2ICGVy --tls"
+    echo -e "$NC"
+    echo ""
+    log_info "执行后，请观察它的输出。如果安装成功，您可以手动按任意键继续。"
+    log_info "如果依然报错，请将它的报错信息提供给我。"
     echo ""
 
-    # 清理临时脚本
-    rm "$SCRIPT_PATH_TMP"
+    press_any_key
 
-    # 检查子脚本是否成功执行
-    if [ $exit_code -ne 0 ]; then
-        log_error "子脚本执行失败，退出码: $exit_code"
-        log_warn "请仔细检查上面【子脚本输出】中的错误信息。"
-        press_any_key
-        return
-    fi
-
-    log_info "子脚本执行成功，正在检查服务状态..."
+    log_info "正在检查服务状态..."
     sleep 1
     if systemctl is-active --quiet nezha-agent-v0; then
-        log_info "✅ Nezha V0 探针安装并启动成功！"
+        log_info "✅ 检测到服务已成功启动！"
     else
-        log_error "服务最终未能启动！"
+        log_error "服务状态检测失败！"
         log_warn "显示详细状态以供诊断:"
         echo -e "${WHITE}-------------------------------------------------------"
         systemctl status nezha-agent-v0.service --no-pager -l
