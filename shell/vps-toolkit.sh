@@ -1718,11 +1718,20 @@ install_nezha_agent_v0() {
         return
     fi
     log_info "正在修改脚本以避免冲突 (服务名: nezha-agent-v0)..."
+    # 修改安装路径
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' /tmp/nezha_v0_install.sh
-    sed -i 's|nezha-agent.service|nezha-agent-v0.service|g' /tmp/nezha_v0_install.sh
+    # 修改服务文件名
+    sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' /tmp/nezha_v0_install.sh
+    # 修改systemctl命令
+    sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' /tmp/nezha_v0_install.sh
+    sed -i 's/systemctl stop nezha-agent/systemctl stop nezha-agent-v0/g' /tmp/nezha_v0_install.sh
+    sed -i 's/systemctl disable nezha-agent/systemctl disable nezha-agent-v0/g' /tmp/nezha_v0_install.sh
+
     chmod +x /tmp/nezha_v0_install.sh
     log_info "正在执行修改后的安装脚本..."
-    bash /tmp/nezha_v0_install.sh install_agent "$server_addr" "$server_port" "$server_key" "$tls_option"
+    # 修复：移除了 $tls_option 周围的引号，以防止在为空时传递空字符串参数
+    bash /tmp/nezha_v0_install.sh install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+
     rm /tmp/nezha_v0_install.sh
     log_info "检查服务状态..."
     sleep 2
@@ -1730,6 +1739,7 @@ install_nezha_agent_v0() {
         log_info "✅ Nezha V0 探针安装并启动成功！"
     else
         log_error "Nezha V0 探针服务启动失败！请检查日志。"
+        log_warn "你可以尝试使用以下命令查看日志: journalctl -u nezha-agent-v0 -f"
     fi
     press_any_key
 }
@@ -1776,8 +1786,11 @@ install_nezha_agent_v1() {
         return
     fi
     log_info "正在修改脚本以避免冲突 (服务名: nezha-agent-v1)..."
+    # 修复：直接修改 SERVICE_NAME 变量，这将自动修正所有相关的 systemctl 调用和服务文件路径
+    sed -i 's/SERVICE_NAME="nezha-agent"/SERVICE_NAME="nezha-agent-v1"/g' /tmp/agent_v1_install.sh
+    # 修改安装路径
     sed -i 's|AGENT_DIR="/opt/nezha/agent"|AGENT_DIR="/opt/nezha/agent-v1"|g' /tmp/agent_v1_install.sh
-    sed -i 's|SERVICE_FILE="/etc/systemd/system/nezha-agent.service"|SERVICE_FILE="/etc/systemd/system/nezha-agent-v1.service"|g' /tmp/agent_v1_install.sh
+
     chmod +x /tmp/agent_v1_install.sh
     log_info "正在执行修改后的安装脚本..."
     export NZ_SERVER="$server_info"
@@ -1792,6 +1805,7 @@ install_nezha_agent_v1() {
         log_info "✅ Nezha V1 探针安装并启动成功！"
     else
         log_error "Nezha V1 探针服务启动失败！请检查日志。"
+        log_warn "你可以尝试使用以下命令查看日志: journalctl -u nezha-agent-v1 -f"
     fi
     press_any_key
 }
@@ -1831,7 +1845,7 @@ nezha_agent_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 哪吒探针 (Agent) 管理            $CYAN║$NC"
+        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
@@ -1839,9 +1853,9 @@ nezha_agent_menu() {
         else
             echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                $CYAN║$NC"
         echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
@@ -1849,9 +1863,9 @@ nezha_agent_menu() {
         else
             echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                $CYAN║$NC"
         echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
