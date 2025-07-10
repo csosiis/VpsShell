@@ -1693,15 +1693,14 @@ uninstall_nezha_agent_v0_silent() {
     rm -f /etc/systemd/system/nezha-agent-v0.service
     rm -rf /opt/nezha/agent-v0
 }
-
 install_nezha_agent_v0() {
+    # 强制清理旧版，确保环境干净
+    uninstall_nezha_agent_v0_silent
+    systemctl daemon-reload
+
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "安装前将自动清理旧版，确保全新安装..."
-    uninstall_nezha_agent_v0_silent
-    systemctl daemon-reload # 清理后重载一次
-
-    log_info "开始安装 Nezha V0 探针 (手动模式)..."
+    log_info "开始安装 Nezha V0 探针 (使用改造脚本模式)..."
     read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
     read -p "请输入面板服务器端口 [默认: 443]: " server_port
@@ -1716,46 +1715,33 @@ install_nezha_agent_v0() {
         tls_option=""; log_warn "端口为 $server_port，将不使用 TLS 加密。"
     fi
 
-    local AGENT_DIR="/opt/nezha/agent-v0"
-    local SERVICE_FILE="/etc/systemd/system/nezha-agent-v0.service"
+    local SCRIPT_PATH_TMP="/tmp/nezha_v0_install_mod.sh"
 
-    ARCH=$(uname -m)
-    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; elif [ "$ARCH" = "s390x" ]; then ARCH="s390x"; else ARCH="amd64"; fi
-
-    log_info "检测到架构: $ARCH"
-    DOWNLOAD_URL="https://github.com/nezhahq/agent/releases/latest/download/nezha-agent_linux_${ARCH}.zip"
-
-    log_info "正在创建安装目录: $AGENT_DIR"; mkdir -p "$AGENT_DIR"
-    log_info "正在从 $DOWNLOAD_URL 下载 Agent..."
-    if ! wget -qO "/tmp/nezha-agent.zip" "$DOWNLOAD_URL"; then
-        log_error "下载 Agent 失败！请检查网络或链接。"; rm -rf "$AGENT_DIR"; press_any_key; return
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
-    log_info "正在解压 Agent..."; unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"; rm "/tmp/nezha-agent.zip"
-    if [ ! -f "$AGENT_DIR/nezha-agent" ]; then
-        log_error "解压失败或压缩包中没有 nezha-agent 文件。"; rm -rf "$AGENT_DIR"; press_any_key; return
-    fi
+    log_info "正在对官方脚本进行改造以实现共存..."
+    # 1. 修改安装目录
+    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' "$SCRIPT_PATH_TMP"
+    # 2. 修改服务文件路径
+    sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' "$SCRIPT_PATH_TMP"
+    # 3. 修改所有systemctl的调用目标
+    sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
+    sed -i 's/systemctl stop nezha-agent/systemctl stop nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
+    sed -i 's/systemctl disable nezha-agent/systemctl disable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
+    sed -i 's/systemctl is-active nezha-agent/systemctl is-active nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
+    sed -i 's/systemctl enable nezha-agent/systemctl enable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
 
-    log_info "赋予执行权限..."; chmod +x "$AGENT_DIR/nezha-agent"
-    log_info "正在创建 systemd 服务文件: $SERVICE_FILE"
-    cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=Nezha V0 Agent
-After=network.target
-[Service]
-Type=simple
-User=root
-Restart=on-failure
-RestartSec=5s
-ExecStart=${AGENT_DIR}/nezha-agent -s ${server_addr}:${server_port} -p ${server_key} ${tls_option}
-[Install]
-WantedBy=multi-user.target
-EOF
+    log_info "赋予脚本执行权限并执行改造后的脚本..."
+    chmod +x "$SCRIPT_PATH_TMP"
 
-    log_info "正在重载 systemd 并启动服务..."
-    systemctl daemon-reload
-    systemctl enable nezha-agent-v0.service
-    systemctl restart nezha-agent-v0.service
+    # 直接调用改造后的脚本
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+
+    # 清理临时脚本
+    rm "$SCRIPT_PATH_TMP"
 
     log_info "检查服务状态..."
     sleep 2
@@ -1952,7 +1938,7 @@ nezha_agent_menu() {
         echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
