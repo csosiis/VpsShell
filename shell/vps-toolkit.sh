@@ -40,6 +40,39 @@ generate_random_port() {
 generate_random_password() {
     tr </dev/urandom -dc 'A-Za-z0-9' | head -c 20
 }
+# --- UI 渲染辅助函数 ---
+_print_menu_header() {
+    local title=$1
+    local title_len
+    title_len=$(echo "$title" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+    local padding_total=$((50 - title_len))
+    local padding_left=$((padding_total / 2))
+    local padding_right=$((padding_total - padding_left))
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    printf "$CYAN║%*s$WHITE%s$NC%*s$CYAN║$NC\n" $padding_left "" "$title" $padding_right ""
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+}
+_print_menu_footer() {
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+}
+_print_menu_item() {
+    local num=$1
+    local text=$2
+    local color=${3:-$WHITE}
+    local full_text
+    if [ -z "$num" ]; then
+        full_text="   $text"
+    else
+        full_text="   $num. $text"
+    fi
+    printf "$CYAN║$NC$color%-52s$CYAN║$NC\n" "$full_text"
+}
+_print_menu_separator() {
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+}
+_print_menu_blank() {
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+}
 # --- 核心功能：依赖项管理 ---
 ensure_dependencies() {
     local dependencies=("$@") # 接收所有传入的参数作为依赖列表
@@ -135,35 +168,34 @@ show_system_info() {
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
     clear
-    echo ""
-    echo -e "$CYAN-------------------- 系统信息查询 ---------------------$NC"
-    printf "$GREEN主机名　　　  : $WHITE%s$NC\n" "$hostname_info"
-    printf "$GREEN系统版本　　  : $WHITE%s$NC\n" "$os_info"
-    printf "${GREEN}Linux版本　 　: $WHITE%s$NC\n" "$kernel_info"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    printf "${GREEN}CPU架构　　 　: $WHITE%s$NC\n" "$cpu_arch"
-    printf "${GREEN}CPU型号　　 　: $WHITE%s$NC\n" "$cpu_model"
-    printf "${GREEN}CPU频率　　 　: $WHITE%s$NC\n" "$cpu_freq_from_model"
-    printf "${GREEN}CPU核心数　 　: $WHITE%s$NC\n" "$cpu_cores"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    printf "${GREEN}CPU占用　　 　: $WHITE%s$NC\n" "$cpu_usage"
-    printf "$GREEN系统负载　　  : $WHITE%s$NC\n" "$load_info"
-    printf "$GREEN物理内存　　  : $WHITE%s$NC\n" "$memory_info"
-    printf "$GREEN硬盘占用　　  : $WHITE%s$NC\n" "$disk_info"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    printf "$GREEN总接收　　　  : $WHITE%s$NC\n" "$net_info_rx"
-    printf "$GREEN总发送　　　  : $WHITE%s$NC\n" "$net_info_tx"
-    printf "$GREEN网络算法　　  : $WHITE%s$NC\n" "$net_algo"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    printf "$GREEN运营商　　　  : $WHITE%s$NC\n" "$ip_info"
-    printf "$GREEN公网IPv4地址　: $WHITE%s$NC\n" "$ipv4_addr"
-    printf "$GREEN公网IPv6地址　: $WHITE%s$NC\n" "$ipv6_addr"
-    printf "${GREEN}DNS地址　　 　: $WHITE%s$NC\n" "$dns_info"
-    printf "$GREEN地理位置　　  : $WHITE%s$NC\n" "$geo_info"
-    printf "$GREEN系统时间　　  : $WHITE%s$NC\n" "$timezone $current_time"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    printf "$GREEN运行时长　　  : $WHITE%s$NC\n" "$uptime_info"
-    echo -e "$CYAN-------------------------------------------------------$NC"
+    _print_menu_header "系统信息查询"
+    _print_menu_item "" "主机名: $WHITE$hostname_info" "$GREEN"
+    _print_menu_item "" "系统版本: $WHITE$os_info" "$GREEN"
+    _print_menu_item "" "Linux版本: $WHITE$kernel_info" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "" "CPU架构: $WHITE$cpu_arch" "$GREEN"
+    _print_menu_item "" "CPU型号: $WHITE$cpu_model" "$GREEN"
+    _print_menu_item "" "CPU频率: $WHITE$cpu_freq_from_model" "$GREEN"
+    _print_menu_item "" "CPU核心数: $WHITE$cpu_cores" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "" "CPU占用: $WHITE$cpu_usage" "$GREEN"
+    _print_menu_item "" "系统负载: $WHITE$load_info" "$GREEN"
+    _print_menu_item "" "物理内存: $WHITE$memory_info" "$GREEN"
+    _print_menu_item "" "硬盘占用: $WHITE$disk_info" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "" "总接收: $WHITE$net_info_rx" "$GREEN"
+    _print_menu_item "" "总发送: $WHITE$net_info_tx" "$GREEN"
+    _print_menu_item "" "网络算法: $WHITE$net_algo" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "" "运营商: $WHITE$ip_info" "$GREEN"
+    _print_menu_item "" "公网IPv4: $WHITE$ipv4_addr" "$GREEN"
+    _print_menu_item "" "公网IPv6: $WHITE$ipv6_addr" "$GREEN"
+    _print_menu_item "" "DNS地址: $WHITE$dns_info" "$GREEN"
+    _print_menu_item "" "地理位置: $WHITE$geo_info" "$GREEN"
+    _print_menu_item "" "系统时间: $WHITE$timezone $current_time" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "" "运行时长: $WHITE$uptime_info" "$GREEN"
+    _print_menu_footer
     press_any_key
 }
 clean_system() {
@@ -230,10 +262,16 @@ EOF
 }
 set_network_priority() {
     clear
-    echo -e "请选择网络优先级设置:\n"
-    echo -e "1. IPv6 优先\n"
-    echo -e "2. IPv4 优先\n"
-    echo -e "0. 返回主菜单\n"
+    _print_menu_header "设置网络优先级"
+    _print_menu_blank
+    _print_menu_item "1" "IPv6 优先"
+    _print_menu_blank
+    _print_menu_item "2" "IPv4 优先"
+    _print_menu_blank
+    _print_menu_separator
+    _print_menu_item "0" "返回主菜单"
+    _print_menu_footer
+    echo ""
     read -p "请输入选择: " choice
     case $choice in
     1)
@@ -248,7 +286,7 @@ set_network_priority() {
         fi
         log_info "✅ IPv4 优先已设置。"
         ;;
-    0) return 1 ;;
+    0) return ;;
     *) log_error "无效选择。" ;;
     esac
     press_any_key
@@ -294,15 +332,16 @@ set_timezone() {
     local current_timezone
     current_timezone=$(timedatectl show --property=Timezone --value)
     log_info "当前系统时区是: $current_timezone"
-    echo ""
-    log_info "请选择新的时区："
-    echo ""
+    _print_menu_header "选择新的时区"
+
     options=("Asia/Shanghai" "Asia/Taipei" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
     for i in "${!options[@]}"; do
-        echo "$((i + 1))) ${options[$i]}"
-        echo ""
+        _print_menu_item "$((i + 1))" "${options[$i]}"
+        _print_menu_blank
     done
-    PS3="请输入选项 (1-8): "
+    _print_menu_footer
+
+    PS3="请输入选项 (1-${#options[@]}): "
     select opt in "${options[@]}"; do
         if [[ "$opt" == "返回上一级菜单" ]]; then
             log_info "操作已取消。"
@@ -803,11 +842,15 @@ push_to_telegram() {
 push_nodes() {
     ensure_dependencies "jq" "curl"
     clear
-    echo -e "$WHITE--- 推送节点 ---$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo "2. 推送到 Telegram Bot"
+    _print_menu_header "推送节点"
+    _print_menu_item "1" "推送到 Sub-Store"
+    _print_menu_blank
+    _print_menu_item "2" "推送到 Telegram Bot"
+    _print_menu_blank
+    _print_menu_separator
+    _print_menu_item "0" "返回"
+    _print_menu_footer
     echo ""
-    echo "0. 返回"
     read -p "请选择推送方式: " push_choice
     case $push_choice in
     1) push_to_sub_store ;;
@@ -847,7 +890,8 @@ generate_subscription_link() {
     fi
     local sub_dir="/var/www/html"
     mkdir -p "$sub_dir"
-    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filename
+    sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     local sub_filepath="$sub_dir/$sub_filename"
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str
@@ -857,11 +901,12 @@ generate_subscription_link() {
     echo "$base64_content" >"$sub_filepath"
     local sub_url="http://$host/$sub_filename"
     clear
-    log_info "已生成临时订阅链接，请立即复制使用！"
-    log_warn "此链接将在您按键返回后被自动删除。"
-    echo -e "$CYAN--------------------------------------------------------------$NC"
-    echo -e "\n$YELLOW$sub_url$NC\n"
-    echo -e "$CYAN--------------------------------------------------------------$NC"
+    _print_menu_header "临时订阅链接"
+    _print_menu_item "" "此链接将在您按键返回后被自动删除！" "$YELLOW"
+    _print_menu_blank
+    _print_menu_item "" "${YELLOW}${sub_url}${NC}"
+    _print_menu_blank
+    _print_menu_footer
     press_any_key
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
@@ -876,8 +921,7 @@ view_node_info() {
             if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
         fi
 
-        log_info "当前已配置的节点链接信息："
-        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+        _print_menu_header "当前已配置节点"
 
         mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
 
@@ -888,11 +932,16 @@ view_node_info() {
             if [[ "$line" =~ ^vmess:// ]]; then
                 node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
             fi
-            echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
-            echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
+            _print_menu_item "$((i + 1))" "$node_name"
+            _print_menu_item "" "$line" "$WHITE"
+            if [ $i -lt $((${#node_lines[@]} - 1)) ]; then
+                _print_menu_separator
+            fi
         done
+        _print_menu_footer
 
-        echo -e "\n1. 新增节点  2. 删除节点 3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}    0. 返回上一级菜单\n"
+        echo ""
+        echo -e "  ${GREEN}1. 新增节点${NC}  ${RED}2. 删除节点${NC}  ${CYAN}3. 推送节点${NC}  ${YELLOW}4. 生成临时订阅链接${NC}    ${WHITE}0. 返回${NC}\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -900,7 +949,6 @@ view_node_info() {
             2) delete_nodes; continue ;;
             3) push_nodes; continue ;;
             4) generate_subscription_link; continue ;;
-            5) generate_tuic_client_config; continue ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -1354,29 +1402,35 @@ update_sub_store_app() {
     press_any_key
 }
 substore_view_access_link() {
-    echo ""
-    log_info "正在读取配置并生成访问链接..."
+    clear
     if ! is_substore_installed; then
-        echo ""
         log_error "Sub-Store尚未安装。"
         press_any_key
         return
     fi
+
+    _print_menu_header "Sub-Store 访问链接"
+
     REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"' | sed 's/\///g')
     FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-    echo -e "\n===================================================================="
+
     if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
-        ACCESS_URL="https://$REVERSE_PROXY_DOMAIN/subs?api=https://$REVERSE_PROXY_DOMAIN$API_KEY"
-        echo -e "\n您的 Sub-Store 反代访问链接如下：\n\n$YELLOW$ACCESS_URL$NC\n"
+        ACCESS_URL="https://$REVERSE_PROXY_DOMAIN/subs?api=https://$REVERSE_PROXY_DOMAIN/$API_KEY"
+        _print_menu_item "" "反代访问链接:" "$GREEN"
+        _print_menu_item "" "$ACCESS_URL" "$YELLOW"
     else
         SERVER_IP_V4=$(curl -s http://ipv4.icanhazip.com)
         if [ -n "$SERVER_IP_V4" ]; then
-            ACCESS_URL_V4="http://$SERVER_IP_V4:$FRONTEND_PORT/subs?api=http://$SERVER_IP_V4:$FRONTEND_PORT$API_KEY"
-            echo -e "\n您的 Sub-Store IPv4 访问链接如下：\n\n$YELLOW$ACCESS_URL_V4$NC\n"
+            ACCESS_URL_V4="http://$SERVER_IP_V4:$FRONTEND_PORT/subs?api=http://$SERVER_IP_V4:$FRONTEND_PORT/$API_KEY"
+            _print_menu_item "" "IPv4 访问链接:" "$GREEN"
+            _print_menu_item "" "$ACCESS_URL_V4" "$YELLOW"
+        else
+            _print_menu_item "" "无法获取公网IPv4，请检查网络" "$RED"
         fi
     fi
-    echo -e "===================================================================="
+
+    _print_menu_footer
 }
 substore_reset_ports() {
     log_info "开始重置 Sub-Store 端口..."
@@ -1558,40 +1612,28 @@ EOF
 substore_manage_menu() {
     while true; do
         clear
+        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+        _print_menu_header "Sub-Store 管理"
+        _print_menu_item "" "当前状态: $STATUS_COLOR"
+        _print_menu_separator
+        _print_menu_item "1" "启动服务"
+        _print_menu_item "2" "停止服务"
+        _print_menu_item "3" "重启服务"
+        _print_menu_item "4" "查看状态"
+        _print_menu_item "5" "查看日志"
+        _print_menu_separator
+        _print_menu_item "6" "查看访问链接"
+        _print_menu_item "7" "重置端口"
+        _print_menu_item "8" "重置 API 密钥"
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
             rp_menu_text="更换反代域名"
         fi
-        echo -e "$WHITE=============================$NC\n"
-        echo -e "$WHITE      Sub-Store 管理菜单      $NC\n"
-        echo -e "$WHITE=============================$NC\n"
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-        echo -e "当前状态: $STATUS_COLOR\n"
-        echo "-----------------------------"
+        _print_menu_item "9" "$rp_menu_text" "$YELLOW"
+        _print_menu_separator
+        _print_menu_item "0" "返回主菜单"
+        _print_menu_footer
         echo ""
-        echo "1. 启动服务"
-        echo ""
-        echo "2. 停止服务"
-        echo ""
-        echo "3. 重启服务"
-        echo ""
-        echo "4. 查看状态"
-        echo ""
-        echo "5. 查看日志"
-        echo ""
-        echo "-----------------------------"
-        echo ""
-        echo "6. 查看访问链接"
-        echo ""
-        echo "7. 重置端口"
-        echo ""
-        echo "8. 重置 API 密钥"
-        echo ""
-        echo -e "9. $YELLOW$rp_menu_text$NC"
-        echo ""
-        echo "0. 返回主菜单"
-        echo ""
-        echo -e "$WHITE-----------------------------$NC\n"
         read -p "请输入选项: " choice
         case $choice in
         1)
@@ -1636,23 +1678,21 @@ substore_manage_menu() {
 substore_main_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        _print_menu_header "Sub-Store 管理"
         if is_substore_installed; then
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            _print_menu_item "" "当前状态: $STATUS_COLOR"
+            _print_menu_separator
+            _print_menu_blank
+            _print_menu_item "1" "管理 Sub-Store (启停/日志/配置)"
+            _print_menu_blank
+            _print_menu_item "2" "更新 Sub-Store 应用" "$GREEN"
+            _print_menu_blank
+            _print_menu_item "3" "卸载 Sub-Store" "$RED"
+            _print_menu_blank
+            _print_menu_separator
+            _print_menu_item "0" "返回主菜单"
+            _print_menu_footer
             read -p "请输入选项: " choice
             case $choice in
             1) substore_manage_menu ;; 2) update_sub_store_app ;;
@@ -1662,14 +1702,14 @@ substore_main_menu() {
                 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            _print_menu_item "" "当前状态: ${YELLOW}● 未安装${NC}"
+            _print_menu_separator
+            _print_menu_blank
+            _print_menu_item "1" "安装 Sub-Store"
+            _print_menu_blank
+            _print_menu_separator
+            _print_menu_item "0" "返回主菜单"
+            _print_menu_footer
             read -p "请输入选项: " choice
             case $choice in
             1) substore_do_install ;; 0) break ;; *)
@@ -1892,31 +1932,25 @@ is_nezha_agent_v1_installed() {
 nezha_agent_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        _print_menu_header "哪吒探针 (Agent) 管理"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            _print_menu_item "1" "安装/重装 V0 探针 ${GREEN}(已安装)${NC}"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            _print_menu_item "1" "安装/重装 V0 探针 ${YELLOW}(未安装)${NC}"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        _print_menu_blank
+        _print_menu_item "2" "卸载 V0 探针" "$RED"
+        _print_menu_separator
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            _print_menu_item "3" "安装/重装 V1 探针 ${GREEN}(已安装)${NC}"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            _print_menu_item "3" "安装/重装 V1 探针 ${YELLOW}(未安装)${NC}"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        _print_menu_blank
+        _print_menu_item "4" "卸载 V1 探针" "$RED"
+        _print_menu_separator
+        _print_menu_item "0" "返回上一级菜单"
+        _print_menu_footer
         echo ""
         read -p "请输入选项: " choice
         case $choice in
@@ -1935,17 +1969,15 @@ nezha_agent_menu() {
 nezha_dashboard_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                哪吒面板 (Dashboard) 管理         $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装/管理 V0 面板 (by fscarmen)             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装/管理 V1 面板 (Official)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        _print_menu_header "哪吒面板 (Dashboard) 管理"
+        _print_menu_blank
+        _print_menu_item "1" "安装/管理 V0 面板 (by fscarmen)"
+        _print_menu_blank
+        _print_menu_item "2" "安装/管理 V1 面板 (Official)"
+        _print_menu_blank
+        _print_menu_separator
+        _print_menu_item "0" "返回上一级菜单"
+        _print_menu_footer
         echo ""
         log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
         log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
@@ -1965,17 +1997,15 @@ nezha_dashboard_menu() {
 nezha_manage_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   哪吒监控管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 探针 (Agent) 管理                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 面板 (Dashboard) 管理                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        _print_menu_header "哪吒监控管理"
+        _print_menu_blank
+        _print_menu_item "1" "探针 (Agent) 管理"
+        _print_menu_blank
+        _print_menu_item "2" "面板 (Dashboard) 管理"
+        _print_menu_blank
+        _print_menu_separator
+        _print_menu_item "0" "返回主菜单"
+        _print_menu_footer
         echo ""
         read -p "请输入选项: " choice
         case $choice in
@@ -2040,25 +2070,29 @@ setup_shortcut() {
 manage_bbr() {
     clear
     log_info "开始检查并管理 BBR..."
-    local kernel_version=$(uname -r | cut -d- -f1)
+    local kernel_version
+    kernel_version=$(uname -r | cut -d- -f1)
     if ! dpkg --compare-versions "$kernel_version" "ge" "4.9"; then
         log_error "您的内核版本 ($kernel_version) 过低，无法开启 BBR。请升级内核至 4.9 或更高版本。"
         press_any_key
         return
     fi
     log_info "内核版本 $kernel_version 符合要求。"
-    local current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
+    local current_congestion_control
+    current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
     log_info "当前 TCP 拥塞控制算法为: $YELLOW$current_congestion_control$NC"
-    local current_queue_discipline=$(sysctl -n net.core.default_qdisc)
+    local current_queue_discipline
+    current_queue_discipline=$(sysctl -n net.core.default_qdisc)
     log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
-    echo ""
-    echo "请选择要执行的操作:"
-    echo ""
-    echo "1. 启用 BBR (原始版本)"
-    echo ""
-    echo "2. 启用 BBR + FQ"
-    echo ""
-    echo "0. 返回"
+
+    _print_menu_header "BBR 拥塞控制管理"
+    _print_menu_item "1" "启用 BBR (原始版本)"
+    _print_menu_blank
+    _print_menu_item "2" "启用 BBR + FQ"
+    _print_menu_blank
+    _print_menu_separator
+    _print_menu_item "0" "返回"
+    _print_menu_footer
     echo ""
     read -p "请输入选项: " choice
     local sysctl_conf="/etc/sysctl.conf"
@@ -2102,33 +2136,21 @@ install_warp() {
 sys_manage_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 优化 DNS                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置 SSH 密钥登录                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. 安装 WARP 网络接口                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        _print_menu_header "系统综合管理"
+        _print_menu_item "1" "系统信息查询"
+        _print_menu_item "2" "清理系统垃圾"
+        _print_menu_item "3" "修改主机名"
+        _print_menu_item "4" "优化 DNS"
+        _print_menu_item "5" "设置网络优先级 (IPv4/v6)"
+        _print_menu_item "6" "设置 SSH 密钥登录"
+        _print_menu_item "7" "设置系统时区"
+        _print_menu_separator
+        _print_menu_item "" "网络优化" "$CYAN"
+        _print_menu_item "8" "BBR 拥塞控制管理"
+        _print_menu_item "9" "安装 WARP 网络接口"
+        _print_menu_separator
+        _print_menu_item "0" "返回主菜单" "$RED"
+        _print_menu_footer
         echo ""
         read -p "请输入选项: " choice
         case $choice in
@@ -2324,37 +2346,23 @@ setup_auto_reverse_proxy() {
 main_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 S-ui 面板                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  10. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        _print_menu_header "全功能 VPS & 应用管理脚本"
+        _print_menu_item "1" "系统综合管理"
+        _print_menu_item "2" "Sing-Box 管理"
+        _print_menu_item "3" "Sub-Store 管理"
+        _print_menu_item "4" "哪吒监控管理" "$GREEN"
+        _print_menu_separator
+        _print_menu_item "" "应用安装 & 快捷工具" "$CYAN"
+        _print_menu_item "5" "安装 S-ui 面板"
+        _print_menu_item "6" "安装 3X-ui 面板"
+        _print_menu_item "7" "搭建 WordPress (Docker)" "$GREEN"
+        _print_menu_item "8" "自动配置网站反向代理" "$GREEN"
+        _print_menu_separator
+        _print_menu_item "9" "更新此脚本" "$GREEN"
+        _print_menu_item "10" "设置快捷命令 (默认: sv)" "$YELLOW"
+        _print_menu_separator
+        _print_menu_item "0" "退出脚本" "$RED"
+        _print_menu_footer
         echo ""
         read -p "请输入选项: " choice
         case $choice in
@@ -2411,29 +2419,17 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
 
     clear
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
-     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
-     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
-     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
-     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    _print_menu_header "Sing-Box 节点协议选择"
+    _print_menu_item "1" "VLESS + WSS"
+    _print_menu_item "2" "VMess + WSS"
+    _print_menu_item "3" "Trojan + WSS"
+    _print_menu_item "4" "Hysteria2 (UDP)"
+    _print_menu_item "5" "TUIC v5 (UDP)"
+    _print_menu_separator
+    _print_menu_item "6" "一键生成以上全部 5 种协议节点" "$GREEN"
+    _print_menu_separator
+    _print_menu_item "0" "返回上一级菜单"
+    _print_menu_footer
     echo ""
     read -p "请输入选项: " protocol_choice
 
@@ -2595,8 +2591,10 @@ singbox_add_node_orchestrator() {
         local tag
         tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为此节点分配唯一 Tag: $tag"
-        local uuid=$(uuidgen)
-        local password=$(generate_random_password)
+        local uuid
+        uuid=$(uuidgen)
+        local password
+        password=$(generate_random_password)
         local config=""
         local node_link=""
         local current_port=${ports[$protocol]}
@@ -2637,11 +2635,13 @@ singbox_add_node_orchestrator() {
         if systemctl is-active --quiet sing-box; then
             log_info "Sing-Box 重启成功。"
             if [ "$success_count" -eq 1 ] && ! $is_one_click; then
-                echo ""
-                log_info "✅ 节点添加成功！分享链接如下："
-                echo -e "$CYAN--------------------------------------------------------------$NC"
-                echo -e "\n$YELLOW$final_node_link$NC\n"
-                echo -e "$CYAN--------------------------------------------------------------$NC"
+                clear
+                _print_menu_header "节点添加成功"
+                _print_menu_item "" "分享链接如下：" "$GREEN"
+                _print_menu_blank
+                _print_menu_item "" "$final_node_link" "$YELLOW"
+                _print_menu_blank
+                _print_menu_footer
             else
                 log_info "正在跳转到节点管理页面..."
                 sleep 1
@@ -2682,39 +2682,27 @@ singbox_add_node_orchestrator() {
 singbox_main_menu() {
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        _print_menu_header "Sing-Box 管理"
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then
                 STATUS_COLOR="$GREEN● 活动$NC"
             else
                 STATUS_COLOR="$RED● 不活动$NC"
             fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            _print_menu_item "" "当前状态: $STATUS_COLOR"
+            _print_menu_separator
+            _print_menu_item "1" "新增节点"
+            _print_menu_item "2" "管理节点"
+            _print_menu_separator
+            _print_menu_item "3" "启动 Sing-Box"
+            _print_menu_item "4" "停止 Sing-Box"
+            _print_menu_item "5" "重启 Sing-Box"
+            _print_menu_item "6" "查看日志"
+            _print_menu_separator
+            _print_menu_item "7" "卸载 Sing-Box" "$RED"
+            _print_menu_separator
+            _print_menu_item "0" "返回主菜单"
+            _print_menu_footer
             echo ""
             read -p "请输入选项: " choice
             case $choice in
@@ -2744,14 +2732,14 @@ singbox_main_menu() {
                 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            _print_menu_item "" "当前状态: ${YELLOW}● 未安装${NC}"
+            _print_menu_separator
+            _print_menu_blank
+            _print_menu_item "1" "安装 Sing-Box"
+            _print_menu_blank
+            _print_menu_separator
+            _print_menu_item "0" "返回主菜单"
+            _print_menu_footer
             echo ""
             read -p "请输入选项: " choice
             case $choice in
