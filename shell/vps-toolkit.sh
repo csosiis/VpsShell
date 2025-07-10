@@ -1729,7 +1729,7 @@ install_nezha_agent_v0() {
     systemctl daemon-reload
     ensure_dependencies "curl" "wget" "unzip" "bsdmainutils"
     clear
-    log_info "开始安装 Nezha V0 探针 (使用改造脚本+虚拟终端模式)..."
+    log_info "开始安装 Nezha V0 探针 (使用改造脚本+无菌环境模式)..."
     read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
     read -p "请输入面板服务器端口 [默认: 443]: " server_port
@@ -1762,11 +1762,12 @@ install_nezha_agent_v0() {
 
     chmod +x "$SCRIPT_PATH_TMP"
 
-    log_info "正在创建虚拟终端来执行改造后的脚本..."
+    log_info "正在创建无菌环境来执行改造后的脚本..."
 
     local CMD_TO_RUN="bash $SCRIPT_PATH_TMP install_agent $server_addr $server_port $server_key $tls_option"
 
-    script -q -c "$CMD_TO_RUN" /dev/null
+    # 使用 env -i 在一个干净的环境中运行，只传递必要的变量
+    env -i HOME="$HOME" PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM="$TERM" bash -c "$CMD_TO_RUN"
 
     rm "$SCRIPT_PATH_TMP"
 
@@ -1788,7 +1789,7 @@ install_nezha_agent_v1() {
     systemctl daemon-reload
     ensure_dependencies "curl" "wget" "unzip" "bsdmainutils"
     clear
-    log_info "开始安装 Nezha V1 探针 (使用改造脚本+虚拟终端模式)..."
+    log_info "开始安装 Nezha V1 探针 (使用改造脚本+无菌环境模式)..."
     read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
     server_info=${server_info:-"nz.ssong.eu.org:8008"}
     read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
@@ -1809,16 +1810,17 @@ install_nezha_agent_v1() {
 
     chmod +x "$SCRIPT_PATH_TMP"
 
-    log_info "正在创建虚拟终端来执行改造后的脚本..."
+    log_info "正在创建无菌环境来执行改造后的脚本..."
 
-    export NZ_SERVER="$server_info"
-    export NZ_TLS="$NZ_TLS"
-    export NZ_CLIENT_SECRET="$server_secret"
+    # 将需要传递的环境变量明确列出
+    local ENV_VARS="HOME='$HOME' PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' TERM='$TERM'"
+    local NEZHA_VARS="NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'"
 
     local CMD_TO_RUN="bash $SCRIPT_PATH_TMP"
-    script -q -c "$CMD_TO_RUN" /dev/null
 
-    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
+    # 使用 env -i 在一个干净的环境中运行
+    env -i $ENV_VARS $NEZHA_VARS bash -c "$CMD_TO_RUN"
+
     rm "$SCRIPT_PATH_TMP"
 
     log_info "子脚本执行完毕，正在检查服务状态..."
@@ -1882,25 +1884,25 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                   $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                   $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                   $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                   $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -1911,7 +1913,7 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
-        5) cleanup_all_nezha_agents ;; # 新增的选项
+        5) cleanup_all_nezha_agents ;;
         0) break ;;
         *)
             log_error "无效选项！"
