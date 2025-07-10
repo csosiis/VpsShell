@@ -345,19 +345,15 @@ _install_docker_and_compose() {
     fi
 }
 # ================= Nezha Management Start =================
-# 检查隔离的v0探针是否安装
 is_nezha_agent_v0_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
 }
-# 检查隔离的v1探针是否安装
 is_nezha_agent_v1_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
 }
-# 检查标准探针是否安装
 is_nezha_agent_standard_installed() {
     [ -f "/etc/systemd/system/nezha-agent.service" ]
 }
-# 静默卸载隔离的v0探针
 uninstall_nezha_agent_v0_silent() {
     if ! is_nezha_agent_v0_installed; then return; fi
     systemctl stop nezha-agent-v0.service &>/dev/null
@@ -365,7 +361,6 @@ uninstall_nezha_agent_v0_silent() {
     rm -f /etc/systemd/system/nezha-agent-v0.service
     rm -rf /opt/nezha/agent-v0
 }
-# 静默卸载隔离的v1探针
 uninstall_nezha_agent_v1_silent() {
     if ! is_nezha_agent_v1_installed; then return; fi
     systemctl stop nezha-agent-v1.service &>/dev/null
@@ -373,7 +368,6 @@ uninstall_nezha_agent_v1_silent() {
     rm -f /etc/systemd/system/nezha-agent-v1.service
     rm -rf /opt/nezha/agent-v1
 }
-# 静默卸载标准探针
 uninstall_nezha_agent_standard_silent() {
     if ! is_nezha_agent_standard_installed; then return; fi
     systemctl stop nezha-agent.service &>/dev/null
@@ -381,33 +375,30 @@ uninstall_nezha_agent_standard_silent() {
     rm -f /etc/systemd/system/nezha-agent.service
     rm -rf /opt/nezha/agent
 }
-# 完整卸载隔离的v0探针
 uninstall_nezha_agent_v0() {
     if ! is_nezha_agent_v0_installed; then
-        log_warn "Nezha V0 探针未安装，无需卸载。"
+        log_warn "Nezha V0 探针 (隔离版) 未安装。"
         press_any_key
         return
     fi
-    log_info "正在停止并禁用 nezha-agent-v0 服务..."
+    log_info "正在卸载 Nezha V0 探针 (隔离版)..."
     uninstall_nezha_agent_v0_silent
     systemctl daemon-reload
-    log_info "✅ Nezha V0 探针已成功卸载。"
+    log_info "✅ Nezha V0 探针 (隔离版) 已成功卸载。"
     press_any_key
 }
-# 完整卸载隔离的v1探针
 uninstall_nezha_agent_v1() {
     if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
+        log_warn "Nezha V1 探针 (隔离版) 未安装。"
         press_any_key
         return
     fi
-    log_info "正在停止并禁用 nezha-agent-v1 服务..."
+    log_info "正在卸载 Nezha V1 探针 (隔离版)..."
     uninstall_nezha_agent_v1_silent
     systemctl daemon-reload
-    log_info "✅ Nezha V1 探针已成功卸载。"
+    log_info "✅ Nezha V1 探针 (隔离版) 已成功卸载。"
     press_any_key
 }
-# 一键清理所有探针
 cleanup_all_nezha_agents() {
     log_warn "此操作将尝试停止并删除本机上所有版本的哪吒探针！"
     log_warn "包括: 标准版, V0版, V1版。此操作不可逆！"
@@ -433,7 +424,6 @@ cleanup_all_nezha_agents() {
     log_info "✅ 所有可识别的哪吒探针均已清理完毕。"
     press_any_key
 }
-# [核心重构] 采用“先安装标准版，再改造”的逻辑安装V0探针
 install_nezha_agent_v0() {
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     cleanup_all_nezha_agents &>/dev/null
@@ -504,7 +494,6 @@ install_nezha_agent_v0() {
     fi
     press_any_key
 }
-# [核心重构] 采用“先安装标准版，再改造”的逻辑安装V1探针
 install_nezha_agent_v1() {
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     cleanup_all_nezha_agents &>/dev/null
@@ -689,7 +678,6 @@ nezha_manage_menu() {
         esac
     done
 }
-# ================= Nezha Management End ===================
 # ================= App Management Start =================
 app_management_menu() {
     while true; do
@@ -698,7 +686,7 @@ app_management_menu() {
         echo -e "$CYAN║$WHITE                  应用安装与管理                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. $GREEN哪吒监控管理$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 哪吒监控 管理                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -710,7 +698,7 @@ app_management_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 安装 3X-ui 面板                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 搭建 WordPress (Docker)                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -733,157 +721,6 @@ app_management_menu() {
     done
 }
 # ================= App Management End ===================
-do_update_script() {
-    log_info "正在从 GitHub 下载最新版本的脚本..."
-    local temp_script="/tmp/vps_tool_new.sh"
-    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
-        log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
-        press_any_key
-        return
-    fi
-    if cmp -s "$SCRIPT_PATH" "$temp_script"; then
-        log_info "脚本已经是最新版本，无需更新。"
-        rm "$temp_script"
-        press_any_key
-        return
-    fi
-    log_info "下载成功，正在应用更新..."
-    chmod +x "$temp_script"
-    mv "$temp_script" "$SCRIPT_PATH"
-    log_info "✅ 脚本已成功更新！正在立即重新加载..."
-    sleep 2
-    exec "$SCRIPT_PATH"
-}
-_create_shortcut() {
-    local shortcut_name=$1
-    local full_path="/usr/local/bin/$shortcut_name"
-    if [ -z "$shortcut_name" ]; then
-        log_error "快捷命令名称不能为空！"
-        return 1
-    fi
-    if ! [[ "$shortcut_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        log_error "无效的命令名称！只能包含字母、数字、下划线和连字符。"
-        return 1
-    fi
-    echo ""
-    log_info "正在为脚本创建快捷命令: $shortcut_name"
-    ln -sf "$SCRIPT_PATH" "$full_path"
-    chmod +x "$full_path"
-    log_info "✅ 快捷命令 '$shortcut_name' 已设置！"
-    log_info "现在您可以随时随地输入 '$shortcut_name' 来运行此脚本。"
-}
-setup_shortcut() {
-    echo ""
-    local default_shortcut="sv"
-    read -p "请输入您想要的快捷命令名称 [默认: $default_shortcut]: " input_name
-    local shortcut_name=${input_name:-$default_shortcut}
-    _create_shortcut "$shortcut_name"
-    press_any_key
-}
-manage_bbr() {
-    clear
-    log_info "开始检查并管理 BBR..."
-    local kernel_version=$(uname -r | cut -d- -f1)
-    if ! dpkg --compare-versions "$kernel_version" "ge" "4.9"; then
-        log_error "您的内核版本 ($kernel_version) 过低，无法开启 BBR。请升级内核至 4.9 或更高版本。"
-        press_any_key
-        return
-    fi
-    log_info "内核版本 $kernel_version 符合要求。"
-    local current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
-    log_info "当前 TCP 拥塞控制算法为: $YELLOW$current_congestion_control$NC"
-    local current_queue_discipline=$(sysctl -n net.core.default_qdisc)
-    log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
-    echo ""
-    echo "请选择要执行的操作:"
-    echo ""
-    echo "1. 启用 BBR (原始版本)"
-    echo ""
-    echo "2. 启用 BBR + FQ"
-    echo ""
-    echo "0. 返回"
-    echo ""
-    read -p "请输入选项: " choice
-    local sysctl_conf="/etc/sysctl.conf"
-    sed -i '/net.core.default_qdisc/d' "$sysctl_conf"
-    sed -i '/net.ipv4.tcp_congestion_control/d' "$sysctl_conf"
-    case $choice in
-    1)
-        log_info "正在启用 BBR..."
-        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
-        ;;
-    2)
-        log_info "正在启用 BBR + FQ..."
-        echo "net.core.default_qdisc = fq" >>"$sysctl_conf"
-        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
-        ;;
-    0)
-        log_info "操作已取消。"
-        return
-        ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        return
-        ;;
-    esac
-    log_info "正在应用配置..."
-    sysctl -p
-    log_info "✅ 配置已应用！请检查上面的新算法是否已生效。"
-    press_any_key
-}
-install_warp() {
-    clear
-    log_info "开始安装 WARP..."
-    log_warn "本功能将使用 fscarmen 的多功能 WARP 脚本。"
-    log_warn "脚本将引导您完成安装，请根据其提示进行选择。"
-    press_any_key
-    bash <(curl -sSL https://raw.githubusercontent.com/fscarmen/warp/main/menu.sh)
-    log_info "WARP 脚本执行完毕。按任意键返回主菜单。"
-    press_any_key
-}
-sys_manage_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 优化 DNS                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置 SSH 密钥登录                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. 安装 WARP 网络接口                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
-        read -p "请输入选项: " choice
-        case $choice in
-        1) show_system_info ;; 2) clean_system ;; 3) change_hostname ;; 4) optimize_dns ;;
-        5) set_network_priority ;; 6) setup_ssh_key ;; 7) set_timezone ;; 8) manage_bbr ;;
-        9) install_warp ;; 0) break ;; *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
-        esac
-    done
-}
 main_menu() {
     while true; do
         clear
