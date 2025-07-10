@@ -1722,33 +1722,48 @@ install_nezha_agent_v0() {
         log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
+    # 在子脚本开头插入 set -e，确保任何错误都会立即终止脚本
+    sed -i '1s/^/#!\/bin\/bash\nset -e\n/' "$SCRIPT_PATH_TMP"
+
     log_info "正在对官方脚本进行改造以实现共存..."
-    # 1. 修改安装目录
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' "$SCRIPT_PATH_TMP"
-    # 2. 修改服务文件路径
     sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' "$SCRIPT_PATH_TMP"
-    # 3. 修改所有systemctl的调用目标
     sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl stop nezha-agent/systemctl stop nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl disable nezha-agent/systemctl disable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl is-active nezha-agent/systemctl is-active nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl enable nezha-agent/systemctl enable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
 
-    log_info "赋予脚本执行权限并执行改造后的脚本..."
     chmod +x "$SCRIPT_PATH_TMP"
 
-    # 直接调用改造后的脚本
+    echo ""
+    log_warn "即将执行改造后的官方脚本，它的所有输出将被完整显示以供调试..."
+    echo -e "${WHITE}===================== 子脚本输出开始 =====================${NC}"
+
+    # 执行脚本，并捕获其退出码
     bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    local exit_code=$?
+
+    echo -e "${WHITE}===================== 子脚本输出结束 =====================${NC}"
+    echo ""
 
     # 清理临时脚本
     rm "$SCRIPT_PATH_TMP"
 
-    log_info "检查服务状态..."
-    sleep 2
+    # 检查子脚本是否成功执行
+    if [ $exit_code -ne 0 ]; then
+        log_error "子脚本执行失败，退出码: $exit_code"
+        log_warn "请仔细检查上面【子脚本输出】中的错误信息。"
+        press_any_key
+        return
+    fi
+
+    log_info "子脚本执行成功，正在检查服务状态..."
+    sleep 1
     if systemctl is-active --quiet nezha-agent-v0; then
         log_info "✅ Nezha V0 探针安装并启动成功！"
     else
-        log_error "Nezha V0 探针服务启动失败！"
+        log_error "服务最终未能启动！"
         log_warn "显示详细状态以供诊断:"
         echo -e "${WHITE}-------------------------------------------------------"
         systemctl status nezha-agent-v0.service --no-pager -l
