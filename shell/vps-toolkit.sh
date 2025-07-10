@@ -1888,29 +1888,27 @@ nezha_agent_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 哪吒探针 (Agent) 管理            $CYAN║$NC"
+        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                   $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                   $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                   $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                   $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -1921,7 +1919,6 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
-        5) cleanup_all_nezha_agents ;;
         0) break ;;
         *)
             log_error "无效选项！"
@@ -2332,7 +2329,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
