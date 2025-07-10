@@ -1680,19 +1680,13 @@ is_nezha_agent_installed() {
     [ -f "/etc/systemd/system/nezha-agent.service" ]
 }
 uninstall_nezha_agent() {
-    if ! is_nezha_agent_installed; then
-        log_warn "标准的 'nezha-agent' 服务未安装，无需卸载。"
-        press_any_key
-        return
+    # 这是一个辅助函数，确保清理标准版时不会报错
+    if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        systemctl stop nezha-agent.service &>/dev/null
+        systemctl disable nezha-agent.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent.service
+        rm -rf /opt/nezha/agent
     fi
-    log_info "正在停止并禁用 nezha-agent 服务..."
-    systemctl stop nezha-agent.service &>/dev/null
-    systemctl disable nezha-agent.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent.service
-    rm -rf /opt/nezha/agent
-    systemctl daemon-reload
-    log_info "✅ 标准的 Nezha 探针已成功卸载。"
-    press_any_key
 }
 uninstall_nezha_agent_v0() {
     if ! is_nezha_agent_v0_installed; then
@@ -1701,7 +1695,10 @@ uninstall_nezha_agent_v0() {
         return
     fi
     log_info "正在停止并禁用 nezha-agent-v0 服务..."
-    uninstall_nezha_agent_v0_silent
+    systemctl stop nezha-agent-v0.service &>/dev/null
+    systemctl disable nezha-agent-v0.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v0.service
+    rm -rf /opt/nezha/agent-v0
     systemctl daemon-reload
     log_info "✅ Nezha V0 探针已成功卸载。"
     press_any_key
@@ -1714,17 +1711,25 @@ uninstall_nezha_agent_v1() {
         return
     fi
     log_info "正在停止并禁用 nezha-agent-v1 服务..."
-    uninstall_nezha_agent_v1_silent
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
     systemctl daemon-reload
     log_info "✅ Nezha V1 探针已成功卸载。"
     press_any_key
 }
+
 install_nezha_agent_v0() {
-    uninstall_nezha_agent_v0_silent
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v0 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
     systemctl daemon-reload
+
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针 (隔离共存模式)..."
+    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+
     read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
     read -p "请输入面板服务器端口 [默认: 443]: " server_port
@@ -1739,45 +1744,64 @@ install_nezha_agent_v0() {
         tls_option="";
     fi
 
-    local SCRIPT_PATH_TMP="/tmp/nezha_v0_install_mod.sh"
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
 
-    log_info "正在下载并改造官方脚本..."
+    log_info "正在下载官方安装脚本..."
     if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
         log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
-    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' "$SCRIPT_PATH_TMP"
-    sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' "$SCRIPT_PATH_TMP"
-    sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
-    sed -i 's/systemctl stop nezha-agent/systemctl stop nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
-    sed -i 's/systemctl disable nezha-agent/systemctl disable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
-    sed -i 's/systemctl is-active nezha-agent/systemctl is-active nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
-    sed -i 's/systemctl enable nezha-agent/systemctl enable nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
-
     chmod +x "$SCRIPT_PATH_TMP"
 
-    log_info "正在创建无菌环境来执行改造后的脚本..."
-    local CMD_TO_RUN="bash $SCRIPT_PATH_TMP install_agent $server_addr $server_port $server_key $tls_option"
-    env -i HOME="$HOME" PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM="$TERM" bash -c "$CMD_TO_RUN"
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
     rm "$SCRIPT_PATH_TMP"
 
-    log_info "子脚本执行完毕，正在检查 'nezha-agent-v0' 服务状态..."
+    # 检查标准版是否安装成功
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v0.service
+    mv /opt/nezha/agent /opt/nezha/agent-v0
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v0/nezha-agent|g' /etc/systemd/system/nezha-agent-v0.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v0' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v0.service
+    systemctl start nezha-agent-v0.service
+
+    log_info "检查最终服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v0; then
-        log_info "✅ Nezha V0 探针 (隔离版) 安装并启动成功！"
+        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
     else
-        log_error "Nezha V0 探针 (隔离版) 服务启动失败！"
+        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
         log_warn "显示详细状态以供诊断:"
         systemctl status nezha-agent-v0.service --no-pager -l
     fi
     press_any_key
 }
 install_nezha_agent_v1() {
-    uninstall_nezha_agent_v1_silent
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v1 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
     systemctl daemon-reload
+
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针 (隔离共存模式)..."
+    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
+
     read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
     server_info=${server_info:-"nz.ssong.eu.org:8008"}
     read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
@@ -1785,29 +1809,53 @@ install_nezha_agent_v1() {
     read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
     if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
 
-    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_mod.sh"
-    log_info "正在下载并改造官方V1安装脚本..."
+    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
+
+    log_info "正在下载官方V1安装脚本..."
     if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
         log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
-    sed -i 's/SERVICE_NAME="nezha-agent"/SERVICE_NAME="nezha-agent-v1"/g' "$SCRIPT_PATH_TMP"
-    sed -i 's|AGENT_DIR="/opt/nezha/agent"|AGENT_DIR="/opt/nezha/agent-v1"|g' "$SCRIPT_PATH_TMP"
     chmod +x "$SCRIPT_PATH_TMP"
 
-    log_info "正在创建无菌环境来执行改造后的脚本..."
-    local ENV_VARS="HOME='$HOME' PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' TERM='$TERM'"
-    local NEZHA_VARS="NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'"
-    local CMD_TO_RUN="bash $SCRIPT_PATH_TMP"
-    env -i $ENV_VARS $NEZHA_VARS bash -c "$CMD_TO_RUN"
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    export NZ_SERVER="$server_info"
+    export NZ_TLS="$NZ_TLS"
+    export NZ_CLIENT_SECRET="$server_secret"
+    bash "$SCRIPT_PATH_TMP"
+    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
     rm "$SCRIPT_PATH_TMP"
 
-    log_info "子脚本执行完毕，正在检查 'nezha-agent-v1' 服务状态..."
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v1.service
+    mv /opt/nezha/agent /opt/nezha/agent-v1
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
+    # V1版的环境变量是在服务文件中定义的，不需要修改ExecStart
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v1.service
+    systemctl start nezha-agent-v1.service
+
+    log_info "检查最终服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v1; then
-        log_info "✅ Nezha V1 探针 (隔离版) 安装并启动成功！"
+        log_info "✅ Nezha V1 探针 (隔离版) 已成功安装并启动！"
     else
-        log_error "Nezha V1 探针 (隔离版) 服务启动失败！"
+        log_error "Nezha V1 探针 (隔离版) 最终启动失败！"
         log_warn "显示详细状态以供诊断:"
         systemctl status nezha-agent-v1.service --no-pager -l
     fi
