@@ -1882,6 +1882,34 @@ uninstall_nezha_agent_v1() {
     log_info "✅ Nezha V1 探针已成功卸载。"
     press_any_key
 }
+cleanup_all_nezha_agents() {
+    log_warn "此操作将尝试停止并删除本机上所有版本的哪吒探针！"
+    log_warn "包括: 标准版, V0版, V1版。此操作不可逆！"
+    read -p "请输入 Y 确认执行: " choice
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在清理标准版 nezha-agent..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent.service
+    rm -rf /opt/nezha/agent
+
+    log_info "正在清理 V0 版 nezha-agent-v0..."
+    uninstall_nezha_agent_v0_silent
+
+    log_info "正在清理 V1 版 nezha-agent-v1..."
+    uninstall_nezha_agent_v1_silent
+
+    log_info "正在重载 systemd 配置..."
+    systemctl daemon-reload
+
+    log_info "✅ 所有可识别的哪吒探针均已清理完毕。"
+    press_any_key
+}
 install_nezha_dashboard_v0() {
     ensure_dependencies "wget"
     log_info "即将运行 fscarmen 的 V0 面板安装/管理脚本..."
@@ -1902,27 +1930,29 @@ nezha_agent_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                 哪吒探针 (Agent) 管理            $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${GREEN}(已安装)$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${GREEN}(已安装)$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   5. $YELLOW清理所有哪吒探针 (强制重置)$NC                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -1933,6 +1963,7 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
+        5) cleanup_all_nezha_agents ;; # 新增的选项
         0) break ;;
         *)
             log_error "无效选项！"
