@@ -1,3 +1,4 @@
+#!/bin/bash
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
@@ -64,34 +65,6 @@ _is_domain_valid() {
     else
         return 1
     fi
-}
-ensure_dependencies() {
-    local dependencies=("$@")
-    local missing_dependencies=()
-    if [ ${#dependencies[@]} -eq 0 ]; then
-        return 0
-    fi
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
-    for pkg in "${dependencies[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-            missing_dependencies+=("$pkg")
-        fi
-    done
-    if [ ${#missing_dependencies[@]} -gt 0 ]; then
-        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并开始安装..."
-        set -e
-        apt-get update -y
-        for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装 $pkg..."
-            apt-get install -y "$pkg"
-        done
-        set +e
-        log_info "按需依赖已安装完毕。"
-    else
-        log_info "所需依赖均已安装。"
-    fi
-    echo ""
 }
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
@@ -794,6 +767,25 @@ push_to_telegram() {
     log_info "✅ 节点信息已成功推送到 Telegram！"
     press_any_key
 }
+push_nodes() {
+    ensure_dependencies "jq" "curl"
+    clear
+    echo -e "$WHITE--- 推送节点 ---$NC\n"
+    echo "1. 推送到 Sub-Store"
+    echo "2. 推送到 Telegram Bot"
+    echo ""
+    echo "0. 返回"
+    read -p "请选择推送方式: " push_choice
+    case $push_choice in
+    1) push_to_sub_store ;;
+    2) push_to_telegram ;;
+    0) return ;;
+    *)
+        log_error "无效选项！"
+        press_any_key
+        ;;
+    esac
+}
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -841,7 +833,6 @@ generate_subscription_link() {
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
 }
-# 显示/管理节点信息
 view_node_info() {
     while true; do
         clear; echo "";
@@ -855,10 +846,8 @@ view_node_info() {
         log_info "当前已配置的节点链接信息："
         echo -e "${CYAN}--------------------------------------------------------------${NC}"
 
-        # 读取节点文件
         mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
 
-        # 循环打印每个节点的信息
         for i in "${!node_lines[@]}"; do
             local line="${node_lines[$i]}"
             local node_name
@@ -870,12 +859,6 @@ view_node_info() {
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
 
-        # ==================== 核心修正点：移除了聚合 Base64 内容的显示 ====================
-        # aggregated_link=$(echo -n "$all_links" | base64 -w0)
-        # echo -e "\n${GREEN}聚合订阅内容 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
-        # =================================================================================
-
-        # 在菜单中保留“生成临时订阅链接”的选项
         echo -e "\n1. 新增节点  2. 删除节点 3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}    0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
@@ -990,29 +973,6 @@ delete_nodes() {
     done
     press_any_key
 }
-push_nodes() {
-    clear
-    echo ""
-    echo -e "$WHITE------- 推送节点 -------$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo ""
-    echo "2. 推送到 Telegram Bot"
-    echo ""
-    echo -e "$WHITE------------------------$NC\n"
-    echo "0. 返回上一级菜单"
-    echo ""
-    echo -e "$WHITE------------------------$NC\n"
-    read -p "请选择推送方式: " push_choice
-    case $push_choice in
-    1) push_to_sub_store ;;
-    2) push_to_telegram ;;
-    0) return ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        ;;
-    esac
-}
 singbox_do_uninstall() {
     if ! is_singbox_installed; then
         log_warn "Sing-Box 未安装，无需卸载。"
@@ -1054,8 +1014,6 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
-
-# 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
@@ -1063,18 +1021,16 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点 1：回归稳定可靠的 FNM 安装方式 ====================
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
-    # 自动检测架构并下载正确的 fnm 版本
     local fnm_zip_name
     case $(dpkg --print-architecture) in
         arm64 | aarch64)
             log_info "检测到 ARM64/AArch64 架构..."
             fnm_zip_name="fnm-linux-aarch64.zip"
             ;;
-        amd64 | *) # 默认和 amd64 都使用通用版本
+        amd64 | *)
             log_info "检测到 AMD64 (x86_64) 架构..."
             fnm_zip_name="fnm-linux.zip"
             ;;
@@ -1084,9 +1040,7 @@ substore_do_install() {
 
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
-    # 直接将 fnm 路径加入到当前脚本会话的 PATH 中，这是最关键的一步
     export PATH="${FNM_DIR}:$PATH"
-    # 立即评估 fnm 的环境变量，使其在当前会话中生效
     eval "$(fnm env)"
     log_info "FNM 安装完成。"
 
@@ -1099,7 +1053,6 @@ substore_do_install() {
     export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
-    # (后续的 Sub-Store 下载和配置代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
@@ -1111,7 +1064,6 @@ substore_do_install() {
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
     local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
 
-    # ==================== 核心修正点 2：ExecStart 回归使用 fnm exec ====================
     cat <<EOF > "$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
@@ -1139,7 +1091,6 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    # ====================================================================================
 
     log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
     log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
@@ -1147,7 +1098,6 @@ EOF
     echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
-
 _install_docker_and_compose() {
     if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "Docker 和 Docker Compose V2 已安装。"
@@ -1572,6 +1522,441 @@ EOF
     substore_view_access_link
     press_any_key
 }
+substore_manage_menu() {
+    while true; do
+        clear
+        local rp_menu_text="设置反向代理 (推荐)"
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
+            rp_menu_text="更换反代域名"
+        fi
+        echo -e "$WHITE=============================$NC\n"
+        echo -e "$WHITE      Sub-Store 管理菜单      $NC\n"
+        echo -e "$WHITE=============================$NC\n"
+        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+        echo -e "当前状态: $STATUS_COLOR\n"
+        echo "-----------------------------"
+        echo ""
+        echo "1. 启动服务"
+        echo ""
+        echo "2. 停止服务"
+        echo ""
+        echo "3. 重启服务"
+        echo ""
+        echo "4. 查看状态"
+        echo ""
+        echo "5. 查看日志"
+        echo ""
+        echo "-----------------------------"
+        echo ""
+        echo "6. 查看访问链接"
+        echo ""
+        echo "7. 重置端口"
+        echo ""
+        echo "8. 重置 API 密钥"
+        echo ""
+        echo -e "9. $YELLOW$rp_menu_text$NC"
+        echo ""
+        echo "0. 返回主菜单"
+        echo ""
+        echo -e "$WHITE-----------------------------$NC\n"
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            systemctl start "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        2)
+            systemctl stop "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        3)
+            systemctl restart "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        4)
+            clear
+            systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager
+            press_any_key
+            ;;
+        5)
+            clear
+            journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager
+            ;;
+        6)
+            substore_view_access_link
+            press_any_key
+            ;;
+        7) substore_reset_ports ;;
+        8) substore_reset_api_key ;;
+        9) substore_setup_reverse_proxy ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
+substore_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        if is_substore_installed; then
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_manage_menu ;; 2) update_sub_store_app ;;
+            3) substore_do_uninstall ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
+            esac
+        else
+            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_do_install ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
+            esac
+        fi
+    done
+}
+# ================= Nezha Management Start =================
+is_nezha_agent_installed() {
+    [ -f "/etc/systemd/system/nezha-agent.service" ]
+}
+uninstall_nezha_agent() {
+    # 这是一个辅助函数，确保清理标准版时不会报错
+    if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        systemctl stop nezha-agent.service &>/dev/null
+        systemctl disable nezha-agent.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent.service
+        rm -rf /opt/nezha/agent
+    fi
+}
+uninstall_nezha_agent_v0() {
+    if ! is_nezha_agent_v0_installed; then
+        log_warn "Nezha V0 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v0 服务..."
+    systemctl stop nezha-agent-v0.service &>/dev/null
+    systemctl disable nezha-agent-v0.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v0.service
+    rm -rf /opt/nezha/agent-v0
+    systemctl daemon-reload
+    log_info "✅ Nezha V0 探针已成功卸载。"
+    press_any_key
+}
+
+uninstall_nezha_agent_v1() {
+    if ! is_nezha_agent_v1_installed; then
+        log_warn "Nezha V1 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v1 服务..."
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
+    systemctl daemon-reload
+    log_info "✅ Nezha V1 探针已成功卸载。"
+    press_any_key
+}
+
+install_nezha_agent_v0() {
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v0 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
+
+    ensure_dependencies "curl" "wget" "unzip"
+    clear
+    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+
+    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
+    server_addr=${server_addr:-"nz.wiitwo.eu.org"}
+    read -p "请输入面板服务器端口 [默认: 443]: " server_port
+    server_port=${server_port:-"443"}
+    read -p "请输入面板密钥: " server_key
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！"; press_any_key; return
+    fi
+
+    local tls_option="--tls"
+    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
+        tls_option="";
+    fi
+
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
+
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    rm "$SCRIPT_PATH_TMP"
+
+    # 检查标准版是否安装成功
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v0.service
+    mv /opt/nezha/agent /opt/nezha/agent-v0
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v0/nezha-agent|g' /etc/systemd/system/nezha-agent-v0.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v0' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v0.service
+    systemctl start nezha-agent-v0.service
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet nezha-agent-v0; then
+        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status nezha-agent-v0.service --no-pager -l
+    fi
+    press_any_key
+}
+install_nezha_agent_v1() {
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v1 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
+
+    ensure_dependencies "curl" "wget" "unzip"
+    clear
+    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
+
+    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
+    server_info=${server_info:-"nz.ssong.eu.org:8008"}
+    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
+    server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
+    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
+    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
+
+    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
+
+    log_info "正在下载官方V1安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    export NZ_SERVER="$server_info"
+    export NZ_TLS="$NZ_TLS"
+    export NZ_CLIENT_SECRET="$server_secret"
+    bash "$SCRIPT_PATH_TMP"
+    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
+    rm "$SCRIPT_PATH_TMP"
+
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v1.service
+    mv /opt/nezha/agent /opt/nezha/agent-v1
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
+    # V1版的环境变量是在服务文件中定义的，不需要修改ExecStart
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v1.service
+    systemctl start nezha-agent-v1.service
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet nezha-agent-v1; then
+        log_info "✅ Nezha V1 探针 (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha V1 探针 (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status nezha-agent-v1.service --no-pager -l
+    fi
+    press_any_key
+}
+install_nezha_dashboard_v0() {
+    ensure_dependencies "wget"
+    log_info "即将运行 fscarmen 的 V0 面板安装/管理脚本..."
+    press_any_key
+    bash <(wget -qO- https://raw.githubusercontent.com/fscarmen2/Argo-Nezha-Service-Container/main/dashboard.sh)
+    log_info "脚本执行完毕。"
+    press_any_key
+}
+install_nezha_dashboard_v1() {
+    ensure_dependencies "curl"
+    log_info "即将运行官方 V1 面板安装/管理脚本..."
+    press_any_key
+    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && sudo ./nezha.sh
+    log_info "脚本执行完毕。"
+    press_any_key
+}
+is_nezha_agent_v0_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
+}
+
+is_nezha_agent_v1_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
+}
+nezha_agent_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v0_installed; then
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v1_installed; then
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) install_nezha_agent_v0 ;;
+        2) uninstall_nezha_agent_v0 ;;
+        3) install_nezha_agent_v1 ;;
+        4) uninstall_nezha_agent_v1 ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
+nezha_dashboard_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                哪吒面板 (Dashboard) 管理         $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装/管理 V0 面板 (by fscarmen)             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 安装/管理 V1 面板 (Official)                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
+        log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) install_nezha_dashboard_v0 ;;
+        2) install_nezha_dashboard_v1 ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
+nezha_manage_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   哪吒监控管理                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 探针 (Agent) 管理                           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 面板 (Dashboard) 管理                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
+# ================= Nezha Management End ===================
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/vps_tool_new.sh"
@@ -1770,131 +2155,6 @@ _add_protocol_inbound() {
     log_info "✅ [$protocol] 协议配置添加成功！"
     return 0
 }
-substore_manage_menu() {
-    while true; do
-        clear
-        local rp_menu_text="设置反向代理 (推荐)"
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
-            rp_menu_text="更换反代域名"
-        fi
-        echo -e "$WHITE=============================$NC\n"
-        echo -e "$WHITE      Sub-Store 管理菜单      $NC\n"
-        echo -e "$WHITE=============================$NC\n"
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-        echo -e "当前状态: $STATUS_COLOR\n"
-        echo "-----------------------------"
-        echo ""
-        echo "1. 启动服务"
-        echo ""
-        echo "2. 停止服务"
-        echo ""
-        echo "3. 重启服务"
-        echo ""
-        echo "4. 查看状态"
-        echo ""
-        echo "5. 查看日志"
-        echo ""
-        echo "-----------------------------"
-        echo ""
-        echo "6. 查看访问链接"
-        echo ""
-        echo "7. 重置端口"
-        echo ""
-        echo "8. 重置 API 密钥"
-        echo ""
-        echo -e "9. $YELLOW$rp_menu_text$NC"
-        echo ""
-        echo "0. 返回主菜单"
-        echo ""
-        echo -e "$WHITE-----------------------------$NC\n"
-        read -p "请输入选项: " choice
-        case $choice in
-        1)
-            systemctl start "$SUBSTORE_SERVICE_NAME"
-            log_info "命令已发送"
-            sleep 1
-            ;;
-        2)
-            systemctl stop "$SUBSTORE_SERVICE_NAME"
-            log_info "命令已发送"
-            sleep 1
-            ;;
-        3)
-            systemctl restart "$SUBSTORE_SERVICE_NAME"
-            log_info "命令已发送"
-            sleep 1
-            ;;
-        4)
-            clear
-            systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager
-            press_any_key
-            ;;
-        5)
-            clear
-            journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager
-            ;;
-        6)
-            substore_view_access_link
-            press_any_key
-            ;;
-        7) substore_reset_ports ;;
-        8) substore_reset_api_key ;;
-        9) substore_setup_reverse_proxy ;;
-        0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
-        esac
-    done
-}
-substore_main_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
-            case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *)
-                log_warn "无效选项！"
-                sleep 1
-                ;;
-            esac
-        else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
-            case $choice in
-            1) substore_do_install ;; 0) break ;; *)
-                log_warn "无效选项！"
-                sleep 1
-                ;;
-            esac
-        fi
-    done
-}
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -2041,23 +2301,23 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 S-ui 面板                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 安装 S-ui 面板                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 3X-ui 面板                             $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 安装 3X-ui 面板                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   11. $YELLOW哪吒探针V0V1 $NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC  10. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2068,28 +2328,13 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4)
-            ensure_dependencies "curl"
-            install_sui
-            ;;
-        5)
-            ensure_dependencies "curl"
-            install_3xui
-            ;;
-        6) install_wordpress ;;
-        7) setup_auto_reverse_proxy ;;
-        8) do_update_script ;;
-        9) setup_shortcut ;;
-        11)
-            isolate_nezha_v1
-            # $? 变量会保存上一个命令（也就是我们的函数）的返回值
-            if [ $? -eq 0 ]; then
-                log_info "V1 隔离操作成功完成！"
-            else
-                log_error "V1 隔离操作失败，请检查上面的日志。"
-            fi
-            press_any_key # 等待用户按键后才返回主菜单
-            ;;
+        4) nezha_manage_menu ;;
+        5) install_sui ;;
+        6) install_3xui ;;
+        7) install_wordpress ;;
+        8) setup_auto_reverse_proxy ;;
+        9) do_update_script ;;
+        10) setup_shortcut ;;
         0) exit 0 ;;
         *)
             log_error "无效选项！"
@@ -2098,73 +2343,6 @@ main_menu() {
         esac
     done
 }
-isolate_nezha_v1() {
-  # --- 使用 local 声明局部变量，避免污染主脚本 ---
-  local DEFAULT_SERVICE_NAME="nezha-agent"
-  local V1_SERVICE_NAME="nezha-agent-v1"
-  local DEFAULT_PATH="/opt/nezha/agent/" # 注意末尾的斜杠
-  local V1_PATH="/opt/nezha/agent-v1/"   # 注意末尾的斜杠
-  local SERVICE_FILE_PATH="/etc/systemd/system"
-  local DEFAULT_PATH_NO_SLASH
-
-  # --- 函数主体逻辑 ---
-  echo "✅ 开始执行哪吒 V1 探针隔离函数..."
-  echo "-------------------------------------------"
-
-  # 检查是否以 root 权限运行
-  if [ "$EUID" -ne 0 ]; then
-    echo "错误：此函数需要以 sudo/root 权限运行。"
-    return 1 # 返回失败状态码
-  fi
-
-  # 检查原始服务是否存在
-  if ! systemctl list-units --full -all | grep -Fq "${DEFAULT_SERVICE_NAME}.service"; then
-    echo "错误：未找到原始服务 ${DEFAULT_SERVICE_NAME}.service。请确认 V1 探针已正确安装且未被处理过。"
-    return 1
-  fi
-
-  echo "➡️ [1/7] 正在停止当前的 ${DEFAULT_SERVICE_NAME} 服务..."
-  systemctl stop "${DEFAULT_SERVICE_NAME}.service" || { echo "停止服务失败"; return 1; }
-
-  echo "➡️ [2/7] 正在将服务文件重命名为 ${V1_SERVICE_NAME}.service..."
-  mv "${SERVICE_FILE_PATH}/${DEFAULT_SERVICE_NAME}.service" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
-
-  echo "➡️ [3/7] 正在为 V1 创建专属目录 ${V1_PATH}..."
-  mkdir -p "${V1_PATH}"
-
-  echo "➡️ [4/7] 正在移动 V1 程序文件..."
-  DEFAULT_PATH_NO_SLASH=$(echo "$DEFAULT_PATH" | sed 's:/*$::')
-  if [ -d "$DEFAULT_PATH_NO_SLASH" ] && [ "$(ls -A ${DEFAULT_PATH_NO_SLASH} 2>/dev/null)" ]; then
-      mv ${DEFAULT_PATH_NO_SLASH}/* "${V1_PATH}"
-  else
-      echo "   - 警告：原始目录 ${DEFAULT_PATH_NO_SLASH} 为空或不存在，可能已被处理。继续..."
-  fi
-
-  echo "➡️ [5/7] 正在自动修改服务文件中的所有相关路径..."
-  sed -i "s|${DEFAULT_PATH}|${V1_PATH}|g" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
-
-  echo "➡️ [6/7] 正在重新加载 systemd 配置、设置开机自启并重启服务..."
-  systemctl daemon-reload
-  systemctl enable "${V1_SERVICE_NAME}.service"
-  systemctl restart "${V1_SERVICE_NAME}.service"
-
-  echo "➡️ [7/7] 操作完成！正在检查 ${V1_SERVICE_NAME} 的最终状态..."
-  sleep 2
-
-  # 检查服务最终是否成功运行
-  if ! systemctl is-active --quiet "${V1_SERVICE_NAME}.service"; then
-      echo "错误：${V1_SERVICE_NAME}.service 未能成功启动。请检查日志。"
-      systemctl status "${V1_SERVICE_NAME}.service" --no-pager
-      return 1
-  fi
-
-  systemctl status "${V1_SERVICE_NAME}.service" --no-pager
-  echo "-------------------------------------------"
-  echo "✅ 函数执行成功！${V1_SERVICE_NAME} 服务已独立运行。"
-
-  return 0 # 返回成功状态码
-}
-
 post_add_node_menu() {
     while true; do
         echo ""
@@ -2196,10 +2374,9 @@ singbox_add_node_orchestrator() {
     local cert_path key_path
     declare -A ports
     local protocols_to_create=()
-    local protocols_with_self_signed=() # 用于记录使用了自签证书的协议
+    local protocols_with_self_signed=()
     local is_one_click=false
 
-    # ##############【修改点 1 - 菜单风格替换】##############
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
@@ -2437,7 +2614,6 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
-            # ##############【修改点 2 - 添加操作提示】##############
             if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
                 echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
                 for p in "${protocols_with_self_signed[@]}"; do
