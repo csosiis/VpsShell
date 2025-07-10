@@ -93,34 +93,6 @@ ensure_dependencies() {
     fi
     echo ""
 }
-ensure_dependencies() {
-    local dependencies=("$@")
-    local missing_dependencies=()
-    if [ ${#dependencies[@]} -eq 0 ]; then
-        return 0
-    fi
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
-    for pkg in "${dependencies[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-            missing_dependencies+=("$pkg")
-        fi
-    done
-    if [ ${#missing_dependencies[@]} -gt 0 ]; then
-        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并开始安装..."
-        set -e
-        apt-get update -y
-        for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装 $pkg..."
-            apt-get install -y "$pkg"
-        done
-        set +e
-        log_info "按需依赖已安装完毕。"
-    else
-        log_info "所需依赖均已安装。"
-    fi
-    echo ""
-}
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
@@ -684,13 +656,11 @@ select_nodes_for_push() {
         log_warn "没有可推送的节点。"
         return 1
     fi
+    clear
     echo -e "\n请选择要推送的节点：\n"
-    echo "1. 推送所有节点"
-    echo ""
-    echo "2. 推送单个/多个节点"
-    echo ""
-    echo "0. 返回"
-    echo ""
+    echo -e "1. 推送所有节点\n"
+    echo -e "2. 推送单个/多个节点\n"
+    echo -e "0. 返回\n"
     read -p "请输入选项: " push_choice
     selected_links=()
     case $push_choice in
@@ -824,25 +794,6 @@ push_to_telegram() {
     log_info "✅ 节点信息已成功推送到 Telegram！"
     press_any_key
 }
-push_nodes() {
-    ensure_dependencies "jq" "curl"
-    clear
-    echo -e "$WHITE--- 推送节点 ---$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo "2. 推送到 Telegram Bot"
-    echo ""
-    echo "0. 返回"
-    read -p "请选择推送方式: " push_choice
-    case $push_choice in
-    1) push_to_sub_store ;;
-    2) push_to_telegram ;;
-    0) return ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        ;;
-    esac
-}
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -890,57 +841,52 @@ generate_subscription_link() {
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
 }
+# 显示/管理节点信息
 view_node_info() {
     while true; do
-        clear
-        echo ""
+        clear; echo "";
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
             read -p "请输入选项: " choice
-            if [[ "$choice" == "1" ]]; then
-                singbox_add_node_orchestrator
-                continue
-            else return; fi
+            if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
         fi
+
         log_info "当前已配置的节点链接信息："
-        echo -e "$CYAN--------------------------------------------------------------$NC"
-        mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
-        all_links=""
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+
+        # 读取节点文件
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+
+        # 循环打印每个节点的信息
         for i in "${!node_lines[@]}"; do
-            line="${node_lines[$i]}"
+            local line="${node_lines[$i]}"
+            local node_name
             node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
-            if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"'); fi
-            echo -e "\n$GREEN$((i + 1)). $WHITE$node_name$NC\n\n$line"
-            echo -e "\n$CYAN--------------------------------------------------------------$NC"
-            all_links+="$line"$'\n'
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"')
+            fi
+            echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}"
+            echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
-        aggregated_link=$(echo -n "$all_links" | base64 -w0)
-        echo -e "\n$GREEN聚合订阅内容 (Base64):$NC\n\n$YELLOW$aggregated_link$NC\n\n$CYAN--------------------------------------------------------------$NC"
-        echo -e "\n1. 新增节点\n\n2. 删除节点\n\n3. 推送节点\n\n4. $YELLOW生成临时订阅链接 (需Nginx)$NC\n\n0. 返回上一级菜单\n"
+
+        # ==================== 核心修正点：移除了聚合 Base64 内容的显示 ====================
+        # aggregated_link=$(echo -n "$all_links" | base64 -w0)
+        # echo -e "\n${GREEN}聚合订阅内容 (Base64):${NC}\n\n${YELLOW}${aggregated_link}${NC}\n\n${CYAN}--------------------------------------------------------------${NC}"
+        # =================================================================================
+
+        # 在菜单中保留“生成临时订阅链接”的选项
+        echo -e "\n1. 新增节点  2. 删除节点 3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}    0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
+
         case $choice in
-        1)
-            singbox_add_node_orchestrator
-            continue
-            ;;
-        2)
-            delete_nodes
-            continue
-            ;;
-        3)
-            push_nodes
-            continue
-            ;;
-        4)
-            generate_subscription_link
-            continue
-            ;;
-        0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+            1) singbox_add_node_orchestrator; continue ;;
+            2) delete_nodes; continue ;;
+            3) push_nodes; continue ;;
+            4) generate_subscription_link; continue ;;
+            5) generate_tuic_client_config; continue ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
@@ -1783,6 +1729,7 @@ _create_self_signed_cert() {
     cert_path="$cert_dir/$domain_name.cert.pem"
     key_path="$cert_dir/$domain_name.key.pem"
     if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
+        echo ""
         log_info "检测到已存在的自签名证书，将直接使用。"
         return 0
     fi
@@ -2110,6 +2057,8 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   11. $YELLOW哪吒探针V0V1 $NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2131,6 +2080,16 @@ main_menu() {
         7) setup_auto_reverse_proxy ;;
         8) do_update_script ;;
         9) setup_shortcut ;;
+        11)
+            isolate_nezha_v1
+            # $? 变量会保存上一个命令（也就是我们的函数）的返回值
+            if [ $? -eq 0 ]; then
+                log_info "V1 隔离操作成功完成！"
+            else
+                log_error "V1 隔离操作失败，请检查上面的日志。"
+            fi
+            press_any_key # 等待用户按键后才返回主菜单
+            ;;
         0) exit 0 ;;
         *)
             log_error "无效选项！"
@@ -2139,6 +2098,73 @@ main_menu() {
         esac
     done
 }
+isolate_nezha_v1() {
+  # --- 使用 local 声明局部变量，避免污染主脚本 ---
+  local DEFAULT_SERVICE_NAME="nezha-agent"
+  local V1_SERVICE_NAME="nezha-agent-v1"
+  local DEFAULT_PATH="/opt/nezha/agent/" # 注意末尾的斜杠
+  local V1_PATH="/opt/nezha/agent-v1/"   # 注意末尾的斜杠
+  local SERVICE_FILE_PATH="/etc/systemd/system"
+  local DEFAULT_PATH_NO_SLASH
+
+  # --- 函数主体逻辑 ---
+  echo "✅ 开始执行哪吒 V1 探针隔离函数..."
+  echo "-------------------------------------------"
+
+  # 检查是否以 root 权限运行
+  if [ "$EUID" -ne 0 ]; then
+    echo "错误：此函数需要以 sudo/root 权限运行。"
+    return 1 # 返回失败状态码
+  fi
+
+  # 检查原始服务是否存在
+  if ! systemctl list-units --full -all | grep -Fq "${DEFAULT_SERVICE_NAME}.service"; then
+    echo "错误：未找到原始服务 ${DEFAULT_SERVICE_NAME}.service。请确认 V1 探针已正确安装且未被处理过。"
+    return 1
+  fi
+
+  echo "➡️ [1/7] 正在停止当前的 ${DEFAULT_SERVICE_NAME} 服务..."
+  systemctl stop "${DEFAULT_SERVICE_NAME}.service" || { echo "停止服务失败"; return 1; }
+
+  echo "➡️ [2/7] 正在将服务文件重命名为 ${V1_SERVICE_NAME}.service..."
+  mv "${SERVICE_FILE_PATH}/${DEFAULT_SERVICE_NAME}.service" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [3/7] 正在为 V1 创建专属目录 ${V1_PATH}..."
+  mkdir -p "${V1_PATH}"
+
+  echo "➡️ [4/7] 正在移动 V1 程序文件..."
+  DEFAULT_PATH_NO_SLASH=$(echo "$DEFAULT_PATH" | sed 's:/*$::')
+  if [ -d "$DEFAULT_PATH_NO_SLASH" ] && [ "$(ls -A ${DEFAULT_PATH_NO_SLASH} 2>/dev/null)" ]; then
+      mv ${DEFAULT_PATH_NO_SLASH}/* "${V1_PATH}"
+  else
+      echo "   - 警告：原始目录 ${DEFAULT_PATH_NO_SLASH} 为空或不存在，可能已被处理。继续..."
+  fi
+
+  echo "➡️ [5/7] 正在自动修改服务文件中的所有相关路径..."
+  sed -i "s|${DEFAULT_PATH}|${V1_PATH}|g" "${SERVICE_FILE_PATH}/${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [6/7] 正在重新加载 systemd 配置、设置开机自启并重启服务..."
+  systemctl daemon-reload
+  systemctl enable "${V1_SERVICE_NAME}.service"
+  systemctl restart "${V1_SERVICE_NAME}.service"
+
+  echo "➡️ [7/7] 操作完成！正在检查 ${V1_SERVICE_NAME} 的最终状态..."
+  sleep 2
+
+  # 检查服务最终是否成功运行
+  if ! systemctl is-active --quiet "${V1_SERVICE_NAME}.service"; then
+      echo "错误：${V1_SERVICE_NAME}.service 未能成功启动。请检查日志。"
+      systemctl status "${V1_SERVICE_NAME}.service" --no-pager
+      return 1
+  fi
+
+  systemctl status "${V1_SERVICE_NAME}.service" --no-pager
+  echo "-------------------------------------------"
+  echo "✅ 函数执行成功！${V1_SERVICE_NAME} 服务已独立运行。"
+
+  return 0 # 返回成功状态码
+}
+
 post_add_node_menu() {
     while true; do
         echo ""
@@ -2170,22 +2196,37 @@ singbox_add_node_orchestrator() {
     local cert_path key_path
     declare -A ports
     local protocols_to_create=()
+    local protocols_with_self_signed=() # 用于记录使用了自签证书的协议
     local is_one_click=false
+
+    # ##############【修改点 1 - 菜单风格替换】##############
     clear
-    echo -e "$CYAN-------------------------------------$NC\n "
-    echo -e "           请选择要搭建的节点类型"
-    echo -e "\n$CYAN-------------------------------------$NC\n"
-    echo -e "1. VLESS + WSS\n"
-    echo -e "2. VMess + WSS\n"
-    echo -e "3. Trojan + WSS\n"
-    echo -e "4. Hysteria2 (UDP)\n"
-    echo -e "5. TUIC v5 (UDP)\n"
-    echo -e "$CYAN-------------------------------------$NC\n"
-    echo -e "6. $GREEN一键生成以上全部 5 种协议节点$NC"
-    echo -e "\n$CYAN-------------------------------------$NC\n"
-    echo -e "0. 返回上一级菜单\n"
-    echo -e "$CYAN-------------------------------------$NC\n"
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    echo ""
     read -p "请输入选项: " protocol_choice
+
     case $protocol_choice in
     1) protocols_to_create=("VLESS") ;;
     2) protocols_to_create=("VMess") ;;
@@ -2207,6 +2248,12 @@ singbox_add_node_orchestrator() {
     echo -e "$GREEN您选择了 [${protocols_to_create[*]}] 协议。$NC"
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)$NC\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
+
+    local insecure_param=""
+    local vmess_insecure_json_part=""
+    local hy2_insecure_param=""
+    local tuic_insecure_param=""
+
     if [ "$cert_choice" == "1" ]; then
         echo ""
         while true; do
@@ -2230,6 +2277,12 @@ singbox_add_node_orchestrator() {
         connect_addr="$domain"
         sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
+        protocols_with_self_signed=("${protocols_to_create[@]}")
+        insecure_param="&allowInsecure=1"
+        vmess_insecure_json_part=", \"skip-cert-verify\": true"
+        hy2_insecure_param="&insecure=1"
+        tuic_insecure_param="&allow_insecure=1"
+
         ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
         ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
@@ -2250,6 +2303,7 @@ singbox_add_node_orchestrator() {
             press_any_key
             return
         fi
+        echo ""
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
         sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then
@@ -2344,19 +2398,21 @@ singbox_add_node_orchestrator() {
                 [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
             then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
             if [[ "$protocol" == "VLESS" ]]; then
-                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F#$tag"
+                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_param}#$tag"
             elif [[ "$protocol" == "VMess" ]]; then
-                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${vmess_insecure_json_part}}"
                 node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
-            else node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"; fi
+            else
+                node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_param}#$tag"
+            fi
             ;;
         "Hysteria2")
             config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
+            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${hy2_insecure_param}#$tag"
             ;;
         "TUIC")
             config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
+            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${tuic_insecure_param}#$tag"
             ;;
         esac
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
@@ -2376,12 +2432,35 @@ singbox_add_node_orchestrator() {
                 echo -e "$CYAN--------------------------------------------------------------$NC"
                 echo -e "\n$YELLOW$final_node_link$NC\n"
                 echo -e "$CYAN--------------------------------------------------------------$NC"
-                press_any_key
             else
-                log_info "正在显示所有节点信息..."
+                log_info "正在跳转到节点管理页面..."
                 sleep 1
-                view_node_info
             fi
+
+            # ##############【修改点 2 - 添加操作提示】##############
+            if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                for p in "${protocols_with_self_signed[@]}"; do
+                    if [[ "$p" == "VMess" ]]; then
+                        echo -e "\n${YELLOW}[VMess 节点]$NC"
+                        log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
+                        log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
+                    fi
+                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                        echo -e "\n${YELLOW}[$p 节点]$NC"
+                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                    fi
+                done
+                echo -e "\n$YELLOW==============================================================$NC"
+            fi
+
+            if [ "$success_count" -gt 1 ] || $is_one_click; then
+                view_node_info
+            else
+                press_any_key
+            fi
+
         else
             log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
             press_any_key
