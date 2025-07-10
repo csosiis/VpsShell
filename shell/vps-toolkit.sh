@@ -1686,74 +1686,57 @@ is_nezha_agent_v0_installed() {
 is_nezha_agent_v1_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
 }
+uninstall_nezha_agent_v0_silent() {
+    if [ ! -f "/etc/systemd/system/nezha-agent-v0.service" ]; then return; fi
+    systemctl stop nezha-agent-v0.service &>/dev/null
+    systemctl disable nezha-agent-v0.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v0.service
+    rm -rf /opt/nezha/agent-v0
+}
+
 install_nezha_agent_v0() {
-    if is_nezha_agent_v0_installed; then
-        log_warn "Nezha V0 探针已安装，无需重复操作。"
-        press_any_key
-        return
-    fi
     ensure_dependencies "curl" "wget" "unzip"
     clear
+    log_info "安装前将自动清理旧版，确保全新安装..."
+    uninstall_nezha_agent_v0_silent
+    systemctl daemon-reload # 清理后重载一次
+
     log_info "开始安装 Nezha V0 探针 (手动模式)..."
-    echo ""
     read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
     read -p "请输入面板服务器端口 [默认: 443]: " server_port
     server_port=${server_port:-"443"}
     read -p "请输入面板密钥: " server_key
     if [ -z "$server_key" ]; then
-        log_error "面板密钥不能为空！"
-        press_any_key
-        return
+        log_error "面板密钥不能为空！"; press_any_key; return
     fi
 
     local tls_option="--tls"
     if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
-        tls_option=""
-        log_warn "端口为 $server_port，将不使用 TLS 加密。"
+        tls_option=""; log_warn "端口为 $server_port，将不使用 TLS 加密。"
     fi
 
     local AGENT_DIR="/opt/nezha/agent-v0"
     local SERVICE_FILE="/etc/systemd/system/nezha-agent-v0.service"
 
-    # 确定架构
     ARCH=$(uname -m)
-    if [ "$ARCH" = "x86_64" ]; then
-        ARCH="amd64"
-    elif [ "$ARCH" = "aarch64" ]; then
-        ARCH="arm64"
-    elif [ "$ARCH" = "s390x" ]; then
-        ARCH="s390x"
-    else
-        ARCH="amd64"
-    fi
+    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; elif [ "$ARCH" = "s390x" ]; then ARCH="s390x"; else ARCH="amd64"; fi
 
     log_info "检测到架构: $ARCH"
     DOWNLOAD_URL="https://github.com/nezhahq/agent/releases/latest/download/nezha-agent_linux_${ARCH}.zip"
 
-    log_info "正在创建安装目录: $AGENT_DIR"
-    mkdir -p "$AGENT_DIR"
-
+    log_info "正在创建安装目录: $AGENT_DIR"; mkdir -p "$AGENT_DIR"
     log_info "正在从 $DOWNLOAD_URL 下载 Agent..."
     if ! wget -qO "/tmp/nezha-agent.zip" "$DOWNLOAD_URL"; then
-        log_error "下载 Agent 失败！请检查网络或链接。"
-        rm -rf "$AGENT_DIR"
-        return
+        log_error "下载 Agent 失败！请检查网络或链接。"; rm -rf "$AGENT_DIR"; press_any_key; return
     fi
 
-    log_info "正在解压 Agent..."
-    unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"
-    rm "/tmp/nezha-agent.zip"
-
+    log_info "正在解压 Agent..."; unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"; rm "/tmp/nezha-agent.zip"
     if [ ! -f "$AGENT_DIR/nezha-agent" ]; then
-        log_error "解压失败或压缩包中没有 nezha-agent 文件。"
-        rm -rf "$AGENT_DIR"
-        return
+        log_error "解压失败或压缩包中没有 nezha-agent 文件。"; rm -rf "$AGENT_DIR"; press_any_key; return
     fi
 
-    log_info "赋予执行权限..."
-    chmod +x "$AGENT_DIR/nezha-agent"
-
+    log_info "赋予执行权限..."; chmod +x "$AGENT_DIR/nezha-agent"
     log_info "正在创建 systemd 服务文件: $SERVICE_FILE"
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -1772,15 +1755,18 @@ EOF
     log_info "正在重载 systemd 并启动服务..."
     systemctl daemon-reload
     systemctl enable nezha-agent-v0.service
-    systemctl start nezha-agent-v0.service
+    systemctl restart nezha-agent-v0.service
 
     log_info "检查服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v0; then
         log_info "✅ Nezha V0 探针安装并启动成功！"
     else
-        log_error "Nezha V0 探针服务启动失败！请检查日志。"
-        log_warn "你可以尝试使用以下命令查看日志: journalctl -u nezha-agent-v0 -f"
+        log_error "Nezha V0 探针服务启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        echo -e "${WHITE}-------------------------------------------------------"
+        systemctl status nezha-agent-v0.service --no-pager -l
+        echo -e "-------------------------------------------------------${NC}"
     fi
     press_any_key
 }
@@ -1800,68 +1786,50 @@ uninstall_nezha_agent_v0() {
     log_info "✅ Nezha V0 探针已成功卸载。"
     press_any_key
 }
+uninstall_nezha_agent_v1_silent() {
+    if [ ! -f "/etc/systemd/system/nezha-agent-v1.service" ]; then return; fi
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
+}
+
 install_nezha_agent_v1() {
-    if is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针已安装，无需重复操作。"
-        press_any_key
-        return
-    fi
     ensure_dependencies "curl" "wget" "unzip"
     clear
+    log_info "安装前将自动清理旧版，确保全新安装..."
+    uninstall_nezha_agent_v1_silent
+    systemctl daemon-reload # 清理后重载一次
+
     log_info "开始安装 Nezha V1 探针 (手动模式)..."
-    echo ""
     read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
     server_info=${server_info:-"nz.ssong.eu.org:8008"}
     read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
     server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
     read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
-    if [[ "$use_tls" =~ ^[Yy]$ ]]; then
-        NZ_TLS="true"
-    else
-        NZ_TLS="false"
-    fi
+    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
 
     local AGENT_DIR="/opt/nezha/agent-v1"
     local SERVICE_FILE="/etc/systemd/system/nezha-agent-v1.service"
 
-    # 确定架构
     ARCH=$(uname -m)
-    if [ "$ARCH" = "x86_64" ]; then
-        ARCH="amd64"
-    elif [ "$ARCH" = "aarch64" ]; then
-        ARCH="arm64"
-    elif [ "$ARCH" = "s390x" ]; then
-        ARCH="s390x"
-    else
-        ARCH="amd64"
-    fi
+    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; elif [ "$ARCH" = "s390x" ]; then ARCH="s390x"; else ARCH="amd64"; fi
 
     log_info "检测到架构: $ARCH"
     DOWNLOAD_URL="https://github.com/nezhahq/agent/releases/latest/download/nezha-agent_linux_${ARCH}.zip"
 
-    log_info "正在创建安装目录: $AGENT_DIR"
-    mkdir -p "$AGENT_DIR"
-
-    log_info "正在从 $DOWNLOAD_URL 下载 Agent..."
+    log_info "正在创建安装目录: $AGENT_DIR"; mkdir -p "$AGENT_DIR"
+    log_info "正在从 $DOWNLOAD_URL 下载 Agent...";
     if ! wget -qO "/tmp/nezha-agent.zip" "$DOWNLOAD_URL"; then
-        log_error "下载 Agent 失败！请检查网络或链接。"
-        rm -rf "$AGENT_DIR"
-        return
+        log_error "下载 Agent 失败！请检查网络或链接。"; rm -rf "$AGENT_DIR"; press_any_key; return
     fi
 
-    log_info "正在解压 Agent..."
-    unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"
-    rm "/tmp/nezha-agent.zip"
-
+    log_info "正在解压 Agent..."; unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"; rm "/tmp/nezha-agent.zip"
     if [ ! -f "$AGENT_DIR/nezha-agent" ]; then
-        log_error "解压失败或压缩包中没有 nezha-agent 文件。"
-        rm -rf "$AGENT_DIR"
-        return
+        log_error "解压失败或压缩包中没有 nezha-agent 文件。"; rm -rf "$AGENT_DIR"; press_any_key; return
     fi
 
-    log_info "赋予执行权限..."
-    chmod +x "$AGENT_DIR/nezha-agent"
-
+    log_info "赋予执行权限..."; chmod +x "$AGENT_DIR/nezha-agent"
     log_info "正在创建 systemd 服务文件: $SERVICE_FILE"
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -1883,15 +1851,18 @@ EOF
     log_info "正在重载 systemd 并启动服务..."
     systemctl daemon-reload
     systemctl enable nezha-agent-v1.service
-    systemctl start nezha-agent-v1.service
+    systemctl restart nezha-agent-v1.service
 
     log_info "检查服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v1; then
         log_info "✅ Nezha V1 探针安装并启动成功！"
     else
-        log_error "Nezha V1 探针服务启动失败！请检查日志。"
-        log_warn "你可以尝试使用以下命令查看日志: journalctl -u nezha-agent-v1 -f"
+        log_error "Nezha V1 探针服务启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        echo -e "${WHITE}-------------------------------------------------------"
+        systemctl status nezha-agent-v1.service --no-pager -l
+        echo -e "-------------------------------------------------------${NC}"
     fi
     press_any_key
 }
@@ -1935,23 +1906,23 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${GREEN}(已安装)$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                      $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${GREEN}(已安装)$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${GREEN}(已安装)$NC                       $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                      $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
