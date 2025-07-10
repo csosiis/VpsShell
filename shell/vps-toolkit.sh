@@ -1700,16 +1700,15 @@ install_nezha_agent_v0() {
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针 (最终调试模式)..."
+    log_info "开始安装 Nezha V0 探针 (终极调试模式)..."
 
     local SCRIPT_PATH_TMP="/tmp/nezha_v0_install_mod.sh"
 
-    log_info "正在下载官方安装脚本..."
+    log_info "正在下载并改造官方脚本..."
     if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
         log_error "下载官方脚本失败！"; press_any_key; return
     fi
 
-    log_info "正在对官方脚本进行改造..."
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' "$SCRIPT_PATH_TMP"
     sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' "$SCRIPT_PATH_TMP"
     sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' "$SCRIPT_PATH_TMP"
@@ -1722,32 +1721,28 @@ install_nezha_agent_v0() {
 
     log_info "改造后的脚本已生成在: $SCRIPT_PATH_TMP"
     echo ""
-    log_warn "!!!!!!!!!!!!!!!!!! 重要操作 !!!!!!!!!!!!!!!!!! "
-    log_warn "脚本已暂停，需要您手动执行以下命令来完成最后一步的调试。"
+    echo -e "$RED******************************************************************"
+    echo -e "$RED* 重要调试步骤                          *"
+    echo -e "$RED******************************************************************$NC"
     echo ""
-    log_info "请复制下面这整条命令，粘贴到您的SSH终端中，然后按回车执行："
-    echo -e "$YELLOW"
-    # 这里直接使用默认值，因为用户只是复制粘贴，不再需要输入
-    echo "bash $SCRIPT_PATH_TMP install_agent nz.wiitwo.eu.org 443 AXLAsTNla6zn2ICGVy --tls"
+    log_warn "脚本已暂停。为了找到问题的根源，需要您亲自执行最后一步。"
+    echo ""
+    echo -e "${GREEN}操作指南：${NC}"
+    echo -e "1. 请用鼠标，完整地、精确地复制下面这一整行 ${YELLOW}黄色的命令${NC}。"
+    echo -e "2. 将它粘贴到您当前的 SSH 终端里（就是这个窗口），然后按 ${YELLOW}回车键${NC} 执行。"
+    echo -e "3. 请将您按回车后，屏幕上出现的 ${YELLOW}所有新的内容${NC}，从头到尾，完整地复制下来发给我。"
+    echo -e "   (无论内容是成功、是失败、还是乱码，都需要)"
+    echo ""
+    echo -e "${YELLOW}↓↓↓ 请复制下面这行命令 ↓↓↓${NC}"
+    echo -e "$CYAN"
+    # The command to be copied by the user
+    echo "bash /tmp/nezha_v0_install_mod.sh install_agent nz.wiitwo.eu.org 443 AXLAsTNla6zn2ICGVy --tls"
     echo -e "$NC"
+    echo -e "${YELLOW}↑↑↑ 请复制上面这行命令 ↑↑↑${NC}"
     echo ""
-    log_info "执行后，请观察它的输出。如果安装成功，您可以手动按任意键继续。"
-    log_info "如果依然报错，请将它的报错信息提供给我。"
-    echo ""
+    log_info "这个函数的功能到此结束。我在等您手动执行后的结果。"
+    log_info "您可以按任意键返回主菜单。"
 
-    press_any_key
-
-    log_info "正在检查服务状态..."
-    sleep 1
-    if systemctl is-active --quiet nezha-agent-v0; then
-        log_info "✅ 检测到服务已成功启动！"
-    else
-        log_error "服务状态检测失败！"
-        log_warn "显示详细状态以供诊断:"
-        echo -e "${WHITE}-------------------------------------------------------"
-        systemctl status nezha-agent-v0.service --no-pager -l
-        echo -e "-------------------------------------------------------${NC}"
-    fi
     press_any_key
 }
 uninstall_nezha_agent_v0() {
