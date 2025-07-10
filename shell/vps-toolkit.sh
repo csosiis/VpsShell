@@ -1692,9 +1692,9 @@ install_nezha_agent_v0() {
         press_any_key
         return
     fi
-    ensure_dependencies "curl" "wget"
+    ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针..."
+    log_info "开始安装 Nezha V0 探针 (手动模式)..."
     echo ""
     read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
@@ -1706,33 +1706,74 @@ install_nezha_agent_v0() {
         press_any_key
         return
     fi
+
     local tls_option="--tls"
     if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
         tls_option=""
         log_warn "端口为 $server_port，将不使用 TLS 加密。"
     fi
-    log_info "正在下载 V0 Agent 安装脚本..."
-    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o /tmp/nezha_v0_install.sh; then
-        log_error "下载 V0 Agent 安装脚本失败！"
-        press_any_key
+
+    local AGENT_DIR="/opt/nezha/agent-v0"
+    local SERVICE_FILE="/etc/systemd/system/nezha-agent-v0.service"
+
+    # 确定架构
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        ARCH="amd64"
+    elif [ "$ARCH" = "aarch64" ]; then
+        ARCH="arm64"
+    elif [ "$ARCH" = "s390x" ]; then
+        ARCH="s390x"
+    else
+        ARCH="amd64"
+    fi
+
+    log_info "检测到架构: $ARCH"
+    DOWNLOAD_URL="https://github.com/nezhahq/agent/releases/latest/download/nezha-agent_linux_${ARCH}.zip"
+
+    log_info "正在创建安装目录: $AGENT_DIR"
+    mkdir -p "$AGENT_DIR"
+
+    log_info "正在从 $DOWNLOAD_URL 下载 Agent..."
+    if ! wget -qO "/tmp/nezha-agent.zip" "$DOWNLOAD_URL"; then
+        log_error "下载 Agent 失败！请检查网络或链接。"
+        rm -rf "$AGENT_DIR"
         return
     fi
-    log_info "正在修改脚本以避免冲突 (服务名: nezha-agent-v0)..."
-    # 修改安装路径
-    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v0|g' /tmp/nezha_v0_install.sh
-    # 修改服务文件名
-    sed -i 's|/etc/systemd/system/nezha-agent.service|/etc/systemd/system/nezha-agent-v0.service|g' /tmp/nezha_v0_install.sh
-    # 修改systemctl命令
-    sed -i 's/systemctl restart nezha-agent/systemctl restart nezha-agent-v0/g' /tmp/nezha_v0_install.sh
-    sed -i 's/systemctl stop nezha-agent/systemctl stop nezha-agent-v0/g' /tmp/nezha_v0_install.sh
-    sed -i 's/systemctl disable nezha-agent/systemctl disable nezha-agent-v0/g' /tmp/nezha_v0_install.sh
 
-    chmod +x /tmp/nezha_v0_install.sh
-    log_info "正在执行修改后的安装脚本..."
-    # 修复：移除了 $tls_option 周围的引号，以防止在为空时传递空字符串参数
-    bash /tmp/nezha_v0_install.sh install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    log_info "正在解压 Agent..."
+    unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"
+    rm "/tmp/nezha-agent.zip"
 
-    rm /tmp/nezha_v0_install.sh
+    if [ ! -f "$AGENT_DIR/nezha-agent" ]; then
+        log_error "解压失败或压缩包中没有 nezha-agent 文件。"
+        rm -rf "$AGENT_DIR"
+        return
+    fi
+
+    log_info "赋予执行权限..."
+    chmod +x "$AGENT_DIR/nezha-agent"
+
+    log_info "正在创建 systemd 服务文件: $SERVICE_FILE"
+    cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Nezha V0 Agent
+After=network.target
+[Service]
+Type=simple
+User=root
+Restart=on-failure
+RestartSec=5s
+ExecStart=${AGENT_DIR}/nezha-agent -s ${server_addr}:${server_port} -p ${server_key} ${tls_option}
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_info "正在重载 systemd 并启动服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v0.service
+    systemctl start nezha-agent-v0.service
+
     log_info "检查服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v0; then
@@ -1765,9 +1806,9 @@ install_nezha_agent_v1() {
         press_any_key
         return
     fi
-    ensure_dependencies "curl"
+    ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针..."
+    log_info "开始安装 Nezha V1 探针 (手动模式)..."
     echo ""
     read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
     server_info=${server_info:-"nz.ssong.eu.org:8008"}
@@ -1779,26 +1820,71 @@ install_nezha_agent_v1() {
     else
         NZ_TLS="false"
     fi
-    log_info "正在下载 V1 Agent 安装脚本..."
-    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o /tmp/agent_v1_install.sh; then
-        log_error "下载 V1 Agent 安装脚本失败！"
-        press_any_key
+
+    local AGENT_DIR="/opt/nezha/agent-v1"
+    local SERVICE_FILE="/etc/systemd/system/nezha-agent-v1.service"
+
+    # 确定架构
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        ARCH="amd64"
+    elif [ "$ARCH" = "aarch64" ]; then
+        ARCH="arm64"
+    elif [ "$ARCH" = "s390x" ]; then
+        ARCH="s390x"
+    else
+        ARCH="amd64"
+    fi
+
+    log_info "检测到架构: $ARCH"
+    DOWNLOAD_URL="https://github.com/nezhahq/agent/releases/latest/download/nezha-agent_linux_${ARCH}.zip"
+
+    log_info "正在创建安装目录: $AGENT_DIR"
+    mkdir -p "$AGENT_DIR"
+
+    log_info "正在从 $DOWNLOAD_URL 下载 Agent..."
+    if ! wget -qO "/tmp/nezha-agent.zip" "$DOWNLOAD_URL"; then
+        log_error "下载 Agent 失败！请检查网络或链接。"
+        rm -rf "$AGENT_DIR"
         return
     fi
-    log_info "正在修改脚本以避免冲突 (服务名: nezha-agent-v1)..."
-    # 修复：直接修改 SERVICE_NAME 变量，这将自动修正所有相关的 systemctl 调用和服务文件路径
-    sed -i 's/SERVICE_NAME="nezha-agent"/SERVICE_NAME="nezha-agent-v1"/g' /tmp/agent_v1_install.sh
-    # 修改安装路径
-    sed -i 's|AGENT_DIR="/opt/nezha/agent"|AGENT_DIR="/opt/nezha/agent-v1"|g' /tmp/agent_v1_install.sh
 
-    chmod +x /tmp/agent_v1_install.sh
-    log_info "正在执行修改后的安装脚本..."
-    export NZ_SERVER="$server_info"
-    export NZ_TLS="$NZ_TLS"
-    export NZ_CLIENT_SECRET="$server_secret"
-    bash /tmp/agent_v1_install.sh
-    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
-    rm /tmp/agent_v1_install.sh
+    log_info "正在解压 Agent..."
+    unzip -qod "$AGENT_DIR" "/tmp/nezha-agent.zip"
+    rm "/tmp/nezha-agent.zip"
+
+    if [ ! -f "$AGENT_DIR/nezha-agent" ]; then
+        log_error "解压失败或压缩包中没有 nezha-agent 文件。"
+        rm -rf "$AGENT_DIR"
+        return
+    fi
+
+    log_info "赋予执行权限..."
+    chmod +x "$AGENT_DIR/nezha-agent"
+
+    log_info "正在创建 systemd 服务文件: $SERVICE_FILE"
+    cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Nezha V1 Agent
+After=network-online.target
+[Service]
+Type=simple
+User=root
+Restart=on-failure
+RestartSec=5s
+Environment="NZ_SERVER=${server_info}"
+Environment="NZ_CLIENT_SECRET=${server_secret}"
+Environment="NZ_TLS=${NZ_TLS}"
+ExecStart=${AGENT_DIR}/nezha-agent
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_info "正在重载 systemd 并启动服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v1.service
+    systemctl start nezha-agent-v1.service
+
     log_info "检查服务状态..."
     sleep 2
     if systemctl is-active --quiet nezha-agent-v1; then
@@ -1854,8 +1940,8 @@ nezha_agent_menu() {
             echo -e "$CYAN║$NC   1. 安装 V0 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
@@ -1864,8 +1950,8 @@ nezha_agent_menu() {
             echo -e "$CYAN║$NC   3. 安装 V1 探针 ${YELLOW}(未安装)$NC                         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2286,7 +2372,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
