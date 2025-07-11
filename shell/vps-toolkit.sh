@@ -1047,6 +1047,7 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+# 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
@@ -1057,19 +1058,36 @@ substore_do_install() {
     log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
     FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
+    # 自动检测架构并下载正确的 fnm 版本
     local fnm_zip_name
     case $(dpkg --print-architecture) in
         arm64 | aarch64)
             log_info "检测到 ARM64/AArch64 架构..."
             fnm_zip_name="fnm-linux-aarch64.zip"
             ;;
-        amd64 | *)
+        amd64 | *) # 默认和 amd64 都使用通用版本
             log_info "检测到 AMD64 (x86_64) 架构..."
             fnm_zip_name="fnm-linux.zip"
             ;;
     esac
-    log_info "正在下载 FNM: ${fnm_zip_name}..."
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
+
+    # ==================== 核心修正点：增强下载的稳定性与错误处理 ====================
+    local fnm_url="https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}"
+    log_info "正在从 ${fnm_url} 下载 FNM..."
+    if ! curl -L --fail --retry 3 -o "/tmp/fnm.zip" "$fnm_url"; then
+        log_error "下载 FNM 失败。请检查网络连接或 GitHub Release 页面是否正常。"
+        press_any_key
+        return 1
+    fi
+
+    # 增加文件类型校验，确保下载的是zip文件
+    if ! file /tmp/fnm.zip | grep -q "Zip archive data"; then
+        log_error "下载的文件 /tmp/fnm.zip 不是一个有效的 ZIP 文件。安装中止。"
+        rm -f /tmp/fnm.zip
+        press_any_key
+        return 1
+    fi
+    # ====================================================================================
 
     unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
 
@@ -1092,6 +1110,7 @@ substore_do_install() {
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
+
     log_info "开始配置系统服务..."; echo ""
     local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
