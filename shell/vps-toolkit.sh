@@ -1806,6 +1806,10 @@ install_nezha_agent_v1() {
     clear
     log_info "开始安装 Nezha V1 探针 [默认: nz.ssong.eu.org:8008]..."
 
+    server_info="nz.ssong.eu.org:8008"
+    server_secret="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    NZ_TLS="false";
+
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
     log_info "正在下载官方V1安装脚本..."
@@ -1816,9 +1820,9 @@ install_nezha_agent_v1() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
-    export NZ_SERVER="nz.ssong.eu.org:8008"
-    export NZ_TLS="flase"
-    export NZ_CLIENT_SECRET="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    export NZ_SERVER="$server_info"
+    export NZ_TLS="$NZ_TLS"
+    export NZ_CLIENT_SECRET="$server_secret"
     bash "$SCRIPT_PATH_TMP"
     unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
     rm "$SCRIPT_PATH_TMP"
