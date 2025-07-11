@@ -1042,57 +1042,72 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
+# 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
     echo ""
-    log_info "开始执行 Sub-Store 安装流程...";
+    log_info "开始执行 Sub-Store 安装流程..."
     set -e
 
-    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
-    FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
+    # ==================== 核心修正：使用 FNM 官方安装脚本 ====================
+    log_info "正在安装 FNM (Node.js 版本管理器)..."
+    # 使用官方推荐的安装方式，它能自动处理架构和下载，比手动下载更稳定
+    # 通过 --install-dir 直接指定路径，避免权限问题
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
 
-    local fnm_zip_name
-    case $(dpkg --print-architecture) in
-        arm64 | aarch64)
-            log_info "检测到 ARM64/AArch64 架构..."
-            fnm_zip_name="fnm-linux-aarch64.zip"
-            ;;
-        amd64 | *)
-            log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip"
-            ;;
-    esac
-    log_info "正在下载 FNM: ${fnm_zip_name}..."
-    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
-
-    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
-
-    export PATH="${FNM_DIR}:$PATH"
+    # 将 fnm 的路径加入到当前脚本会话的 PATH 中，这是最关键的一步
+    export PATH="/root/.fnm:$PATH"
+    # 立即评估 fnm 的环境变量，使其在当前会话中生效
     eval "$(fnm env)"
     log_info "FNM 安装完成。"
+    # =========================================================================
 
-    log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
-    fnm install v20.18.0
-    fnm use v20.18.0
+    log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
+    # 使用 lts/iron 来确保安装一个稳定的长期支持版本
+    fnm install lts/iron
+    fnm use lts/iron
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"; export PATH="$PNPM_HOME:$PATH"
+    export PNPM_HOME="$HOME/.local/share/pnpm"
+    export PATH="$PNPM_HOME:$PATH"
     log_info "Node.js 和 PNPM 环境准备就绪。"
 
+    # (后续的 Sub-Store 下载和配置代码保持不变)
     log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"; cd "$SUBSTORE_INSTALL_DIR"
+    mkdir -p "$SUBSTORE_INSTALL_DIR"
+    cd "$SUBSTORE_INSTALL_DIR"
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务..."; echo ""
-    local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
-    local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
-    local BACKEND_PORT; while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
+    log_info "开始配置系统服务..."
+    echo ""
+    local API_KEY
+    local random_api_key
+    random_api_key=$(generate_random_password)
+    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
+    API_KEY=${user_api_key:-$random_api_key}
+    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
+    log_info "最终使用的 API 密钥为: ${API_KEY}"
+    local FRONTEND_PORT
+    while true; do
+        read -p "请输入前端访问端口 [默认: 3000]: " port_input
+        FRONTEND_PORT=${port_input:-"3000"}
+        if check_port "$FRONTEND_PORT"; then break; fi
+    done
+    local BACKEND_PORT
+    while true; do
+        read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input
+        BACKEND_PORT=${backend_port_input:-"3001"}
+        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
+            if check_port "$BACKEND_PORT"; then break; fi
+        fi
+    done
 
-    cat <<EOF > "$SUBSTORE_SERVICE_FILE"
+    # ExecStart 使用 fnm exec 可以确保 systemd 服务能找到正确的 node 版本
+    cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
@@ -1106,7 +1121,7 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
@@ -1120,10 +1135,21 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-    log_info "正在启动并启用 sub-store 服务..."; systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" > /dev/null; systemctl start "$SUBSTORE_SERVICE_NAME";
-    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5; set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ 服务状态正常 (active)。"; substore_view_access_link; else log_error "服务启动失败！请使用日志功能排查。"; fi
-    echo ""; read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+    log_info "正在启动并启用 sub-store 服务..."
+    systemctl daemon-reload
+    systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
+    systemctl start "$SUBSTORE_SERVICE_NAME"
+    log_info "正在检测服务状态 (等待 5 秒)..."
+    sleep 5
+    set +e
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ 服务状态正常 (active)。"
+        substore_view_access_link
+    else
+        log_error "服务启动失败！请使用日志功能排查。"
+    fi
+    echo ""
+    read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
 _install_docker_and_compose() {
@@ -1679,18 +1705,9 @@ substore_main_menu() {
 is_nezha_agent_installed() {
     [ -f "/etc/systemd/system/nezha-agent.service" ]
 }
-uninstall_nezha_agent() {
-    # 这是一个辅助函数，确保清理标准版时不会报错
-    if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
-        systemctl stop nezha-agent.service &>/dev/null
-        systemctl disable nezha-agent.service &>/dev/null
-        rm -f /etc/systemd/system/nezha-agent.service
-        rm -rf /opt/nezha/agent
-    fi
-}
 uninstall_nezha_agent_v0() {
     if ! is_nezha_agent_v0_installed; then
-        log_warn "Nezha V0 探针未安装，无需卸载。"
+        log_warn "San Jose V0 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -1700,13 +1717,27 @@ uninstall_nezha_agent_v0() {
     rm -f /etc/systemd/system/nezha-agent-v0.service
     rm -rf /opt/nezha/agent-v0
     systemctl daemon-reload
-    log_info "✅ Nezha V0 探针已成功卸载。"
+    log_info "✅ SanJose V0 探针已成功卸载。"
     press_any_key
 }
-
+uninstall_nezha_agent_v3() {
+    if ! is_nezha_agent_v3_installed; then
+        log_warn "Phoenix V0 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v0 服务..."
+    systemctl stop nezha-agent-v3.service &>/dev/null
+    systemctl disable nezha-agent-v3.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v3.service
+    rm -rf /opt/nezha/agent-v3
+    systemctl daemon-reload
+    log_info "✅ Phoeix V0 探针已成功卸载。"
+    press_any_key
+}
 uninstall_nezha_agent_v1() {
     if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
+        log_warn "Singapore-West V1 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -1716,29 +1747,42 @@ uninstall_nezha_agent_v1() {
     rm -f /etc/systemd/system/nezha-agent-v1.service
     rm -rf /opt/nezha/agent-v1
     systemctl daemon-reload
-    log_info "✅ Nezha V1 探针已成功卸载。"
+    log_info "✅ Singapore-Wes V1 探针已成功卸载。"
     press_any_key
 }
 
+uninstall_nezha_agent() {
+    # 这是一个辅助函数，确保清理标准版时不会报错
+    if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        systemctl stop nezha-agent.service &>/dev/null
+        systemctl disable nezha-agent.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent.service
+        rm -rf /opt/nezha/agent
+    fi
+}
+
 install_nezha_agent_v0() {
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v0 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    # --- 从函数第一个参数获取密钥 ---
+    local server_key="$1"
 
-    ensure_dependencies "curl" "wget" "unzip"
-    clear
-    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+    # --- 固定的服务器信息 ---
+    # 您可以在这里修改为您自己的服务器地址和端口
+    local server_addr="nz.wiitwo.eu.org"
+    local server_port="443"
 
-    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
-    server_addr=${server_addr:-"nz.wiitwo.eu.org"}
-    read -p "请输入面板服务器端口 [默认: 443]: " server_port
-    server_port=${server_port:-"443"}
-    read -p "请输入面板密钥: " server_key
+
+    # --- 获取密钥 ---
+    # 如果没有通过参数传入密钥，则提示用户输入
     if [ -z "$server_key" ]; then
-        log_error "面板密钥不能为空！"; press_any_key; return
+        read -p "请输入San Jose V0哪吒面板面板密钥: " server_key
     fi
 
+    # 最终检查密钥是否为空
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
+    fi
+
+    # --- 安装过程 ---
     local tls_option="--tls"
     if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
         tls_option="";
@@ -1754,6 +1798,7 @@ install_nezha_agent_v0() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 执行脚本，传入固定的服务器信息和获取到的密钥
     bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
     rm "$SCRIPT_PATH_TMP"
 
@@ -1792,7 +1837,119 @@ install_nezha_agent_v0() {
     fi
     press_any_key
 }
+install_nezha_agent_v3() {
+    # --- 从函数第一个参数获取密钥 ---
+    local server_key="$1"
+
+    # --- 固定的服务器信息 ---
+    # 您可以在这里修改为您自己的服务器地址和端口
+    local server_addr="nz.csosm.ip-ddns.com"
+    local server_port="443"
+
+
+    # --- 获取密钥 ---
+    # 如果没有通过参数传入密钥，则提示用户输入
+    if [ -z "$server_key" ]; then
+        read -p "请输入 Phoenix V0哪吒面板密钥: " server_key
+    fi
+
+    # 最终检查密钥是否为空
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
+    fi
+
+    # --- 安装过程 ---
+    local tls_option="--tls"
+    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
+        tls_option="";
+    fi
+
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
+
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 执行脚本，传入固定的服务器信息和获取到的密钥
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    rm "$SCRIPT_PATH_TMP"
+
+    # 检查标准版是否安装成功
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v3.service
+    mv /opt/nezha/agent /opt/nezha/agent-v3
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v3/nezha-agent|g' /etc/systemd/system/nezha-agent-v3.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v3' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v3.service
+    systemctl start nezha-agent-v3.service
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet nezha-agent-v3; then
+        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status nezha-agent-v3.service --no-pager -l
+    fi
+    press_any_key
+}
+
+uninstall_nezha_agent_v1() {
+    if ! is_nezha_agent_v1_installed; then
+        log_warn "Nezha V1 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v1 服务..."
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
+    systemctl daemon-reload
+    log_info "✅ Nezha V1 探针已成功卸载。"
+    press_any_key
+}
 install_nezha_agent_v1() {
+    # --- 新增：交互式指令输入 ---
+    local user_command
+    read -p "请输入安装指令以继续: " user_command
+
+    # 检查输入的指令是否为 "csos"
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"
+        press_any_key
+        return 1
+    fi
+
+    # --- 全自动安装配置 ---
+    # (指令正确后，后续流程与之前完全相同)
+    # 所有参数已在此处硬编码，无需手动输入。
+    # 如果需要修改，请直接编辑下面的值。
+    local server_info="nz.ssong.eu.org:8008"
+    local server_secret="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
+
+    # --- 基础准备 ---
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     uninstall_nezha_agent_v1 &>/dev/null
     uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
@@ -1800,14 +1957,10 @@ install_nezha_agent_v1() {
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
-
-    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
-    server_info=${server_info:-"nz.ssong.eu.org:8008"}
-    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
-    server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
-    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
-    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
+    log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
+    log_info "服务器信息: $server_info"
+    log_info "连接密钥: $server_secret"
+    log_info "启用TLS: $NZ_TLS"
 
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
@@ -1843,7 +1996,6 @@ install_nezha_agent_v1() {
 
     log_info "第3步：修改新的服务文件，使其指向正确的路径..."
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
-    # V1版的环境变量是在服务文件中定义的，不需要修改ExecStart
 
     log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
     systemctl daemon-reload
@@ -1880,7 +2032,9 @@ install_nezha_dashboard_v1() {
 is_nezha_agent_v0_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
 }
-
+is_nezha_agent_v3_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
+}
 is_nezha_agent_v1_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
 }
@@ -1892,22 +2046,32 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v3_installed; then
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC          $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
@@ -1919,6 +2083,8 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
+        5) install_nezha_agent_v3 ;;
+        6) uninstall_nezha_agent_v3 ;;
         0) break ;;
         *)
             log_error "无效选项！"
@@ -1949,33 +2115,6 @@ nezha_dashboard_menu() {
         case $choice in
         1) install_nezha_dashboard_v0 ;;
         2) install_nezha_dashboard_v1 ;;
-        0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
-        esac
-    done
-}
-nezha_manage_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   哪吒监控管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 探针 (Agent) 管理                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 面板 (Dashboard) 管理                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
-        read -p "请输入选项: " choice
-        case $choice in
-        1) nezha_agent_menu ;;
-        2) nezha_dashboard_menu ;;
         0) break ;;
         *)
             log_error "无效选项！"
@@ -2329,7 +2468,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $GREEN哪吒探针管理$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2356,7 +2495,7 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4) nezha_manage_menu ;;
+        4) nezha_agent_menu ;;
         5) install_sui ;;
         6) install_3xui ;;
         7) install_wordpress ;;
