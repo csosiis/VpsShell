@@ -1869,10 +1869,22 @@ install_nezha_agent_v0() {
     press_any_key
 }
 # 全自动安装函数：
-# - 所有配置（服务器、密钥、TLS）均已在函数内硬编码
-# - 运行此函数将不会有任何输入提示，直接开始安装
+# - 新增交互式指令验证
+# - 用户输入正确的指令 "csos" 后，才会继续全自动安装
 install_nezha_agent_v1() {
+    # --- 新增：交互式指令输入 ---
+    local user_command
+    read -p "请输入安装指令以继续: " user_command
+
+    # 检查输入的指令是否为 "csos"
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"
+        press_any_key
+        return 1
+    fi
+
     # --- 全自动安装配置 ---
+    # (指令正确后，后续流程与之前完全相同)
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
     local server_info="nz.ssong.eu.org:8008"
@@ -1887,7 +1899,7 @@ install_nezha_agent_v1() {
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
+    log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
     log_info "服务器信息: $server_info"
     log_info "连接密钥: $server_secret"
     log_info "启用TLS: $NZ_TLS"
@@ -1902,7 +1914,6 @@ install_nezha_agent_v1() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
-    # 使用硬编码的变量设置环境变量
     export NZ_SERVER="$server_info"
     export NZ_TLS="$NZ_TLS"
     export NZ_CLIENT_SECRET="$server_secret"
@@ -1927,7 +1938,6 @@ install_nezha_agent_v1() {
 
     log_info "第3步：修改新的服务文件，使其指向正确的路径..."
     sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
-    # V1版的环境变量是在服务文件中定义的，不需要修改ExecStart
 
     log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
     systemctl daemon-reload
