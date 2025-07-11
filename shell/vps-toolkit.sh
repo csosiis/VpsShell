@@ -636,9 +636,56 @@ nezha_panel_manager() {
         fi
     done
 }
+# --- 脚本自身管理 ---
 
+do_update_script() {
+    log_info "正在从您的私人地址下载最新版本的脚本..."
 
-# 哪吒探针的主入口菜单
+    # 检查 SCRIPT_URL 是否已被修改
+    if [[ "$SCRIPT_URL" == *YOUR_USERNAME* ]]; then
+        log_error "更新失败！"
+        log_warn "您还没有在脚本中设置您自己的私人更新地址 (SCRIPT_URL)。"
+        log_warn "请编辑脚本，将 SCRIPT_URL 变量替换为您自己的 GitHub Raw 链接。"
+        press_any_key
+        return
+    fi
+
+    local temp_script="/tmp/vps_tool_new.sh"
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
+        log_error "下载脚本失败！请检查您的网络连接或私人 URL 是否正确。"
+        press_any_key
+        return
+    fi
+
+    if cmp -s "$SCRIPT_PATH" "$temp_script"; then
+        log_info "您的私人脚本已经是最新版本，无需更新。"; rm "$temp_script"
+        press_any_key
+        return
+    fi
+
+    log_info "下载成功，正在应用更新...";
+    chmod +x "$temp_script"
+    mv "$temp_script" "$SCRIPT_PATH"
+    log_info "✅ 脚本已成功更新！正在立即重新加载..."; sleep 2
+    exec "$SCRIPT_PATH"
+}
+
+_create_shortcut() {
+    local shortcut_name=$1; local full_path="/usr/local/bin/$shortcut_name"
+    if [ -z "$shortcut_name" ]; then log_error "快捷命令名称不能为空！"; return 1; fi
+    if ! [[ "$shortcut_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then log_error "无效的命令名称！"; return 1; fi
+    echo ""; log_info "正在为脚本创建快捷命令: $shortcut_name"
+    ln -sf "$SCRIPT_PATH" "$full_path"; chmod +x "$full_path"
+    log_info "✅ 快捷命令 '$shortcut_name' 已设置！"
+    log_info "现在您可以随时随地输入 '$shortcut_name' 来运行此脚本。"
+}
+
+setup_shortcut() {
+    echo ""; local default_shortcut="sv"
+    read -p "请输入您想要的快捷命令名称 [默认: $default_shortcut]: " input_name
+    local shortcut_name=${input_name:-$default_shortcut}
+    _create_shortcut "$shortcut_name"; press_any_key
+}
 # 哪吒探针的主入口菜单
 nezha_main_menu() {
     while true; do
