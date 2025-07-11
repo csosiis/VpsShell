@@ -1726,6 +1726,15 @@ uninstall_nezha_agent_v1() {
 }
 
 install_nezha_agent_v0() {
+    # --- 从函数第一个参数获取密钥 ---
+    local server_key="$1"
+
+    # --- 固定的服务器信息 ---
+    # 您可以在这里修改为您自己的服务器地址和端口
+    local server_addr="nz.wiitwo.eu.org"
+    local server_port="443"
+
+    # --- 基础准备 ---
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     uninstall_nezha_agent_v0 &>/dev/null
     uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
@@ -1734,16 +1743,21 @@ install_nezha_agent_v0() {
     ensure_dependencies "curl" "wget" "unzip"
     clear
     log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+    log_info "服务器地址: $server_addr"
+    log_info "服务器端口: $server_port"
 
-    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
-    server_addr=${server_addr:-"nz.wiitwo.eu.org"}
-    read -p "请输入面板服务器端口 [默认: 443]: " server_port
-    server_port=${server_port:-"443"}
-    read -p "请输入面板密钥: " server_key
+    # --- 获取密钥 ---
+    # 如果没有通过参数传入密钥，则提示用户输入
     if [ -z "$server_key" ]; then
-        log_error "面板密钥不能为空！"; press_any_key; return
+        read -p "请输入面板密钥: " server_key
     fi
 
+    # 最终检查密钥是否为空
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
+    fi
+
+    # --- 安装过程 ---
     local tls_option="--tls"
     if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
         tls_option="";
@@ -1759,6 +1773,7 @@ install_nezha_agent_v0() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 执行脚本，传入固定的服务器信息和获取到的密钥
     bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
     rm "$SCRIPT_PATH_TMP"
 
@@ -1797,7 +1812,18 @@ install_nezha_agent_v0() {
     fi
     press_any_key
 }
+# 全自动安装函数：
+# - 所有配置（服务器、密钥、TLS）均已在函数内硬编码
+# - 运行此函数将不会有任何输入提示，直接开始安装
 install_nezha_agent_v1() {
+    # --- 全自动安装配置 ---
+    # 所有参数已在此处硬编码，无需手动输入。
+    # 如果需要修改，请直接编辑下面的值。
+    local server_info="nz.ssong.eu.org:8008"
+    local server_secret="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
+
+    # --- 基础准备 ---
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     uninstall_nezha_agent_v1 &>/dev/null
     uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
@@ -1805,14 +1831,10 @@ install_nezha_agent_v1() {
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
-
-    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
-    server_info=${server_info:-"nz.ssong.eu.org:8008"}
-    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
-    server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
-    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
-    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
+    log_info "开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
+    log_info "服务器信息: $server_info"
+    log_info "连接密钥: $server_secret"
+    log_info "启用TLS: $NZ_TLS"
 
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
@@ -1824,6 +1846,7 @@ install_nezha_agent_v1() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 使用硬编码的变量设置环境变量
     export NZ_SERVER="$server_info"
     export NZ_TLS="$NZ_TLS"
     export NZ_CLIENT_SECRET="$server_secret"
