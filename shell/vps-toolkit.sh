@@ -4,7 +4,7 @@
 # 全功能 VPS & 应用管理脚本
 #
 # Author: Jcole
-# Version: 2.0 (Optimized)
+# Version: 2.1 (Optimized + Nezha)
 # ==================================================
 
 # 颜色定义
@@ -22,6 +22,8 @@ SUBSTORE_SERVICE_FILE="/etc/systemd/system/$SUBSTORE_SERVICE_NAME"
 SUBSTORE_INSTALL_DIR="/root/sub-store"
 SINGBOX_CONFIG_FILE="/etc/sing-box/config.json"
 SINGBOX_NODE_LINKS_FILE="/etc/sing-box/nodes_links.txt"
+NEZHA_AGENT_SERVICE="nezha-agent.service"
+NEZHA_AGENT_FILE="/etc/systemd/system/$NEZHA_AGENT_SERVICE"
 SCRIPT_PATH=$(realpath "$0")
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 FLAG_FILE="/root/.vps_toolkit.initialized"
@@ -1276,7 +1278,7 @@ update_sub_store_app() {
 substore_view_access_link() {
     echo ""; log_info "正在读取配置并生成访问链接..."
     if ! is_substore_installed; then echo ""; log_error "Sub-Store尚未安装。"; press_any_key; return; fi
-    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+    REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
     API_KEY=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
     FRONTEND_PORT=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
     echo -e "\n===================================================================="
@@ -1305,7 +1307,7 @@ substore_reset_ports() {
     sed -i "s|^Environment=\"SUB_STORE_BACKEND_API_PORT=.*|Environment=\"SUB_STORE_BACKEND_API_PORT=$NEW_BACKEND_PORT\"|" "$SUBSTORE_SERVICE_FILE"
     log_info "正在重载并重启服务..."; systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 2; set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ 端口重置成功！"; REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        log_info "✅ 端口重置成功！"; REVERSE_PROXY_DOMAIN=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null | awk -F'=' '{print $3}' | tr -d '"')
         if [ -n "$REVERSE_PROXY_DOMAIN" ]; then
             NGINX_CONF_PATH="/etc/nginx/sites-available/$REVERSE_PROXY_DOMAIN.conf"
             if [ -f "$NGINX_CONF_PATH" ]; then
@@ -1478,6 +1480,149 @@ substore_main_menu() {
         fi
     done
 }
+
+# --- 哪吒探针管理 ---
+is_nezha_installed() {
+    if [ -f "/opt/nezha/agent/nezha-agent" ]; then return 0; else return 1; fi
+}
+
+nezha_do_install() {
+    ensure_dependencies "curl" "unzip" # 优化点：增加unzip依赖检查
+    if is_nezha_installed; then log_info "哪吒探针已安装。如需修改配置，请先卸载再重新安装。"; press_any_key; return; fi
+
+    local NEZHA_SERVER NEZHA_PORT NEZHA_KEY
+    while true; do
+        read -p "请输入您的哪吒面板服务器地址 (IP或域名): " NEZHA_SERVER
+        if [ -n "$NEZHA_SERVER" ]; then break; else log_error "服务器地址不能为空！"; fi
+    done
+    while true; do
+        read -p "请输入您的哪吒面板服务器端口: " NEZHA_PORT
+        if [[ "$NEZHA_PORT" =~ ^[0-9]+$ ]] && [ "$NEZHA_PORT" -gt 0 ] && [ "$NEZHA_PORT" -lt 65536 ]; then break; else log_error "端口号无效！"; fi
+    done
+    while true; do
+        read -p "请输入您的哪吒面板密钥: " NEZHA_KEY
+        if [ -n "$NEZHA_KEY" ]; then break; else log_error "密钥不能为空！"; fi
+    done
+
+    log_info "正在安装哪吒探针..."
+    mkdir -p /opt/nezha/agent
+
+    local arch; arch=$(uname -m)
+    if [[ "$arch" == "x86_64" ]]; then arch="amd64"; elif [[ "$arch" == "aarch64" ]]; then arch="arm64"; fi
+
+    local agent_url="https://github.com/naiba/nezha/releases/latest/download/nezha-agent_linux_${arch}.zip"
+    log_info "正在从 $agent_url 下载探针..."
+    # 优化点：统一使用curl
+    if ! curl -L "$agent_url" -o "/opt/nezha/nezha-agent.zip"; then
+        log_error "下载探针失败！请检查网络或架构 (${arch}) 是否受支持。"; press_any_key; return
+    fi
+
+    unzip -q /opt/nezha/nezha-agent.zip -d /opt/nezha/agent/
+    chmod +x /opt/nezha/agent/nezha-agent
+    rm /opt/nezha/nezha-agent.zip
+
+    log_info "正在创建并配置 systemd 服务..."
+    cat > "$NEZHA_AGENT_FILE" << EOF
+[Unit]
+Description=Nezha Agent
+After=network-online.target
+
+[Service]
+ExecStart=/opt/nezha/agent/nezha-agent -s ${NEZHA_SERVER}:${NEZHA_PORT} -p ${NEZHA_KEY}
+Restart=always
+RestartSec=5s
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable "$NEZHA_AGENT_SERVICE" > /dev/null
+    systemctl start "$NEZHA_AGENT_SERVICE"
+
+    log_info "正在检查服务状态 (等待3秒)..."; sleep 3
+    if systemctl is-active --quiet "$NEZHA_AGENT_SERVICE"; then
+        log_info "✅ 哪吒探针安装并启动成功！"
+    else
+        log_error "哪吒探针启动失败！请使用 '查看日志' 功能进行排查。"
+    fi
+    press_any_key
+}
+
+nezha_do_uninstall() {
+    if ! is_nezha_installed; then log_warn "哪吒探针未安装。"; press_any_key; return; fi
+    read -p "确定要卸载哪吒探针吗? (y/N): " choice
+    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then log_info "操作已取消。"; press_any_key; return; fi
+
+    log_info "正在停止并禁用服务..."; systemctl stop "$NEZHA_AGENT_SERVICE" || true; systemctl disable "$NEZHA_AGENT_SERVICE" || true
+    log_info "正在删除服务文件..."; rm -f "$NEZHA_AGENT_FILE"
+    log_info "正在删除探针目录..."; rm -rf /opt/nezha
+    systemctl daemon-reload
+    log_info "✅ 哪吒探针已成功卸载。"; press_any_key
+}
+
+nezha_manage_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                    哪吒探针管理                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        if systemctl is-active --quiet "$NEZHA_AGENT_SERVICE"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+        echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 启动探针        2. 停止探针        3. 重启探针  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 查看日志                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. $RED卸载探针$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) systemctl start "$NEZHA_AGENT_SERVICE"; log_info "命令已发送"; sleep 1 ;;
+        2) systemctl stop "$NEZHA_AGENT_SERVICE"; log_info "命令已发送"; sleep 1 ;;
+        3) systemctl restart "$NEZHA_AGENT_SERVICE"; log_info "命令已发送"; sleep 1 ;;
+        4) clear; journalctl -u "$NEZHA_AGENT_SERVICE" -f --no-pager ;;
+        5) nezha_do_uninstall; break ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+nezha_main_menu() {
+    while true; do
+        clear
+        if is_nezha_installed; then
+            nezha_manage_menu
+            break # 从管理菜单返回后直接退出到主菜单
+        else
+            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+            echo -e "$CYAN║$WHITE                    哪吒探针管理                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装哪吒探针                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            read -p "请输入选项: " choice
+            case $choice in
+                1) nezha_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
+
 
 # --- 其他应用安装 ---
 install_sui() {
@@ -1706,19 +1851,21 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒探针管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE应用安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 S-ui / 3X-ui 面板                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 安装 S-ui / 3X-ui 面板                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. $GREEN更新此脚本$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1729,7 +1876,8 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4)
+        4) nezha_main_menu ;;
+        5)
             clear
             echo -e "请选择要安装的面板：\n1. S-ui\n2. 3X-ui\n0. 返回\n"
             read -p "请输入选项: " panel_choice
@@ -1740,10 +1888,10 @@ main_menu() {
                 *) log_error "无效选项！"; sleep 1 ;;
             esac
             ;;
-        5) install_wordpress ;;
-        6) setup_auto_reverse_proxy ;;
-        7) do_update_script ;;
-        8) setup_shortcut ;;
+        6) install_wordpress ;;
+        7) setup_auto_reverse_proxy ;;
+        8) do_update_script ;;
+        9) setup_shortcut ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
