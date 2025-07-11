@@ -1721,7 +1721,7 @@ uninstall_nezha_agent_v0() {
     press_any_key
 }
 uninstall_nezha_agent_v3() {
-    if ! is_nezha_agent_v0_installed; then
+    if ! is_nezha_agent_v3_installed; then
         log_warn "Nezha V0 探针未安装，无需卸载。"
         press_any_key
         return
