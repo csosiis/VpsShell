@@ -1055,45 +1055,29 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
-    FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
-
-    # 自动检测架构并下载正确的 fnm 版本
-    local fnm_zip_name
-    case $(dpkg --print-architecture) in
-        arm64 | aarch64)
-            log_info "检测到 ARM64/AArch64 架构..."
-            fnm_zip_name="fnm-linux-aarch64.zip"
-            ;;
-        amd64 | *) # 默认和 amd64 都使用通用版本
-            log_info "检测到 AMD64 (x86_64) 架构..."
-            fnm_zip_name="fnm-linux.zip"
-            ;;
-    esac
-
-    # ==================== 核心修正点：增强下载的稳定性与错误处理 ====================
-    local fnm_url="https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}"
-    log_info "正在从 ${fnm_url} 下载 FNM..."
-    if ! curl -L --fail --retry 3 -o "/tmp/fnm.zip" "$fnm_url"; then
-        log_error "下载 FNM 失败。请检查网络连接或 GitHub Release 页面是否正常。"
+    # ==================== 核心修正点：改用官方推荐的安装脚本 ====================
+    log_info "正在使用官方脚本安装 FNM (Fast Node Manager)..."
+    # 官方安装脚本会自动处理架构检测和下载
+    if ! curl -fsSL https://fnm.vercel.app/install | bash; then
+        log_error "FNM 安装脚本执行失败。请检查网络或上游脚本问题。"
         press_any_key
         return 1
     fi
 
-    # 增加文件类型校验，确保下载的是zip文件
-    if ! file /tmp/fnm.zip | grep -q "Zip archive data"; then
-        log_error "下载的文件 /tmp/fnm.zip 不是一个有效的 ZIP 文件。安装中止。"
-        rm -f /tmp/fnm.zip
-        press_any_key
-        return 1
-    fi
-    # ====================================================================================
-
-    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
-
-    export PATH="${FNM_DIR}:$PATH"
+    # FNM 的默认安装路径是 /root/.fnm (当以root运行时)
+    # 将其路径添加到当前会话的 PATH 环境变量中，以便后续命令可以调用
+    export PATH="/root/.fnm:$PATH"
+    # 立即评估 fnm 的环境变量，使其在当前会话中生效
     eval "$(fnm env)"
+
+    # 验证fnm命令是否可用
+    if ! command -v fnm &> /dev/null; then
+        log_error "FNM 安装后，命令依然无法找到。请检查安装日志。"
+        press_any_key
+        return 1
+    fi
     log_info "FNM 安装完成。"
+    # ====================================================================================
 
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
     fnm install v20.18.0
@@ -1130,7 +1114,8 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+# ==================== 另一处关键修正：更新 systemd 服务中的 fnm 路径 ====================
+ExecStart=/root/.fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
