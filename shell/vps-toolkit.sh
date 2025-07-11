@@ -1778,7 +1778,7 @@ install_nezha_agent_v0() {
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+    log_info "开始安装 Nezha V0 探针 (San Jose)..."
     log_info "服务器地址: $server_addr"
     log_info "服务器端口: $server_port"
 
@@ -2144,32 +2144,32 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 V0 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 V0 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC        $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 V1 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 V1 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v3_installed; then
-            echo -e "$CYAN║$NC   5. 安装/重装 V3 探针 ${GREEN}(已安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 V3 探针 ${YELLOW}(未安装)$NC                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC        $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $RED卸载 V3 探针$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
