@@ -25,6 +25,38 @@ curl -O https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell
 
 
 
+#### 科技lion脚本
+
+```
+bash <(curl -sL kejilion.sh)
+```
+
+
+
+#### 服务器评测脚本
+
+```
+wget https://github.com/spiritLHLS/ecs/raw/main/ecs.sh
+```
+
+
+
+#### Warp
+
+```
+wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
+```
+
+
+
+#### CM-VPS脚本
+
+```
+wget https://raw.githubusercontent.com/eooce/ssh_tool/main/ssh_tool.sh
+```
+
+
+
 #### Mtproxy
 
 ```
@@ -33,7 +65,7 @@ wget -N --no-check-certificate https://github.com/whunt1/onekeymakemtg/raw/maste
 
 
 
-#### Root登录
+#### GCP-Root登录
 
 ```
 echo "root:n4fLA4z8frR04wV4gqvG" | sudo chpasswd root && sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config && sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config && sudo sed -i 's|^Include /etc/ssh/sshd_config.d/\*.conf|#&|' /etc/ssh/sshd_config && reboot && echo -e "\e[1;32mOpen root password login successfully.restart server......\033[0m" || echo -e "\e[1;91mFailed to open root password \033[0m"
