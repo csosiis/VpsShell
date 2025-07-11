@@ -1729,7 +1729,7 @@ uninstall_nezha_agent_v3() {
     log_info "正在停止并禁用 nezha-agent-v0 服务..."
     systemctl stop nezha-agent-v3.service &>/dev/null
     systemctl disable nezha-agent-v3.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v0.service
+    rm -f /etc/systemd/system/nezha-agent-v3.service
     rm -rf /opt/nezha/agent-v3
     systemctl daemon-reload
     log_info "✅ Phoeix V0 探针已成功卸载。"
@@ -2066,9 +2066,9 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v3_installed; then
-            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC          $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC           $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
