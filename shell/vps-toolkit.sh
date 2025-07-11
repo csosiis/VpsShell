@@ -1802,9 +1802,22 @@ install_nezha_agent_v0() {
     press_any_key
 }
 install_nezha_agent_v1() {
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v1 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
+
     ensure_dependencies "curl" "wget" "unzip"
     clear
     log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
+
+    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
+    server_info=${server_info:-"nz.ssong.eu.org:8008"}
+    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
+    server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
+    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
+    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
+
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
     log_info "正在下载官方V1安装脚本..."
@@ -1815,9 +1828,9 @@ install_nezha_agent_v1() {
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
-    export NZ_SERVER="nz.ssong.eu.org:8008"
-    export NZ_TLS="flase"
-    export NZ_CLIENT_SECRET="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    export NZ_SERVER="$server_info"
+    export NZ_TLS="$NZ_TLS"
+    export NZ_CLIENT_SECRET="$server_secret"
     bash "$SCRIPT_PATH_TMP"
     unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
     rm "$SCRIPT_PATH_TMP"
