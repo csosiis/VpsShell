@@ -1770,17 +1770,6 @@ install_nezha_agent_v0() {
     local server_addr="nz.wiitwo.eu.org"
     local server_port="443"
 
-    # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v0 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
-
-    ensure_dependencies "curl" "wget" "unzip"
-    clear
-    log_info "开始安装 Nezha V0 探针 (San Jose)..."
-    log_info "服务器地址: $server_addr"
-    log_info "服务器端口: $server_port"
 
     # --- 获取密钥 ---
     # 如果没有通过参数传入密钥，则提示用户输入
@@ -1857,17 +1846,6 @@ install_nezha_agent_v3() {
     local server_addr="nz.csosm.ip-ddns.com"
     local server_port="443"
 
-    # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v3 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
-
-    ensure_dependencies "curl" "wget" "unzip"
-    clear
-    log_info "开始安装 Nezha V0 探针 (Phoenix)..."
-    log_info "服务器地址: $server_addr"
-    log_info "服务器端口: $server_port"
 
     # --- 获取密钥 ---
     # 如果没有通过参数传入密钥，则提示用户输入
