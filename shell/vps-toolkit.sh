@@ -2598,7 +2598,7 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4) nezha_manage_menu ;;
+        4) nezha_agent_menu ;;
         5) install_sui ;;
         6) install_3xui ;;
         7) install_wordpress ;;
