@@ -40,39 +40,6 @@ generate_random_port() {
 generate_random_password() {
     tr </dev/urandom -dc 'A-Za-z0-9' | head -c 20
 }
-# --- 核心功能：依赖项管理 ---
-ensure_dependencies() {
-    local dependencies=("$@") # 接收所有传入的参数作为依赖列表
-    local missing_dependencies=()
-
-    # 检查是否有待处理的依赖项
-    if [ ${#dependencies[@]} -eq 0 ]; then
-        return 0
-    fi
-
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
-    for pkg in "${dependencies[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-            missing_dependencies+=("$pkg")
-        fi
-    done
-
-    if [ ${#missing_dependencies[@]} -gt 0 ]; then
-        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并开始安装..."
-        set -e
-        apt-get update -y
-        for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装 ${pkg}..."
-            apt-get install -y "$pkg"
-        done
-        set +e
-        log_info "按需依赖已安装完毕。"
-    else
-        log_info "所需依赖均已安装。"
-    fi
-    echo ""
-}
 _is_port_available() {
     local port_to_check=$1
     local used_ports_array_name=$2
@@ -98,6 +65,34 @@ _is_domain_valid() {
     else
         return 1
     fi
+}
+ensure_dependencies() {
+    local dependencies=("$@")
+    local missing_dependencies=()
+    if [ ${#dependencies[@]} -eq 0 ]; then
+        return 0
+    fi
+    log_info "正在按需检查依赖: ${dependencies[*]}..."
+    for pkg in "${dependencies[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+            missing_dependencies+=("$pkg")
+        fi
+    done
+    if [ ${#missing_dependencies[@]} -gt 0 ]; then
+        log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
+        log_info "正在更新软件包列表并开始安装..."
+        set -e
+        apt-get update -y
+        for pkg in "${missing_dependencies[@]}"; do
+            log_info "正在安装 $pkg..."
+            apt-get install -y "$pkg"
+        done
+        set +e
+        log_info "按需依赖已安装完毕。"
+    else
+        log_info "所需依赖均已安装。"
+    fi
+    echo ""
 }
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
@@ -1724,6 +1719,7 @@ uninstall_nezha_agent_v1() {
     log_info "✅ Nezha V1 探针已成功卸载。"
     press_any_key
 }
+
 install_nezha_agent_v0() {
     log_info "为确保全新安装，将首先清理所有旧的探针安装..."
     uninstall_nezha_agent_v0 &>/dev/null
