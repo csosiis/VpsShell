@@ -745,7 +745,7 @@ main_menu() {
             ;;
         6) install_wordpress ;;
         7) setup_auto_reverse_proxy ;;
-        8) do_update_script ;;
+        8) do_update_script ;; # 【修复】添加了此行
         9) setup_shortcut ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
