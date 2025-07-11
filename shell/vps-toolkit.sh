@@ -1053,6 +1053,7 @@ substore_do_install() {
     # ==================== 核心修正：使用 FNM 官方安装脚本 ====================
     log_info "正在安装 FNM (Node.js 版本管理器)..."
     # 使用官方推荐的安装方式，它能自动处理架构和下载，比手动下载更稳定
+    # 通过 --install-dir 直接指定路径，避免权限问题
     curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
 
     # 将 fnm 的路径加入到当前脚本会话的 PATH 中，这是最关键的一步
