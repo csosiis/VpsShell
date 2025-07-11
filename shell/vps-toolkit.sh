@@ -1707,7 +1707,7 @@ is_nezha_agent_installed() {
 }
 uninstall_nezha_agent_v0() {
     if ! is_nezha_agent_v0_installed; then
-        log_warn "Nezha V0 探针未安装，无需卸载。"
+        log_warn "San Jose V0 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -1717,12 +1717,12 @@ uninstall_nezha_agent_v0() {
     rm -f /etc/systemd/system/nezha-agent-v0.service
     rm -rf /opt/nezha/agent-v0
     systemctl daemon-reload
-    log_info "✅ Nezha V0 探针已成功卸载。"
+    log_info "✅ SanJose V0 探针已成功卸载。"
     press_any_key
 }
 uninstall_nezha_agent_v3() {
     if ! is_nezha_agent_v3_installed; then
-        log_warn "Nezha V0 探针未安装，无需卸载。"
+        log_warn "Phoenix V0 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -1730,14 +1730,14 @@ uninstall_nezha_agent_v3() {
     systemctl stop nezha-agent-v3.service &>/dev/null
     systemctl disable nezha-agent-v3.service &>/dev/null
     rm -f /etc/systemd/system/nezha-agent-v0.service
-    rm -rf /opt/nezha/agent-v0
+    rm -rf /opt/nezha/agent-v3
     systemctl daemon-reload
-    log_info "✅ Nezha V0 探针已成功卸载。"
+    log_info "✅ Phoeix V0 探针已成功卸载。"
     press_any_key
 }
 uninstall_nezha_agent_v1() {
     if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
+        log_warn "Singapore-West V1 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -1747,7 +1747,7 @@ uninstall_nezha_agent_v1() {
     rm -f /etc/systemd/system/nezha-agent-v1.service
     rm -rf /opt/nezha/agent-v1
     systemctl daemon-reload
-    log_info "✅ Nezha V1 探针已成功卸载。"
+    log_info "✅ Singapore-Wes V1 探针已成功卸载。"
     press_any_key
 }
 
