@@ -1730,18 +1730,18 @@ uninstall_nezha_agent_v1() {
 }
 
 install_nezha_agent_v0() {
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v0 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_v0 &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
+    echo -e "\n${GREEN}开始安装 Nezha V0 (nz.wiitwo.eu.org:443) 探针...${NC}"
 
-    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
+    #read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
-    read -p "请输入面板服务器端口 [默认: 443]: " server_port
+    #read -p "请输入面板服务器端口 [默认: 443]: " server_port
     server_port=${server_port:-"443"}
     read -p "请输入面板密钥: " server_key
     if [ -z "$server_key" ]; then
@@ -1802,21 +1802,21 @@ install_nezha_agent_v0() {
     press_any_key
 }
 install_nezha_agent_v1() {
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v1 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_v1 &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
+    echo -e "\n${GREEN}开始安装 Nezha V1 探针 (nz.ssong.eu.org:8008)...${NC}\n"
 
-    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
+    #read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
     server_info=${server_info:-"nz.ssong.eu.org:8008"}
-    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
+    #read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
     server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
-    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
-    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
+    #read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
+     NZ_TLS="false"
 
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
