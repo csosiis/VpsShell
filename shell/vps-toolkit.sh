@@ -1802,14 +1802,9 @@ install_nezha_agent_v0() {
     press_any_key
 }
 install_nezha_agent_v1() {
-    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    #uninstall_nezha_agent_v1 &>/dev/null
-    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    #systemctl daemon-reload
-
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    echo -e "\n${GREEN}开始安装 Nezha V1 探针 (nz.ssong.eu.org:8008)...${NC}\n"
+    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
     log_info "正在下载官方V1安装脚本..."
@@ -1821,7 +1816,7 @@ install_nezha_agent_v1() {
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
     export NZ_SERVER="nz.ssong.eu.org:8008"
-    export NZ_TLS="false"
+    export NZ_TLS="flase"
     export NZ_CLIENT_SECRET="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
     bash "$SCRIPT_PATH_TMP"
     unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
