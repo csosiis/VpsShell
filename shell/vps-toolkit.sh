@@ -1774,7 +1774,7 @@ install_nezha_agent_v0() {
     # --- 获取密钥 ---
     # 如果没有通过参数传入密钥，则提示用户输入
     if [ -z "$server_key" ]; then
-        read -p "请输入面板密钥: " server_key
+        read -p "请输入San Jose V0哪吒面板面板密钥: " server_key
     fi
 
     # 最终检查密钥是否为空
@@ -1850,7 +1850,7 @@ install_nezha_agent_v3() {
     # --- 获取密钥 ---
     # 如果没有通过参数传入密钥，则提示用户输入
     if [ -z "$server_key" ]; then
-        read -p "请输入面板密钥: " server_key
+        read -p "请输入 Phoenix V0哪吒面板密钥: " server_key
     fi
 
     # 最终检查密钥是否为空
