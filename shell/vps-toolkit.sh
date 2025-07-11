@@ -1055,7 +1055,6 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    # ==================== 核心修正点：改用官方推荐的安装脚本 ====================
     log_info "正在使用官方脚本安装 FNM (Fast Node Manager)..."
     # 官方安装脚本会自动处理架构检测和下载
     if ! curl -fsSL https://fnm.vercel.app/install | bash; then
@@ -1064,15 +1063,16 @@ substore_do_install() {
         return 1
     fi
 
-    # FNM 的默认安装路径是 /root/.fnm (当以root运行时)
-    # 将其路径添加到当前会话的 PATH 环境变量中，以便后续命令可以调用
-    export PATH="/root/.fnm:$PATH"
+    # ==================== 核心修正点：根据安装日志修正 FNM 路径 ====================
+    # FNM 安装日志显示，其路径为 /root/.local/share/fnm
+    # 必须将这个正确的路径添加到当前会话的 PATH 环境变量中
+    export PATH="/root/.local/share/fnm:$PATH"
     # 立即评估 fnm 的环境变量，使其在当前会话中生效
     eval "$(fnm env)"
 
-    # 验证fnm命令是否可用
+    # 再次验证fnm命令是否可用
     if ! command -v fnm &> /dev/null; then
-        log_error "FNM 安装后，命令依然无法找到。请检查安装日志。"
+        log_error "FNM 安装后，命令依然无法找到。请检查安装日志或手动执行 'source /root/.bashrc' 后重试。"
         press_any_key
         return 1
     fi
@@ -1114,8 +1114,8 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-# ==================== 另一处关键修正：更新 systemd 服务中的 fnm 路径 ====================
-ExecStart=/root/.fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+# ==================== 同步修正 systemd 服务中的 fnm 路径 ====================
+ExecStart=/root/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
