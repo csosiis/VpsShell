@@ -1047,7 +1047,6 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
-# 安装 Sub-Store
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
@@ -1055,29 +1054,28 @@ substore_do_install() {
     log_info "开始执行 Sub-Store 安装流程...";
     set -e
 
-    log_info "正在使用官方脚本安装 FNM (Fast Node Manager)..."
-    # 官方安装脚本会自动处理架构检测和下载
-    if ! curl -fsSL https://fnm.vercel.app/install | bash; then
-        log_error "FNM 安装脚本执行失败。请检查网络或上游脚本问题。"
-        press_any_key
-        return 1
-    fi
+    log_info "正在安装 FNM, Node.js 和 PNPM (这可能需要一些时间)..."
+    FNM_DIR="$HOME/.local/share/fnm"; mkdir -p "$FNM_DIR"
 
-    # ==================== 核心修正点：根据安装日志修正 FNM 路径 ====================
-    # FNM 安装日志显示，其路径为 /root/.local/share/fnm
-    # 必须将这个正确的路径添加到当前会话的 PATH 环境变量中
-    export PATH="/root/.local/share/fnm:$PATH"
-    # 立即评估 fnm 的环境变量，使其在当前会话中生效
+    local fnm_zip_name
+    case $(dpkg --print-architecture) in
+        arm64 | aarch64)
+            log_info "检测到 ARM64/AArch64 架构..."
+            fnm_zip_name="fnm-linux-aarch64.zip"
+            ;;
+        amd64 | *)
+            log_info "检测到 AMD64 (x86_64) 架构..."
+            fnm_zip_name="fnm-linux.zip"
+            ;;
+    esac
+    log_info "正在下载 FNM: ${fnm_zip_name}..."
+    curl -L "https://github.com/Schniz/fnm/releases/latest/download/${fnm_zip_name}" -o /tmp/fnm.zip
+
+    unzip -q -o -d "$FNM_DIR" /tmp/fnm.zip; rm /tmp/fnm.zip; chmod +x "${FNM_DIR}/fnm";
+
+    export PATH="${FNM_DIR}:$PATH"
     eval "$(fnm env)"
-
-    # 再次验证fnm命令是否可用
-    if ! command -v fnm &> /dev/null; then
-        log_error "FNM 安装后，命令依然无法找到。请检查安装日志或手动执行 'source /root/.bashrc' 后重试。"
-        press_any_key
-        return 1
-    fi
     log_info "FNM 安装完成。"
-    # ====================================================================================
 
     log_info "正在使用 FNM 安装 Node.js (v20.18.0)..."
     fnm install v20.18.0
@@ -1094,7 +1092,6 @@ substore_do_install() {
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-
     log_info "开始配置系统服务..."; echo ""
     local API_KEY; local random_api_key; random_api_key=$(generate_random_password); read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key; API_KEY=${user_api_key:-$random_api_key}; if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi; log_info "最终使用的 API 密钥为: ${API_KEY}"
     local FRONTEND_PORT; while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
@@ -1114,8 +1111,7 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-# ==================== 同步修正 systemd 服务中的 fnm 路径 ====================
-ExecStart=/root/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+ExecStart=$HOME/.local/share/fnm/fnm exec --using v20.18.0 node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
@@ -1730,18 +1726,18 @@ uninstall_nezha_agent_v1() {
 }
 
 install_nezha_agent_v0() {
-    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    #uninstall_nezha_agent_v0 &>/dev/null
-    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    #systemctl daemon-reload
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v0 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    echo -e "\n${GREEN}开始安装 Nezha V0 (nz.wiitwo.eu.org:443) 探针...${NC}"
+    log_info "开始安装 Nezha V0 探针 (安装后改造模式)..."
 
-    #read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
+    read -p "请输入面板服务器地址 [默认: nz.wiitwo.eu.org]: " server_addr
     server_addr=${server_addr:-"nz.wiitwo.eu.org"}
-    #read -p "请输入面板服务器端口 [默认: 443]: " server_port
+    read -p "请输入面板服务器端口 [默认: 443]: " server_port
     server_port=${server_port:-"443"}
     read -p "请输入面板密钥: " server_key
     if [ -z "$server_key" ]; then
@@ -1802,13 +1798,21 @@ install_nezha_agent_v0() {
     press_any_key
 }
 install_nezha_agent_v1() {
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v1 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
+
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "开始安装 Nezha V1 探针 [默认: nz.ssong.eu.org:8008]..."
+    log_info "开始安装 Nezha V1 探针 (安装后改造模式)..."
 
-    server_info="nz.ssong.eu.org:8008"
-    server_secret="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
-    NZ_TLS="false";
+    read -p "请输入面板服务器地址和端口 (格式: domain:port) [默认: nz.ssong.eu.org:8008]: " server_info
+    server_info=${server_info:-"nz.ssong.eu.org:8008"}
+    read -p "请输入面板密钥 [默认: wdptRINwlgBB3kE0U8eDGYjqV56nAhLh]: " server_secret
+    server_secret=${server_secret:-"wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"}
+    read -p "是否为gRPC连接启用TLS? (y/N): " use_tls
+    if [[ "$use_tls" =~ ^[Yy]$ ]]; then NZ_TLS="true"; else NZ_TLS="false"; fi
 
     local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
 
