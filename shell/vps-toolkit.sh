@@ -1848,7 +1848,7 @@ install_nezha_agent_v0() {
     fi
     press_any_key
 }
-install_nezha_agent_v0() {
+install_nezha_agent_v3() {
     # --- 从函数第一个参数获取密钥 ---
     local server_key="$1"
 
@@ -2181,7 +2181,7 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
-        5) install_nezha_agent_v0 ;;
+        5) install_nezha_agent_v3 ;;
         6) uninstall_nezha_agent_v3 ;;
         0) break ;;
         *)
