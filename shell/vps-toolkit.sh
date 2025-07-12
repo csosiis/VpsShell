@@ -569,7 +569,7 @@ install_warp() {
 
 
 # =================================================================
-# X-ui / S-ui 面板安装
+# 应用安装 (UI面板 / Traffmonetizer)
 # =================================================================
 
 # =================================================
@@ -596,6 +596,83 @@ install_3xui() {
     press_any_key
 }
 
+# =================================================
+# 函数: ui_panels_menu
+# 说明: (新增) 显示S-ui和3X-ui的安装选项子菜单。
+# =================================================
+ui_panels_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+            1) install_sui; break ;;
+            2) install_3xui; break ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+# =================================================
+# 函数: install_traffmonetizer
+# 说明: (新增) 安装 Traffmonetizer 容器，并根据输入的密令选择amd或arm架构。
+# =================================================
+install_traffmonetizer() {
+    log_info "开始部署 Traffmonetizer..."
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续部署 Traffmonetizer。"
+        press_any_key
+        return
+    fi
+
+    # 检查并移除已存在的同名容器
+    if docker ps -a --format '{{.Names}}' | grep -q "^tm$"; then
+        log_warn "检测到已存在的 Traffmonetizer 容器 (tm)，将停止并删除它以进行重新部署。"
+        docker stop tm >/dev/null 2>&1
+        docker rm tm >/dev/null 2>&1
+    fi
+
+    read -p "请输入部署密令 (amd/arm): " arch_choice
+
+    local docker_command=""
+    case "$arch_choice" in
+        amd)
+            log_info "选择 amd 架构，准备执行命令..."
+            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli_v2 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
+            ;;
+        arm)
+            log_info "选择 arm 架构，准备执行命令..."
+            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli:arm64v8 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
+            ;;
+        *)
+            log_error "无效的密令！请输入 'amd' 或 'arm'。"
+            press_any_key
+            return
+            ;;
+    esac
+
+    log_info "正在执行 Docker 命令..."
+    eval "$docker_command"
+
+    sleep 3
+    if docker ps --format '{{.Names}}' | grep -q "^tm$"; then
+        log_info "✅ Traffmonetizer 容器 (tm) 已成功启动！"
+        docker ps | grep "tm"
+    else
+        log_error "Traffmonetizer 容器启动失败！请使用 'docker logs tm' 查看错误日志。"
+    fi
+    press_any_key
+}
 
 # =================================================================
 # Sing-Box 核心功能
@@ -2780,41 +2857,77 @@ substore_manage_menu() {
     while true; do
         clear
         local rp_menu_text="设置反向代理 (推荐)"
-        grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null && rp_menu_text="更换反代域名"
-
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
+            rp_menu_text="更换反代域名"
+        fi
         echo -e "$WHITE=============================$NC\n"
         echo -e "$WHITE      Sub-Store 管理菜单      $NC\n"
         echo -e "$WHITE=============================$NC\n"
-        local STATUS_COLOR="$RED● 不活动$NC"
-        systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME" && STATUS_COLOR="$GREEN● 活动$NC"
+        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
         echo -e "当前状态: $STATUS_COLOR\n"
         echo "-----------------------------"
+        echo ""
         echo "1. 启动服务"
+        echo ""
         echo "2. 停止服务"
+        echo ""
         echo "3. 重启服务"
+        echo ""
         echo "4. 查看状态"
+        echo ""
         echo "5. 查看日志"
+        echo ""
         echo "-----------------------------"
+        echo ""
         echo "6. 查看访问链接"
+        echo ""
         echo "7. 重置端口"
+        echo ""
         echo "8. 重置 API 密钥"
+        echo ""
         echo -e "9. $YELLOW$rp_menu_text$NC"
+        echo ""
         echo "0. 返回主菜单"
+        echo ""
         echo -e "$WHITE-----------------------------$NC\n"
         read -p "请输入选项: " choice
-
         case $choice in
-        1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key ;;
-        5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager ;;
-        6) substore_view_access_link; press_any_key ;;
+        1)
+            systemctl start "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        2)
+            systemctl stop "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        3)
+            systemctl restart "$SUBSTORE_SERVICE_NAME"
+            log_info "命令已发送"
+            sleep 1
+            ;;
+        4)
+            clear
+            systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager
+            press_any_key
+            ;;
+        5)
+            clear
+            journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager
+            ;;
+        6)
+            substore_view_access_link
+            press_any_key
+            ;;
         7) substore_reset_ports ;;
         8) substore_reset_api_key ;;
         9) substore_setup_reverse_proxy ;;
         0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2831,29 +2944,42 @@ substore_main_menu() {
         echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         if is_substore_installed; then
-            local STATUS_COLOR="$RED● 不活动$NC"
-            systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME" && STATUS_COLOR="$GREEN● 活动$NC"
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
             echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
             1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            3) substore_do_uninstall ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
             esac
         else
             echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) substore_do_install ;; 0) break ;; *)
+                log_warn "无效选项！"
+                sleep 1
+                ;;
             esac
         fi
     done
@@ -2862,7 +2988,7 @@ substore_main_menu() {
 
 # =================================================
 # 函数: main_menu
-# 说明: 脚本的入口，显示所有功能模块的主菜单。
+# 说明: (已修改) 脚本的入口，显示所有功能模块的主菜单。
 # =================================================
 main_menu() {
     while true; do
@@ -2875,10 +3001,10 @@ main_menu() {
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE应用安装$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC   5. 安装 S-ui 面板                              $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $GREEN通用网站反向代理配置$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. $GREEN通用网站反向代理配置$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. $GREEN安装 Traffmonetizer (Docker)$NC                $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE脚本管理$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  10. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
@@ -2890,11 +3016,11 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4) nezha_agent_menu ;; # 这里暂时只链接到 agent 菜单
-        5) install_sui ;;
-        6) install_3xui ;;
-        7) install_wordpress ;;
-        8) setup_auto_reverse_proxy "" "" ;; # 传入空参数启动交互模式
+        4) nezha_agent_menu ;;
+        5) ui_panels_menu ;;
+        6) install_wordpress ;;
+        7) setup_auto_reverse_proxy "" "" ;; # 传入空参数启动交互模式
+        8) install_traffmonetizer ;;
         9) do_update_script ;;
         10) setup_shortcut ;;
         0) exit 0 ;;
