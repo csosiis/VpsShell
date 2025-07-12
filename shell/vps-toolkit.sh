@@ -1321,6 +1321,219 @@ EOF
     fi
     press_any_key
 }
+# ==============================================================================
+# 新增功能：安装苹果CMS (Maccms)
+# ==============================================================================
+install_maccms() {
+    # 检查并安装 Docker 环境
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
+        press_any_key
+        return
+    fi
+
+    clear
+    log_info "开始使用 Docker Compose 搭建苹果CMS影视站..."
+    echo ""
+
+    # 获取项目目录
+    local project_dir
+    read -p "请输入新苹果CMS项目的安装目录 [默认: /root/maccms]: " project_dir
+    project_dir=${project_dir:-"/root/maccms"}
+    if [ -f "$project_dir/docker-compose.yml" ]; then
+        log_error "错误：目录 \"$project_dir\" 下似乎已存在一个站点！"
+        log_warn "请为新的站点选择一个不同的、全新的目录。"
+        press_any_key
+        return
+    fi
+
+    mkdir -p "$project_dir/nginx" "$project_dir/source/maccms10" || {
+        log_error "无法创建目录 $project_dir！请检查权限。"
+        press_any_key
+        return
+    }
+    cd "$project_dir" || {
+        log_error "无法进入目录 $project_dir！"
+        press_any_key
+        return
+    }
+    log_info "新的苹果CMS将被安装在: $(pwd)"
+    echo ""
+
+    # 设置数据库密码
+    local db_root_password
+    local db_user_password
+    read -s -p "请输入新的数据库 root 密码 [默认使用随机强密码]: " db_root_password
+    echo ""
+    db_root_password=${db_root_password:-$(generate_random_password)}
+    log_info "数据库 root 密码已设置。"
+    echo ""
+    read -s -p "请输入新的数据库 maccms_user 用户密码 [默认使用随机强密码]: " db_user_password
+    echo ""
+    db_user_password=${db_user_password:-$(generate_random_password)}
+    log_info "数据库用户 maccms_user 密码已设置。"
+    echo ""
+
+    # 设置访问端口
+    local maccms_port
+    while true; do
+        read -p "请输入苹果CMS的外部访问端口 [默认: 8880]: " maccms_port
+        maccms_port=${maccms_port:-"8880"}
+        if [[ ! "$maccms_port" =~ ^[0-9]+$ ]] || [ "$maccms_port" -lt 1 ] || [ "$maccms_port" -gt 65535 ]; then
+            log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$maccms_port" "used_ports_for_this_run"; then
+            :
+        else break; fi
+    done
+    echo ""
+
+    # 下载并解压苹果CMS源码
+    local MACCMS_V10_URL="https://github.com/magicblack/maccms10/archive/refs/heads/master.zip"
+    log_info "正在从 GitHub 下载最新的苹果CMS V10 源码..."
+    if ! curl -L -o maccms.zip "${MACCMS_V10_URL}"; then
+        log_error "下载苹果CMS失败！请检查网络或URL。"
+        press_any_key
+        return
+    fi
+    log_info "正在解压源码..."
+    unzip -q maccms.zip -d ./
+    # 将解压后的文件夹内容移动到正确的源码目录
+    mv maccms10-master/* ./source/maccms10/
+    # 清理临时文件和空目录
+    rm -rf maccms10-master maccms.zip
+    log_info "✅ 苹果CMS源码准备就绪！"
+    echo ""
+
+    # 生成 Nginx 配置文件
+    log_info "正在生成 nginx/default.conf..."
+    cat >nginx/default.conf <<'EOF'
+server {
+    listen 80;
+    server_name localhost;
+    root /var/www/html/maccms10;
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    location / {
+        if (!-e $request_filename) {
+            rewrite ^/index.php(.*)$ /index.php?s=$1 last;
+            rewrite ^/admin.php(.*)$ /admin.php?s=$1 last;
+            rewrite ^/api.php(.*)$ /api.php?s=$1 last;
+            rewrite ^(.*)$ /index.php?s=$1 last;
+            break;
+        }
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_pass   php:9000;
+        fastcgi_index  index.php;
+        fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include        fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+    # 生成 docker-compose.yml 文件
+    log_info "正在生成 docker-compose.yml..."
+    cat >docker-compose.yml <<EOF
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:1.21-alpine
+    container_name: ${project_dir##*/}_nginx
+    ports:
+      - "$maccms_port:80"
+    volumes:
+      - ./source:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx_logs:/var/log/nginx
+    depends_on:
+      - php
+    restart: always
+    networks:
+      - maccms_net
+
+  php:
+    image: php:7.4-fpm-alpine
+    container_name: ${project_dir##*/}_php
+    volumes:
+      - ./source:/var/www/html
+    restart: always
+    expose:
+      - 9000
+    depends_on:
+      - db
+    networks:
+      - maccms_net
+
+  db:
+    image: mysql:5.7
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: '$db_root_password'
+      MYSQL_DATABASE: 'maccms'
+      MYSQL_USER: 'maccms_user'
+      MYSQL_PASSWORD: '$db_user_password'
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - maccms_net
+
+networks:
+  maccms_net:
+    driver: bridge
+
+volumes:
+  db_data:
+  nginx_logs:
+EOF
+    if [ ! -f "docker-compose.yml" ]; then
+        log_error "docker-compose.yml 文件创建失败！"
+        press_any_key
+        return
+    fi
+    echo ""
+
+    log_info "正在使用 Docker Compose 启动苹果CMS服务..."
+    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
+    docker compose up -d
+    echo ""
+    log_info "正在检查服务状态..."
+    sleep 5
+    docker compose ps
+    echo ""
+    log_info "✅ 苹果CMS 容器已成功启动！"
+    echo ""
+
+    local ipv4_addr
+    ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+
+    clear
+    log_info "==================== 安装向导 ===================="
+    log_info "请立即访问以下地址，在浏览器中完成最后的安装步骤："
+    if [ -n "$ipv4_addr" ]; then
+        echo -e "$YELLOW    http://$ipv4_addr:$maccms_port/install.php$NC"
+    else
+        log_warn "未能获取到公网IPv4地址，请使用您的服务器IP访问。"
+    fi
+    echo ""
+    log_warn "在安装页面的数据库配置环节，请务必使用以下信息："
+    echo -e "$GREEN  数据库主机: db$NC"
+    echo -e "$GREEN  数据库名称: maccms$NC"
+    echo -e "$GREEN  数据库用户: maccms_user$NC"
+    echo -e "$GREEN  数据库密码: $db_user_password$NC (您刚才设置的密码)"
+    echo "===================================================="
+    press_any_key
+}
 substore_do_uninstall() {
     if ! is_substore_installed; then
         log_warn "Sub-Store 未安装。"
@@ -2468,7 +2681,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒探针管理$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒探针管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2476,15 +2689,17 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 安装 3X-ui 面板                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 搭建苹果CMS影视站 (Docker)                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $GREEN自动配置网站反向代理$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. 搭建 WordPress (Docker)                     $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. 自动配置网站反向代理                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   99. $GREEN更新此脚本$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  10. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC  66. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2498,10 +2713,11 @@ main_menu() {
         4) nezha_agent_menu ;;
         5) install_sui ;;
         6) install_3xui ;;
-        7) install_wordpress ;;
-        8) setup_auto_reverse_proxy ;;
-        9) do_update_script ;;
-        10) setup_shortcut ;;
+        7) install_maccms ;;
+        8) install_wordpress ;;
+        9) setup_auto_reverse_proxy ;;
+        99) do_update_script ;;
+        66) setup_shortcut ;;
         0) exit 0 ;;
         *)
             log_error "无效选项！"
