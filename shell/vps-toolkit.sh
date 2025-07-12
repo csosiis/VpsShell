@@ -2949,8 +2949,8 @@ singbox_main_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         if is_singbox_installed; then
             local STATUS_COLOR="$RED● 不活动$NC"
-            systemctl is-active --quiet sing-box && STATUS_COLOR="$GREEN● 活动$NC"
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            systemctl is-active --quiet sing-box && STATUS_COLOR="$GREEN● 活动  $NC"
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   ${GREEN}1. 新增节点${NC}                                    $CYAN║$NC"
@@ -3010,7 +3010,7 @@ substore_manage_menu() {
             rp_menu_text="更换反代域名"
         fi
 
-        local STATUS_COLOR="$RED● 不活动$NC"
+        local STATUS_COLOR="$RED● 不活动 $NC"
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
             STATUS_COLOR="$GREEN● 活动$NC"
         fi
@@ -3029,7 +3029,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC   6. 查看访问链接                                $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 重置端口                                    $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
-        printf "$CYAN║$NC   9. ${YELLOW}%-40s${NC}$CYAN          ║$NC\n" "$rp_menu_text"
+        printf "$CYAN║$NC   9. ${YELLOW}%-40s${NC}$CYAN            ║$NC\n" "$rp_menu_text"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. ${RED}返回主菜单${NC}                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
