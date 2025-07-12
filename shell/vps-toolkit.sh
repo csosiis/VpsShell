@@ -2997,7 +2997,7 @@ singbox_main_menu() {
 
 # =================================================
 # 函数: substore_manage_menu
-# 说明: 显示 Sub-Store 的详细管理菜单，包括启停、日志和配置修改。
+# 说明: (已修改样式) 显示 Sub-Store 的详细管理菜单，包括启停、日志和配置修改。
 # =================================================
 substore_manage_menu() {
     while true; do
@@ -3006,37 +3006,31 @@ substore_manage_menu() {
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
             rp_menu_text="更换反代域名"
         fi
-        echo -e "$WHITE=============================$NC\n"
-        echo -e "$WHITE      Sub-Store 管理菜单      $NC\n"
-        echo -e "$WHITE=============================$NC\n"
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-        echo -e "当前状态: $STATUS_COLOR\n"
-        echo "-----------------------------"
+
+        local STATUS_COLOR="$RED● 不活动$NC"
+        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+            STATUS_COLOR="$GREEN● 活动$NC"
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 Sub-Store 管理菜单               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        printf "$CYAN║$NC  当前状态: %-36b $CYAN║$NC\n" "$STATUS_COLOR"
+        echo -e "$CYAN╟─────────────────── $WHITE服务控制$CYAN ─────────────────────╢$NC"
+        echo -e "$CYAN║$NC   1. 启动服务          2. 停止服务          3. 重启服务  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 查看状态          5. 查看日志                       $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE配置管理$CYAN ─────────────────────╢$NC"
+        echo -e "$CYAN║$NC   6. 查看访问链接                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 重置端口                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
+        printf "$CYAN║$NC   9. ${YELLOW}%-40s${NC}$CYAN║$NC\n" "$rp_menu_text"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. ${RED}返回主菜单${NC}                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
-        echo "1. 启动服务"
-        echo ""
-        echo "2. 停止服务"
-        echo ""
-        echo "3. 重启服务"
-        echo ""
-        echo "4. 查看状态"
-        echo ""
-        echo "5. 查看日志"
-        echo ""
-        echo "-----------------------------"
-        echo ""
-        echo "6. 查看访问链接"
-        echo ""
-        echo "7. 重置端口"
-        echo ""
-        echo "8. 重置 API 密钥"
-        echo ""
-        echo -e "9. $YELLOW$rp_menu_text$NC"
-        echo ""
-        echo "0. 返回主菜单"
-        echo ""
-        echo -e "$WHITE-----------------------------$NC\n"
+
         read -p "请输入选项: " choice
+
         case $choice in
         1)
             systemctl start "$SUBSTORE_SERVICE_NAME"
