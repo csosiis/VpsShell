@@ -2014,40 +2014,55 @@ nezha_agent_menu() {
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-
-        local v0_status="${YELLOW}(未安装)$NC"
-        is_nezha_agent_v0_installed && v0_status="${GREEN}(已安装)$NC"
-        printf "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 %-18b$CYAN║$NC\n" "$v0_status"
-        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v0_installed; then
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-
-        local v1_status="${YELLOW}(未安装)$NC"
-        is_nezha_agent_v1_installed && v1_status="${GREEN}(已安装)$NC"
-        printf "$CYAN║$NC   3. 安装/重装 Singapore V1 探针 %-16b$CYAN║$NC\n" "$v1_status"
-        echo -e "$CYAN║$NC   4. $RED卸载 Singapore V1 探针$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v1_installed; then
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-
-        local v3_status="${YELLOW}(未安装)$NC"
-        is_nezha_agent_v3_installed && v3_status="${GREEN}(已安装)$NC"
-        printf "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 %-18b$CYAN║$NC\n" "$v3_status"
-        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                          $CYAN║$NC"
-
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        if is_nezha_agent_v3_installed; then
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC          $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
+        fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
         read -p "请输入选项: " choice
         case $choice in
-        1) install_nezha_agent_v0 ;; 2) uninstall_nezha_agent_v0 ;;
-        3) install_nezha_agent_v1 ;; 4) uninstall_nezha_agent_v1 ;;
-        5) install_nezha_agent_v3 ;; 6) uninstall_nezha_agent_v3 ;;
+        1) install_nezha_agent_v0 ;;
+        2) uninstall_nezha_agent_v0 ;;
+        3) install_nezha_agent_v1 ;;
+        4) uninstall_nezha_agent_v1 ;;
+        5) install_nezha_agent_v3 ;;
+        6) uninstall_nezha_agent_v3 ;;
         0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
-
-
 # =================================================
 # 函数: nezha_dashboard_menu
 # 说明: 显示哪吒面板（Dashboard）的管理菜单，允许用户选择安装不同版本的面板。
@@ -2344,7 +2359,7 @@ _create_self_signed_cert() {
         return 0
     fi
 
-    log_info "\n正在为域名 $domain_name 生成自签名证书..."
+    echo -e "\n${GREEN}正在为域名 $domain_name 生成自签名证书...${NC}"
     mkdir -p "$cert_dir"
     openssl ecparam -genkey -name prime256v1 -out "$key_path"
     openssl req -new -x509 -days 3650 -key "$key_path" -out "$cert_path" -subj "/CN=$domain_name"
@@ -2578,144 +2593,275 @@ post_add_node_menu() {
 # =================================================
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
+    local cert_choice custom_id location connect_addr sni_domain final_node_link
+    local cert_path key_path
+    declare -A ports
     local protocols_to_create=()
+    local protocols_with_self_signed=()
     local is_one_click=false
 
     clear
-    # --- 协议选择 ---
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
     echo ""
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-        1) protocols_to_create=("VLESS");;
-        2) protocols_to_create=("VMess");;
-        3) protocols_to_create=("Trojan");;
-        4) protocols_to_create=("Hysteria2");;
-        5) protocols_to_create=("TUIC");;
-        6) protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC"); is_one_click=true;;
-        0) return;;
-        *) log_error "无效选择，操作中止."; press_any_key; return;;
+    1) protocols_to_create=("VLESS") ;;
+    2) protocols_to_create=("VMess") ;;
+    3) protocols_to_create=("Trojan") ;;
+    4) protocols_to_create=("Hysteria2") ;;
+    5) protocols_to_create=("TUIC") ;;
+    6)
+        protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+        is_one_click=true
+        ;;
+    0) return ;;
+    *)
+        log_error "无效选择，操作中止。"
+        press_any_key
+        return
+        ;;
     esac
-
     clear
-    log_info "您选择了 [${protocols_to_create[*]}] 协议。"
-
-    # --- 证书与连接地址处理 ---
-    local cert_path key_path connect_addr sni_domain
-    local insecure_params=()
-    declare -A insecure_params=( [VLESS]="" [Trojan]="" [Hysteria2]="" [TUIC]="" [VMess]="")
-
+    echo -e "$GREEN您选择了 [${protocols_to_create[*]}] 协议。$NC"
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)$NC\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
+    local insecure_param=""
+    local vmess_insecure_json_part=""
+    local hy2_insecure_param=""
+    local tuic_insecure_param=""
+
     if [ "$cert_choice" == "1" ]; then
-        read -p "请输入您已解析到本机的域名: " domain
-        if ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; press_any_key; return; fi
-        if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; press_any_key; return; fi
-        cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"; key_path="/etc/letsencrypt/live/$domain/privkey.pem"
-        connect_addr="$domain"; sni_domain="$domain"
+        echo ""
+        while true; do
+            read -p "请输入您已解析到本机的域名: " domain
+            if [[ -z "$domain" ]]; then
+                echo ""
+                log_error "域名不能为空！"
+            elif ! _is_domain_valid "$domain"; then
+                echo ""
+                log_error "域名格式不正确。"
+            else break; fi
+        done
+        if ! apply_ssl_certificate "$domain"; then
+            echo ""
+            log_error "证书处理失败。"
+            press_any_key
+            return
+        fi
+        cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
+        key_path="/etc/letsencrypt/live/$domain/privkey.pem"
+        connect_addr="$domain"
+        sni_domain="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        insecure_params[VLESS]="&allowInsecure=1"; insecure_params[Trojan]="&allowInsecure=1"
-        insecure_params[Hysteria2]="&insecure=1"; insecure_params[TUIC]="&allow_insecure=1"
-        insecure_params[VMess]=', "skip-cert-verify": true'
+        protocols_with_self_signed=("${protocols_to_create[@]}")
+        insecure_param="&allowInsecure=1"
+        vmess_insecure_json_part=", \"skip-cert-verify\": true"
+        hy2_insecure_param="&insecure=1"
+        tuic_insecure_param="&allow_insecure=1"
 
-        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com); ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
-        if [ -n "$ipv4_addr" ]; then connect_addr="$ipv4_addr"; else connect_addr="[$ipv6_addr]"; fi
-
+        ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+        ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
+        if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
+            read -p "请输入选项 (1-2): " ip_choice
+            if [ "$ip_choice" == "2" ]; then connect_addr="[$ipv6_addr]"; else connect_addr="$ipv4_addr"; fi
+        elif [ -n "$ipv4_addr" ]; then
+            echo ""
+            log_info "将自动使用 IPv4 地址。"
+            connect_addr="$ipv4_addr"
+        elif [ -n "$ipv6_addr" ]; then
+            echo ""
+            log_info "将自动使用 IPv6 地址。"
+            connect_addr="[$ipv6_addr]"
+        else
+            echo ""
+            log_error "无法获取任何公网 IP 地址！"
+            press_any_key
+            return
+        fi
+        echo ""
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
         sni_domain=${sni_input:-"www.bing.com"}
-        if ! _create_self_signed_cert "$sni_domain"; then log_error "自签名证书处理失败。"; press_any_key; return; fi
-        cert_path="/etc/sing-box/certs/$sni_domain.cert.pem"; key_path="/etc/sing-box/certs/$sni_domain.key.pem"
+        if ! _create_self_signed_cert "$sni_domain"; then
+            echo ""
+            log_error "自签名证书处理失败。"
+            press_any_key
+            return
+        fi
+        cert_path="/etc/sing-box/certs/$sni_domain.cert.pem"
+        key_path="/etc/sing-box/certs/$sni_domain.key.pem"
     else
-        log_error "无效证书选择."; press_any_key; return
+        log_error "无效证书选择。"
+        press_any_key
+        return
     fi
-
-    # --- 端口与标识输入 ---
-    local used_ports_for_this_run=(); declare -A ports
-    for p in "${protocols_to_create[@]}"; do
+    local used_ports_for_this_run=()
+    if $is_one_click; then
+        echo ""
+        log_info "您已选择一键模式，请为每个协议指定端口。"
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                echo ""
+                local port_prompt="请输入 [$p] 的端口 [回车则随机]: "
+                if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [$p] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
+                read -p "$(echo -e "$port_prompt")" port_input
+                if [ -z "$port_input" ]; then
+                    port_input=$(generate_random_port)
+                    echo ""
+                    log_info "已为 [$p] 生成随机端口: $port_input"
+                fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                    echo ""
+                    log_error "端口号需为 1-65535。"
+                elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                    ports[$p]=$port_input
+                    used_ports_for_this_run+=("$port_input")
+                    break
+                fi
+            done
+        done
+    else
+        local protocol_name=${protocols_to_create[0]}
         while true; do
-            local port_prompt="请输入 [$p] 的端口 [回车则随机]: "
-            [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]] && port_prompt="请输入 [$p] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "
-            read -p "$(echo -e "\n$port_prompt")" port_input
-            port_input=${port_input:-$(generate_random_port)}
-            if _is_port_available "$port_input" "used_ports_for_this_run"; then
-                ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break
+            local port_prompt="请输入 [$protocol_name] 的端口 [回车则随机]: "
+            if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [$protocol_name] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
+            echo ""
+            read -p "$(echo -e "$port_prompt")" port_input
+            if [ -z "$port_input" ]; then
+                port_input=$(generate_random_port)
+                echo ""
+                log_info "已生成随机端口: $port_input"
+            fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
+                echo ""
+                log_error "端口号需为 1-65535。"
+            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
+                ports[$protocol_name]=$port_input
+                used_ports_for_this_run+=("$port_input")
+                break
             fi
         done
-    done
-
-    echo ""; read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
+    fi
+    echo ""
+    read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
     custom_id=${custom_id:-"Jcole"}
-
-    # --- 节点生成循环 ---
-    local geo_info_json; geo_info_json=$(curl -s ip-api.com/json)
-    local country_code; country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
-    local region_name; region_name=$(echo "$geo_info_json" | jq -r '.regionName // "N/A"' | sed 's/ //g')
-    local success_count=0; local final_node_link=""
-
+    local geo_info_json
+    geo_info_json=$(curl -s ip-api.com/json)
+    local country_code
+    country_code=$(echo "$geo_info_json" | jq -r '.countryCode')
+    local region_name
+    region_name=$(echo "$geo_info_json" | jq -r '.regionName' | sed 's/ //g')
+    if [ -z "$country_code" ]; then country_code="N/A"; fi
+    if [ -z "$region_name" ]; then region_name="N/A"; fi
+    local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
-        local tag; tag=$(_get_unique_tag "$country_code-$region_name-$custom_id-$protocol")
-        log_info "\n已为 [$protocol] 节点分配唯一 Tag: $tag"
-        local uuid; uuid=$(uuidgen)
-        local password; password=$(generate_random_password)
-        local config; local node_link;
+        echo ""
+        local tag_base="$country_code-$region_name-$custom_id"
+        local base_tag_for_protocol="$tag_base-$protocol"
+        local tag
+        tag=$(_get_unique_tag "$base_tag_for_protocol")
+        log_info "已为此节点分配唯一 Tag: $tag"
+        local uuid=$(uuidgen)
+        local password=$(generate_random_password)
+        local config=""
+        local node_link=""
         local current_port=${ports[$protocol]}
         local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
         local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-
         case $protocol in
-            "VLESS" | "VMess" | "Trojan")
-                local user_json="{\"uuid\":\"$uuid\"}"; [[ "$protocol" == "Trojan" ]] && user_json="{\"password\":\"$password\"}"
-                config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[${user_json}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-                case $protocol in
-                    "VLESS") node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_params[VLESS]}#$tag";;
-                    "VMess") vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_params[VMess]}}"; node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)";;
-                    "Trojan") node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_params[Trojan]}#$tag";;
-                esac
-                ;;
-            "Hysteria2")
-                config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-                node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${insecure_params[Hysteria2]}#$tag"
-                ;;
-            "TUIC")
-                config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-                node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${insecure_params[TUIC]}#$tag"
-                ;;
+        "VLESS" | "VMess" | "Trojan")
+            config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
+                [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
+            then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+            if [[ "$protocol" == "VLESS" ]]; then
+                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_param}#$tag"
+            elif [[ "$protocol" == "VMess" ]]; then
+                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${vmess_insecure_json_part}}"
+                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+            else
+                node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_param}#$tag"
+            fi
+            ;;
+        "Hysteria2")
+            config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
+            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${hy2_insecure_param}#$tag"
+            ;;
+        "TUIC")
+            config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
+            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${tuic_insecure_param}#$tag"
+            ;;
         esac
-
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
-            ((success_count++)); final_node_link="$node_link"
+            ((success_count++))
+            final_node_link="$node_link"
         fi
     done
-
-    # --- 结果处理 ---
     if [ "$success_count" -gt 0 ]; then
-        log_info "\n共成功添加 $success_count 个节点，正在重启 Sing-Box..."
-        systemctl restart sing-box; sleep 2
+        log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box
+        sleep 2
         if systemctl is-active --quiet sing-box; then
             log_info "Sing-Box 重启成功。"
-            if ! $is_one_click; then
-                 echo -e "\n✅ 节点添加成功！分享链接如下：\n$CYAN--------------------------------------------------------------$NC\n$YELLOW$final_node_link$NC\n$CYAN--------------------------------------------------------------$NC"
+            if [ "$success_count" -eq 1 ] && ! $is_one_click; then
+                echo ""
+                log_info "✅ 节点添加成功！分享链接如下："
+                echo -e "$CYAN--------------------------------------------------------------$NC"
+                echo -e "\n$YELLOW$final_node_link$NC\n"
+                echo -e "$CYAN--------------------------------------------------------------$NC"
+            else
+                log_info "正在跳转到节点管理页面..."
+                sleep 1
             fi
-            if [ "$cert_choice" == "2" ]; then
-                log_warn "\n重要提示：您使用了自签名证书，请根据客户端提示，勾选“允许不安全连接”或“跳过证书验证”选项。"
+
+            if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                for p in "${protocols_with_self_signed[@]}"; do
+                    if [[ "$p" == "VMess" ]]; then
+                        echo -e "\n${YELLOW}[VMess 节点]$NC"
+                        log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
+                        log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
+                    fi
+                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                        echo -e "\n${YELLOW}[$p 节点]$NC"
+                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                    fi
+                done
+                echo -e "\n$YELLOW==============================================================$NC"
             fi
-            if $is_one_click; then view_node_info; else post_add_node_menu; fi
+
+            if [ "$success_count" -gt 1 ] || $is_one_click; then
+                view_node_info
+            else
+                press_any_key
+            fi
+
         else
-            log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
+            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
             press_any_key
         fi
     else
@@ -2996,19 +3142,33 @@ main_menu() {
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $GREEN哪吒监控管理$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE应用安装$CYAN ─────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $GREEN搭建 WordPress (Docker)$NC                     $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. $GREEN通用网站反向代理配置$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. $GREEN安装 Traffmonetizer (Docker)$NC                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 搭建 WordPress (Docker)                     $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 通用网站反向代理配置                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. 安装 Traffmonetizer (Docker)                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE脚本管理$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. 更新此脚本                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  10. $YELLOW设置快捷命令 (默认: sv)$NC                     $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
         read -p "请输入选项: " choice
