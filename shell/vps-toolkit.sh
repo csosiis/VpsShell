@@ -328,6 +328,80 @@ install_3xui() {
     log_info "3X-ui 安装脚本执行完毕。"
     press_any_key
 }
+ui_panels_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN╟                                                  ╢$NC"
+        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
+        echo -e "$CYAN╟                                                  ╢$NC"
+        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
+        echo -e "$CYAN╟                                                  ╢$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+            1) install_sui; break ;;
+            2) install_3xui; break ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+# 函数: install_traffmonetizer
+# 说明: (新增) 安装 Traffmonetizer 容器，并根据输入的密令选择amd或arm架构。
+# =================================================
+install_traffmonetizer() {
+    log_info "开始部署 Traffmonetizer..."
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续部署 Traffmonetizer。"
+        press_any_key
+        return
+    fi
+
+    # 检查并移除已存在的同名容器
+    if docker ps -a --format '{{.Names}}' | grep -q "^tm$"; then
+        log_warn "检测到已存在的 Traffmonetizer 容器 (tm)，将停止并删除它以进行重新部署。"
+        docker stop tm >/dev/null 2>&1
+        docker rm tm >/dev/null 2>&1
+    fi
+
+    read -p "请输入部署密令 (amd/arm): " arch_choice
+
+    local docker_command=""
+    case "$arch_choice" in
+        amd)
+            log_info "选择 amd 架构，准备执行命令..."
+            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli_v2 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
+            ;;
+        arm)
+            log_info "选择 arm 架构，准备执行命令..."
+            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli:arm64v8 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
+            ;;
+        *)
+            log_error "无效的密令！请输入 'amd' 或 'arm'。"
+            press_any_key
+            return
+            ;;
+    esac
+
+    log_info "正在执行 Docker 命令..."
+    eval "$docker_command"
+
+    sleep 3
+    if docker ps --format '{{.Names}}' | grep -q "^tm$"; then
+        log_info "✅ Traffmonetizer 容器 (tm) 已成功启动！"
+        docker ps | grep "tm"
+    else
+        log_error "Traffmonetizer 容器启动失败！请使用 'docker logs tm' 查看错误日志。"
+    fi
+    press_any_key
+}
 is_singbox_installed() {
     if command -v sing-box &>/dev/null; then return 0; else return 1; fi
 }
@@ -2683,13 +2757,13 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 哪吒探针管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 安装 Traffmonetizer (Docker)                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 S-ui 面板                              $CYAN║$NC"
+         echo -e "$CYAN║$NC   6. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 搭建苹果CMS影视站 (Docker)                   $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 搭建苹果CMS影视站 (Docker)                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 搭建 WordPress (Docker)                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2711,8 +2785,8 @@ main_menu() {
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
         4) nezha_agent_menu ;;
-        5) install_sui ;;
-        6) install_3xui ;;
+        5) install_traffmonetizer ;;
+        6) ui_panels_menu ;;
         7) install_maccms ;;
         8) install_wordpress ;;
         9) setup_auto_reverse_proxy ;;
