@@ -3038,6 +3038,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC   7. 重置端口                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         printf "$CYAN║$NC   9. ${YELLOW}%-40s${NC}$CYAN            ║$NC\n" "$rp_menu_text"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
