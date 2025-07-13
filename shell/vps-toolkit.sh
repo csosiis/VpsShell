@@ -1447,10 +1447,10 @@ install_maccms() {
     db_root_password=${db_root_password:-$(generate_random_password)}
     log_info "数据库 root 密码已设置。"
     echo ""
-    read -s -p "请输入新的数据库 maccms_user 用户密码 (请使用不含特殊字符的密码) [默认使用随机强密码]: " db_user_password
+    read -s -p "请输入新的数据库 Jcole 用户密码 (请使用不含特殊字符的密码) [默认使用随机强密码]: " db_user_password
     echo ""
     db_user_password=${db_user_password:-$(generate_random_password 20)}
-    log_info "数据库用户 maccms_user 密码已设置。"
+    log_info "数据库用户 Jcole 密码已设置。"
     echo ""
 
     # 设置访问端口
@@ -1566,7 +1566,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: '$db_root_password'
       MYSQL_DATABASE: 'maccms'
-      MYSQL_USER: 'maccms_user'
+      MYSQL_USER: 'Jcole'
       MYSQL_PASSWORD: '$db_user_password'
     volumes:
       - db_data:/var/lib/mysql
@@ -2786,7 +2786,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   66. $YELLOW设置快捷命令 (默认: sv)$NC                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC    0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
