@@ -1396,7 +1396,7 @@ EOF
     press_any_key
 }
 # ==============================================================================
-# 新增功能：安装苹果CMS (Maccms)
+# 新增功能：安装苹果CMS (Maccms)  【修正版】
 # ==============================================================================
 install_maccms() {
     # 检查并安装 Docker 环境
@@ -1421,7 +1421,12 @@ install_maccms() {
         return
     fi
 
-    mkdir -p "$project_dir/nginx" "$project_dir/source/maccms10" || {
+    # 【修正一】：将下载地址指向一个官方的、更稳定的发行版
+    local MACCMS_V10_URL="https://github.com/magicblack/maccms10/archive/refs/tags/v1.0.2023.1000.3002.zip"
+    local MACCMS_ZIP_FILE="v1.0.2023.1000.3002.zip"
+    local MACCMS_EXTRACTED_DIR="maccms10-1.0.2023.1000.3002"
+
+    mkdir -p "$project_dir/nginx" "$project_dir/source" || {
         log_error "无法创建目录 $project_dir！请检查权限。"
         press_any_key
         return
@@ -1442,9 +1447,9 @@ install_maccms() {
     db_root_password=${db_root_password:-$(generate_random_password)}
     log_info "数据库 root 密码已设置。"
     echo ""
-    read -s -p "请输入新的数据库 maccms_user 用户密码 [默认使用随机强密码]: " db_user_password
+    read -s -p "请输入新的数据库 maccms_user 用户密码 (请使用不含特殊字符的密码) [默认使用随机强密码]: " db_user_password
     echo ""
-    db_user_password=${db_user_password:-$(generate_random_password)}
+    db_user_password=${db_user_password:-$(generate_random_password 20)}
     log_info "数据库用户 maccms_user 密码已设置。"
     echo ""
 
@@ -1462,19 +1467,22 @@ install_maccms() {
     echo ""
 
     # 下载并解压苹果CMS源码
-    local MACCMS_V10_URL="https://github.com/magicblack/maccms10/archive/refs/heads/master.zip"
-    log_info "正在从 GitHub 下载最新的苹果CMS V10 源码..."
-    if ! curl -L -o maccms.zip "${MACCMS_V10_URL}"; then
+    log_info "正在从 GitHub 下载苹果CMS V10 稳定版源码..."
+    if ! curl -L -o "${MACCMS_ZIP_FILE}" "${MACCMS_V10_URL}"; then
         log_error "下载苹果CMS失败！请检查网络或URL。"
         press_any_key
         return
     fi
     log_info "正在解压源码..."
-    unzip -q maccms.zip -d ./
+    unzip -q "${MACCMS_ZIP_FILE}" -d ./
     # 将解压后的文件夹内容移动到正确的源码目录
-    mv maccms10-master/* ./source/maccms10/
+    mv "${MACCMS_EXTRACTED_DIR}"/* ./source/
     # 清理临时文件和空目录
-    rm -rf maccms10-master maccms.zip
+    rm -rf "${MACCMS_EXTRACTED_DIR}" "${MACCMS_ZIP_FILE}"
+
+    # 【修正二】：增加权限设置步骤，这是解决502错误的关键！
+    log_info "正在设置源码目录权限..."
+    chown -R 82:82 ./source/
     log_info "✅ 苹果CMS源码准备就绪！"
     echo ""
 
@@ -1484,7 +1492,7 @@ install_maccms() {
 server {
     listen 80;
     server_name localhost;
-    root /var/www/html/maccms10;
+    root /var/www/html;
     index index.php index.html index.htm;
 
     access_log /var/log/nginx/access.log;
@@ -1545,6 +1553,9 @@ services:
       - 9000
     depends_on:
       - db
+    # 【修正三】：增加AppArmor豁免配置，解决潜在的系统安全策略问题
+    security_opt:
+      - "apparmor:unconfined"
     networks:
       - maccms_net
 
