@@ -1396,10 +1396,11 @@ EOF
     press_any_key
 }
 # ==============================================================================
-# 安装苹果CMS (Maccms)  【最终稳定版 - 修复下载及ARM兼容性】
+# 安装苹果CMS (Maccms)  【最终Git版 - 修复下载及ARM兼容性】
 # ==============================================================================
 install_maccms() {
-    # 检查并安装 Docker 环境
+    # 检查并安装 Docker 和 Git 环境
+    ensure_dependencies "git"
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
         press_any_key
@@ -1421,12 +1422,7 @@ install_maccms() {
         return
     fi
 
-    # 【修正一】：使用GitHub代理地址，提高下载成功率
-    local MACCMS_V10_URL="https://github.com/magicblack/maccms10/archive/refs/tags/v1.0.2023.1000.3002.zip"
-    local MACCMS_ZIP_FILE="v1.0.2023.1000.3002.zip"
-    local MACCMS_EXTRACTED_DIR="maccms10-1.0.2023.1000.3002"
-
-    mkdir -p "$project_dir/nginx" "$project_dir/source" || {
+    mkdir -p "$project_dir/nginx" || {
         log_error "无法创建目录 $project_dir！请检查权限。"
         press_any_key
         return
@@ -1466,23 +1462,16 @@ install_maccms() {
     done
     echo ""
 
-    # 下载并解压苹果CMS源码
-    log_info "正在从 GitHub 下载苹果CMS V10 稳定版源码..."
-    # 【修正二】：增加严格的下载失败检查
-    if ! curl -L -o "${MACCMS_ZIP_FILE}" "${MACCMS_V10_URL}"; then
-        log_error "下载苹果CMS失败！请检查网络或更换脚本中的下载代理地址。"
+    # 【修正】：使用 git clone 代替 curl 下载
+    log_info "正在使用 git clone 克隆苹果CMS V10 稳定版源码..."
+    local MACCMS_GIT_URL="https://github.com/magicblack/maccms10.git"
+    local MACCMS_TAG="v1.0.2023.1000.3002"
+
+    if ! git clone --depth 1 --branch "${MACCMS_TAG}" "${MACCMS_GIT_URL}" ./source; then
+        log_error "使用 git clone 克隆源码失败！请检查您的网络连接或git是否能正常工作。"
         press_any_key
         return
     fi
-    log_info "正在解压源码..."
-    unzip -q "${MACCMS_ZIP_FILE}" -d ./
-    if [ $? -ne 0 ]; then
-        log_error "解压文件失败！可能是下载的文件不完整。"
-        press_any_key
-        return
-    fi
-    mv "${MACCMS_EXTRACTED_DIR}"/* ./source/
-    rm -rf "${MACCMS_EXTRACTED_DIR}" "${MACCMS_ZIP_FILE}"
 
     # 设置权限
     log_info "正在设置源码目录权限..."
