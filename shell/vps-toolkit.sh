@@ -1422,7 +1422,7 @@ install_maccms() {
     fi
 
     # 【修正一】：使用GitHub代理地址，提高下载成功率
-    local MACCMS_V10_URL="https://ghproxy.com/https://github.com/magicblack/maccms10/archive/refs/tags/v1.0.2023.1000.3002.zip"
+    local MACCMS_V10_URL="https://github.com/magicblack/maccms10/archive/refs/tags/v1.0.2023.1000.3002.zip"
     local MACCMS_ZIP_FILE="v1.0.2023.1000.3002.zip"
     local MACCMS_EXTRACTED_DIR="maccms10-1.0.2023.1000.3002"
 
