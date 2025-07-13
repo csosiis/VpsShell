@@ -1456,7 +1456,169 @@ install_maccms() {
     # 设置访问端口
     local maccms_port
     while true; do
-        read -p "请输入苹果CMS的外部访问端口 [默认: 8
+        read -p "请输入苹果CMS的外部访问端口 [默认: 8880]: " maccms_port
+        maccms_port=${maccms_port:-"8880"}
+        if [[ ! "$maccms_port" =~ ^[0-9]+$ ]] || [ "$maccms_port" -lt 1 ] || [ "$maccms_port" -gt 65535 ]; then
+            log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! _is_port_available "$maccms_port" "used_ports_for_this_run"; then
+            :
+        else break; fi
+    done
+    echo ""
+
+    # 下载并解压苹果CMS源码
+    log_info "正在从 GitHub 下载苹果CMS V10 稳定版源码..."
+    # 【修正二】：增加严格的下载失败检查
+    if ! curl -L -o "${MACCMS_ZIP_FILE}" "${MACCMS_V10_URL}"; then
+        log_error "下载苹果CMS失败！请检查网络或更换脚本中的下载代理地址。"
+        press_any_key
+        return
+    fi
+    log_info "正在解压源码..."
+    unzip -q "${MACCMS_ZIP_FILE}" -d ./
+    if [ $? -ne 0 ]; then
+        log_error "解压文件失败！可能是下载的文件不完整。"
+        press_any_key
+        return
+    fi
+    mv "${MACCMS_EXTRACTED_DIR}"/* ./source/
+    rm -rf "${MACCMS_EXTRACTED_DIR}" "${MACCMS_ZIP_FILE}"
+
+    # 设置权限
+    log_info "正在设置源码目录权限..."
+    chown -R 82:82 ./source/
+    log_info "✅ 苹果CMS源码准备就绪！"
+    echo ""
+
+    # 生成 Nginx 配置文件
+    log_info "正在生成 nginx/default.conf..."
+    cat >nginx/default.conf <<'EOF'
+server {
+    listen 80;
+    server_name localhost;
+    root /var/www/html;
+    index index.php index.html index.htm;
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+    location / {
+        if (!-e $request_filename) {
+            rewrite ^/index.php(.*)$ /index.php?s=$1 last;
+            rewrite ^/admin.php(.*)$ /admin.php?s=$1 last;
+            rewrite ^/api.php(.*)$ /api.php?s=$1 last;
+            rewrite ^(.*)$ /index.php?s=$1 last;
+            break;
+        }
+    }
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_pass   php:9000;
+        fastcgi_index  index.php;
+        fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include        fastcgi_params;
+    }
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+    # 生成 docker-compose.yml 文件
+    log_info "正在生成 docker-compose.yml..."
+    cat >docker-compose.yml <<EOF
+version: '3.8'
+services:
+  nginx:
+    image: nginx:1.21-alpine
+    container_name: ${project_dir##*/}_nginx
+    ports:
+      - "$maccms_port:80"
+    volumes:
+      - ./source:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx_logs:/var/log/nginx
+    depends_on:
+      - php
+    restart: always
+    networks:
+      - maccms_net
+  php:
+    image: php:7.4-fpm
+    container_name: ${project_dir##*/}_php
+    volumes:
+      - ./source:/var/www/html
+    restart: always
+    expose:
+      - 9000
+    depends_on:
+      - db
+    security_opt:
+      - "apparmor:unconfined"
+    networks:
+      - maccms_net
+  db:
+    image: mariadb:10.6
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: '$db_root_password'
+      MYSQL_DATABASE: 'maccms'
+      MYSQL_USER: 'maccms_user'
+      MYSQL_PASSWORD: '$db_user_password'
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - maccms_net
+networks:
+  maccms_net:
+    driver: bridge
+volumes:
+  db_data:
+  nginx_logs:
+EOF
+    if [ ! -f "docker-compose.yml" ]; then
+        log_error "docker-compose.yml 文件创建失败！"
+        press_any_key
+        return
+    fi
+    echo ""
+
+    log_info "正在使用 Docker Compose 启动苹果CMS服务..."
+    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
+    docker compose up -d
+    echo ""
+    log_info "正在检查服务状态..."
+    sleep 5
+    if ! docker compose ps | grep -q "running"; then
+        log_error "容器未能成功启动！请检查上面的日志输出。"
+        log_info "您可以使用 'docker logs <容器名>' 来查看具体错误。"
+        press_any_key
+        return
+    fi
+    docker compose ps
+    echo ""
+    log_info "✅ 苹果CMS 容器已成功启动！"
+    echo ""
+
+    local ipv4_addr
+    ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+
+    clear
+    log_info "==================== 安装向导 ===================="
+    log_info "请立即访问以下地址，在浏览器中完成最后的安装步骤："
+    if [ -n "$ipv4_addr" ]; then
+        echo -e "$YELLOW    http://$ipv4_addr:$maccms_port/install.php$NC"
+    else
+        log_warn "未能获取到公网IPv4地址，请使用您的服务器IP访问。"
+    fi
+    echo ""
+    log_warn "在安装页面的数据库配置环节，请务必使用以下信息："
+    echo -e "$GREEN  数据库主机: db$NC"
+    echo -e "$GREEN  数据库名称: maccms$NC"
+    echo -e "$GREEN  数据库用户: maccms_user$NC"
+    echo -e "$GREEN  数据库密码: $db_user_password$NC (您刚才设置的密码)"
+    echo "===================================================="
+    press_any_key
+}
 substore_manage_menu() {
     while true; do
         clear
