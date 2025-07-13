@@ -2786,7 +2786,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   66. $YELLOW设置快捷命令 (默认: sv)$NC                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC    0. $RED退出脚本$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC    0. $RED退出脚本$NC                                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
