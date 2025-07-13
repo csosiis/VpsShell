@@ -1411,6 +1411,20 @@ install_maccms() {
     log_info "开始使用 Docker Compose 搭建苹果CMS影视站..."
     echo ""
 
+    # 检测架构
+    local arch
+    arch=$(uname -m)
+    if [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+        PHP_IMAGE="arm64v8/php:7.4-fpm"
+        MARIADB_IMAGE="arm64v8/mariadb:10.6"
+        NGINX_IMAGE="arm64v8/nginx:1.21-alpine"
+    else
+        PHP_IMAGE="php:7.4-fpm"
+        MARIADB_IMAGE="mariadb:10.6"
+        NGINX_IMAGE="nginx:1.21-alpine"
+    fi
+    log_info "已检测到架构: $arch, 将使用镜像: $PHP_IMAGE, $MARIADB_IMAGE, $NGINX_IMAGE"
+
     # 获取项目目录
     local project_dir
     read -p "请输入新苹果CMS项目的安装目录 [默认: /root/maccms]: " project_dir
@@ -1463,20 +1477,16 @@ install_maccms() {
     echo ""
 
     # 使用 git clone 两步法
-    log_info "正在使用 git clone 克隆苹果CMS V10 源码 (两步法)..."
+    log_info "正在使用 git clone 克隆苹果CMS V10 源码..."
     local MACCMS_GIT_URL="https://github.com/magicblack/maccms10.git"
     local MACCMS_TAG="v2024.1000.4049"
 
-    log_info "第一步：克隆主项目..."
     if ! git clone "${MACCMS_GIT_URL}" ./source; then
-        log_error "Git 克隆失败！请检查您的网络。"
+        log_error "Git 克隆失败！请检查网络。"
         press_any_key
         return
     fi
-
     cd ./source || return
-    log_info "第二步：检出 (checkout) 稳定版 ${MACCMS_TAG}..."
-    # 【终极修正】：使用 -b 参数，基于标签创建新分支，这是最稳健的方式
     if ! git checkout -b temp-branch "${MACCMS_TAG}"; then
         log_error "Git 检出稳定版标签失败！"
         cd ..
@@ -1484,15 +1494,11 @@ install_maccms() {
         return
     fi
     cd ..
-
-    # 设置权限
-    log_info "正在设置源码目录权限..."
     chown -R 82:82 ./source/
     log_info "✅ 苹果CMS源码准备就绪！"
     echo ""
 
-    # 生成 Nginx 配置文件
-    log_info "正在生成 nginx/default.conf..."
+    # Nginx 配置
     cat >nginx/default.conf <<'EOF'
 server {
     listen 80;
@@ -1523,13 +1529,12 @@ server {
 }
 EOF
 
-    # 生成 docker-compose.yml 文件
-    log_info "正在生成 docker-compose.yml..."
+    # 生成 docker-compose.yml
     cat >docker-compose.yml <<EOF
 version: '3.8'
 services:
   nginx:
-    image: nginx:1.21-alpine
+    image: $NGINX_IMAGE
     container_name: ${project_dir##*/}_nginx
     ports:
       - "$maccms_port:80"
@@ -1543,7 +1548,7 @@ services:
     networks:
       - maccms_net
   php:
-    image: php:7.4-fpm
+    image: $PHP_IMAGE
     container_name: ${project_dir##*/}_php
     volumes:
       - ./source:/var/www/html
@@ -1552,12 +1557,10 @@ services:
       - 9000
     depends_on:
       - db
-    security_opt:
-      - "apparmor:unconfined"
     networks:
       - maccms_net
   db:
-    image: mariadb:10.6
+    image: $MARIADB_IMAGE
     container_name: ${project_dir##*/}_db
     restart: always
     environment:
@@ -1576,50 +1579,15 @@ volumes:
   db_data:
   nginx_logs:
 EOF
-    if [ ! -f "docker-compose.yml" ]; then
-        log_error "docker-compose.yml 文件创建失败！"
-        press_any_key
-        return
-    fi
-    echo ""
 
     log_info "正在使用 Docker Compose 启动苹果CMS服务..."
-    log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
     docker compose up -d
-    echo ""
-    log_info "正在检查服务状态..."
     sleep 5
-    if ! docker compose ps | grep -q "running"; then
-        log_error "容器未能成功启动！请检查上面的日志输出。"
-        log_info "您可以使用 'docker logs <容器名>' 来查看具体错误。"
-        press_any_key
-        return
-    fi
     docker compose ps
-    echo ""
-    log_info "✅ 苹果CMS 容器已成功启动！"
-    echo ""
-
-    local ipv4_addr
-    ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-
-    clear
-    log_info "==================== 安装向导 ===================="
-    log_info "请立即访问以下地址，在浏览器中完成最后的安装步骤："
-    if [ -n "$ipv4_addr" ]; then
-        echo -e "$YELLOW    http://$ipv4_addr:$maccms_port/install.php$NC"
-    else
-        log_warn "未能获取到公网IPv4地址，请使用您的服务器IP访问。"
-    fi
-    echo ""
-    log_warn "在安装页面的数据库配置环节，请务必使用以下信息："
-    echo -e "$GREEN  数据库主机: db$NC"
-    echo -e "$GREEN  数据库名称: maccms$NC"
-    echo -e "$GREEN  数据库用户: maccms_user$NC"
-    echo -e "$GREEN  数据库密码: $db_user_password$NC (您刚才设置的密码)"
-    echo "===================================================="
+    log_info "✅ 苹果CMS 安装完成，您可以通过以下地址访问: http://<服务器IP>:$maccms_port"
     press_any_key
 }
+
 substore_manage_menu() {
     while true; do
         clear
