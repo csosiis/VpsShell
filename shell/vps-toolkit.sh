@@ -1396,7 +1396,7 @@ EOF
     press_any_key
 }
 # ==============================================================================
-# 安装苹果CMS (Maccms)  【最终Git版 - 修复下载及ARM兼容性】
+# 安装苹果CMS (Maccms)  【最终 Git 检出修正版】
 # ==============================================================================
 install_maccms() {
     # 检查并安装 Docker 和 Git 环境
@@ -1462,16 +1462,28 @@ install_maccms() {
     done
     echo ""
 
-    # 【修正】：使用 git clone 代替 curl 下载
-    log_info "正在使用 git clone 克隆苹果CMS V10 稳定版源码..."
+    # 使用 git clone 两步法
+    log_info "正在使用 git clone 克隆苹果CMS V10 源码 (两步法)..."
     local MACCMS_GIT_URL="https://github.com/magicblack/maccms10.git"
-    local MACCMS_TAG="v1.0.2023.1000.3002"
+    local MACCMS_TAG="v2024.1000.4049"
 
-    if ! git clone --depth 1 --branch "${MACCMS_TAG}" "${MACCMS_GIT_URL}" ./source; then
-        log_error "使用 git clone 克隆源码失败！请检查您的网络连接或git是否能正常工作。"
+    log_info "第一步：克隆主项目..."
+    if ! git clone "${MACCMS_GIT_URL}" ./source; then
+        log_error "Git 克隆失败！请检查您的网络。"
         press_any_key
         return
     fi
+
+    cd ./source || return
+    log_info "第二步：检出 (checkout) 稳定版 ${MACCMS_TAG}..."
+    # 【终极修正】：使用 -b 参数，基于标签创建新分支，这是最稳健的方式
+    if ! git checkout -b temp-branch "${MACCMS_TAG}"; then
+        log_error "Git 检出稳定版标签失败！"
+        cd ..
+        press_any_key
+        return
+    fi
+    cd ..
 
     # 设置权限
     log_info "正在设置源码目录权限..."
