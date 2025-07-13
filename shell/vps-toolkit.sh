@@ -80,20 +80,33 @@ ensure_dependencies() {
     done
     if [ ${#missing_dependencies[@]} -gt 0 ]; then
         log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表并开始安装..."
-        set -e
-        apt-get update -y
+        log_info "正在更新软件包列表..."
+        if ! apt-get update -y; then
+            log_error "软件包列表更新失败，请检查网络或源配置！"
+            return 1
+        fi
+        local install_fail=0
         for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装 $pkg..."
-            apt-get install -y "$pkg"
+            log_info "正在安装依赖包: $pkg ..."
+            if ! apt-get install -y "$pkg"; then
+                log_error "依赖包 $pkg 安装失败！"
+                install_fail=1
+            fi
         done
-        set +e
-        log_info "按需依赖已安装完毕。"
+        if [ "$install_fail" -eq 0 ]; then
+            log_info "所有依赖包安装完成。"
+            return 0
+        else
+            log_error "部分依赖包安装失败，请手动检查。"
+            return 1
+        fi
     else
         log_info "所需依赖均已安装。"
+        return 0
     fi
     echo ""
 }
+
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
@@ -1395,118 +1408,104 @@ EOF
     fi
     press_any_key
 }
-# ==============================================================================
-# 安装苹果CMS (Maccms)  【最终 Git 检出修正版】
-# ==============================================================================
+get_latest_maccms_tag() {
+    local repo_api="https://api.github.com/repos/magicblack/maccms10/tags"
+    # 取第一个标签名
+    local latest_tag
+    latest_tag=$(curl -s "$repo_api" | grep -Po '"name":.*?[^\\]",' | head -1 | awk -F'"' '{print $4}')
+    echo "$latest_tag"
+}
+download_maccms_source() {
+    local version=$1
+    local url="https://github.com/magicblack/maccms10/archive/refs/tags/${version}.zip"
+    log_info "开始下载苹果CMS源码压缩包，版本: $version"
+    if ! curl -L -o source.zip "$url"; then
+        log_error "源码压缩包下载失败！请检查网络连接。"
+        return 1
+    fi
+    # 判断文件是否为zip格式
+    if ! file source.zip | grep -q "Zip archive data"; then
+        log_error "下载的文件不是有效的zip压缩包，可能下载失败或版本号错误！"
+        return 1
+    fi
+    log_info "源码压缩包下载并校验通过。"
+    return 0
+}
+
 install_maccms() {
-    # 检查并安装 Docker 和 Git 环境
-    ensure_dependencies "git"
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
-        press_any_key
-        return
-    fi
-
-    clear
-    log_info "开始使用 Docker Compose 搭建苹果CMS影视站..."
     echo ""
+    log_info "开始安装苹果CMS"
 
-    # 检测架构
-    local arch
-    arch=$(uname -m)
-    if [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
-        PHP_IMAGE="arm64v8/php:7.4-fpm"
-        MARIADB_IMAGE="arm64v8/mariadb:10.6"
-        NGINX_IMAGE="arm64v8/nginx:1.21-alpine"
-    else
-        PHP_IMAGE="php:7.4-fpm"
-        MARIADB_IMAGE="mariadb:10.6"
-        NGINX_IMAGE="nginx:1.21-alpine"
-    fi
-    log_info "已检测到架构: $arch, 将使用镜像: $PHP_IMAGE, $MARIADB_IMAGE, $NGINX_IMAGE"
-
-    # 获取项目目录
+    # 输入安装目录
     local project_dir
-    read -p "请输入新苹果CMS项目的安装目录 [默认: /root/maccms]: " project_dir
+    read -p "请输入安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
+
+    # 如果已存在 docker-compose.yml，警告用户
     if [ -f "$project_dir/docker-compose.yml" ]; then
-        log_error "错误：目录 \"$project_dir\" 下似乎已存在一个站点！"
-        log_warn "请为新的站点选择一个不同的、全新的目录。"
+        log_warn "检测到安装目录已存在 Docker 项目，请选择其他目录或先卸载。"
         press_any_key
-        return
+        return 1
     fi
 
-    mkdir -p "$project_dir/nginx" || {
-        log_error "无法创建目录 $project_dir！请检查权限。"
-        press_any_key
-        return
-    }
-    cd "$project_dir" || {
-        log_error "无法进入目录 $project_dir！"
-        press_any_key
-        return
-    }
-    log_info "新的苹果CMS将被安装在: $(pwd)"
-    echo ""
-
-    # 设置数据库密码
-    local db_root_password
-    local db_user_password
-    read -s -p "请输入新的数据库 root 密码 [默认使用随机强密码]: " db_root_password
+    # 输入数据库密码
+    local db_root_password db_user_password
+    read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password
     echo ""
     db_root_password=${db_root_password:-$(generate_random_password)}
-    log_info "数据库 root 密码已设置。"
-    echo ""
-    read -s -p "请输入新的数据库 maccms_user 用户密码 (请使用不含特殊字符的密码) [默认使用随机强密码]: " db_user_password
+
+    read -s -p "请输入 maccms_user 用户密码 [默认随机]: " db_user_password
     echo ""
     db_user_password=${db_user_password:-$(generate_random_password 20)}
-    log_info "数据库用户 maccms_user 密码已设置。"
-    echo ""
 
-    # 设置访问端口
-    local maccms_port
-    while true; do
-        read -p "请输入苹果CMS的外部访问端口 [默认: 8880]: " maccms_port
-        maccms_port=${maccms_port:-"8880"}
-        if [[ ! "$maccms_port" =~ ^[0-9]+$ ]] || [ "$maccms_port" -lt 1 ] || [ "$maccms_port" -gt 65535 ]; then
-            log_error "端口号必须是 1-65535 之间的数字。"
-        elif ! _is_port_available "$maccms_port" "used_ports_for_this_run"; then
-            :
-        else break; fi
-    done
-    echo ""
+    # 其它信息
+    local db_name="maccms"
+    local db_user="maccms_user"
+    local db_port="3306"
+    local web_port
+    read -p "请输入外部访问端口 [默认: 8880]: " web_port
+    web_port=${web_port:-"8880"}
 
-    # 使用 git clone 两步法
-    log_info "正在使用 git clone 克隆苹果CMS V10 源码..."
-    local MACCMS_GIT_URL="https://github.com/magicblack/maccms10.git"
-    local MACCMS_TAG="v2024.1000.4049"
+    # 创建项目结构
+    mkdir -p "$project_dir/nginx" "$project_dir/source"
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    if ! git clone "${MACCMS_GIT_URL}" ./source; then
-        log_error "Git 克隆失败！请检查网络。"
+    # 获取最新 tag
+    local maccms_version
+    maccms_version=$(curl -s https://api.github.com/repos/magicblack/maccms10/tags | grep -Po '"name":.*?[^\\]",' | head -1 | awk -F'"' '{print $4}')
+    if [ -z "$maccms_version" ]; then
+        log_error "获取 maccms 版本失败"
         press_any_key
-        return
+        return 1
     fi
-    cd ./source || return
-    if ! git checkout -b temp-branch "${MACCMS_TAG}"; then
-        log_error "Git 检出稳定版标签失败！"
-        cd ..
-        press_any_key
-        return
-    fi
-    cd ..
-    chown -R 82:82 ./source/
-    log_info "✅ 苹果CMS源码准备就绪！"
-    echo ""
+    log_info "获取到最新版标签: $maccms_version"
 
-    # Nginx 配置
-    cat >nginx/default.conf <<'EOF'
+    # 下载并解压
+    local zip_url="https://github.com/magicblack/maccms10/archive/refs/tags/${maccms_version}.zip"
+    log_info "开始下载..."
+    curl -L -o source.zip "$zip_url" || { log_error "下载失败"; return 1; }
+    unzip -q source.zip || { log_error "解压失败"; return 1; }
+    rm -f source.zip
+
+    local dir="maccms10-${maccms_version#v}"
+    if [ ! -d "$dir" ]; then
+        log_error "解压后目录不存在"
+        return 1
+    fi
+
+    mv "$dir"/* "$project_dir/source/"
+    mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
+    rm -rf "$dir"
+
+    chown -R 82:82 "$project_dir/source"
+
+    # 生成 nginx 配置
+    cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
     listen 80;
     server_name localhost;
     root /var/www/html;
     index index.php index.html index.htm;
-    access_log /var/log/nginx/access.log;
-    error_log /var/log/nginx/error.log;
     location / {
         if (!-e $request_filename) {
             rewrite ^/index.php(.*)$ /index.php?s=$1 last;
@@ -1530,63 +1529,111 @@ server {
 EOF
 
     # 生成 docker-compose.yml
-    cat >docker-compose.yml <<EOF
-version: '3.8'
+    cat >"$project_dir/docker-compose.yml" <<EOF
 services:
-  nginx:
-    image: $NGINX_IMAGE
-    container_name: ${project_dir##*/}_nginx
-    ports:
-      - "$maccms_port:80"
-    volumes:
-      - ./source:/var/www/html
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-      - ./nginx_logs:/var/log/nginx
-    depends_on:
-      - php
+  db:
+    image: mariadb:10.6
+    container_name: ${project_dir##*/}_db
     restart: always
-    networks:
-      - maccms_net
+    environment:
+      MYSQL_ROOT_PASSWORD: "$db_root_password"
+      MYSQL_DATABASE: "$db_name"
+      MYSQL_USER: "$db_user"
+      MYSQL_PASSWORD: "$db_user_password"
+    volumes:
+      - db_data:/var/lib/mysql
+
   php:
-    image: $PHP_IMAGE
+    image: php:7.4-fpm
     container_name: ${project_dir##*/}_php
     volumes:
       - ./source:/var/www/html
     restart: always
-    expose:
-      - 9000
     depends_on:
       - db
-    networks:
-      - maccms_net
-  db:
-    image: $MARIADB_IMAGE
-    container_name: ${project_dir##*/}_db
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: '$db_root_password'
-      MYSQL_DATABASE: 'maccms'
-      MYSQL_USER: 'maccms_user'
-      MYSQL_PASSWORD: '$db_user_password'
+
+  nginx:
+    image: nginx:1.21-alpine
+    container_name: ${project_dir##*/}_nginx
+    ports:
+      - "$web_port:80"
     volumes:
-      - db_data:/var/lib/mysql
-    networks:
-      - maccms_net
-networks:
-  maccms_net:
-    driver: bridge
+      - ./source:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    restart: always
+    depends_on:
+      - php
+
 volumes:
   db_data:
-  nginx_logs:
 EOF
 
-    log_info "正在使用 Docker Compose 启动苹果CMS服务..."
+    # 启动服务
+    log_info "正在启动服务..."
     docker compose up -d
     sleep 5
     docker compose ps
-    log_info "✅ 苹果CMS 安装完成，您可以通过以下地址访问: http://<服务器IP>:$maccms_port"
+
+    log_info "正在修复文件权限..."
+    docker exec -i ${project_dir##*/}_php chown -R www-data:www-data /var/www/html
+    docker exec -i ${project_dir##*/}_php chmod -R 777 /var/www/html/runtime
+    docker exec -i ${project_dir##*/}_php chmod 666 /var/www/html/application/database.php || true
+
+    # 写入数据库配置文件
+    log_info "正在写入数据库配置文件..."
+    docker exec -i ${project_dir##*/}_php bash -c "cat > /var/www/html/application/database.php <<EOF
+<?php
+return [
+    // 数据库配置
+    'type'     => 'mysql',
+    'hostname' => 'db',
+    'database' => '$db_name',
+    'username' => '$db_user',
+    'password' => '$db_user_password',
+    'hostport' => '$db_port',
+    'charset'  => 'utf8mb4',
+    'prefix'   => 'mac_',
+];
+EOF
+"
+
+    # 输出连接信息
+    echo ""
+    log_info "✅ 安装完成，信息如下："
+    echo "--------------------------------------------"
+    echo "网站地址: http://<服务器IP>:$web_port"
+    echo ""
+    echo "数据库信息："
+    echo "  主机: db"
+    echo "  端口: $db_port"
+    echo "  数据库: $db_name"
+    echo "  用户: $db_user"
+    echo "  用户密码: $db_user_password"
+    echo "  Root密码: $db_root_password"
+    echo "--------------------------------------------"
     press_any_key
 }
+
+
+# 卸载函数
+uninstall_maccms() {
+    local project_dir
+    read -p "请输入苹果CMS安装目录 [默认: /root/maccms]: " project_dir
+    project_dir=${project_dir:-"/root/maccms"}
+
+    echo "停止并移除容器..."
+    docker compose -f "$project_dir/docker-compose.yml" down
+
+    echo "删除网络卷（如果有）..."
+    docker volume rm $(docker volume ls -q | grep "${project_dir##*/}") 2>/dev/null || true
+
+    echo "删除目录 $project_dir ..."
+    rm -rf "$project_dir"
+
+    log_info "卸载完成。"
+    press_any_key
+}
+
 
 substore_manage_menu() {
     while true; do
@@ -2496,6 +2543,8 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   11. $GREEN卸载Maccms$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   99. $GREEN更新此脚本$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   66. $YELLOW设置快捷命令 (默认: sv)$NC                    $CYAN║$NC"
@@ -2515,6 +2564,7 @@ main_menu() {
         7) install_maccms ;;
         8) install_wordpress ;;
         9) setup_auto_reverse_proxy ;;
+        11) uninstall_maccms ;;
         99) do_update_script ;;
         66) setup_shortcut ;;
         0) exit 0 ;;
