@@ -2753,26 +2753,44 @@ setup_auto_reverse_proxy() {
     else
         log_info "将代理到预设的本地端口: $local_port"
     fi
-    if command -v caddy &>/dev/null; then
-        _configure_caddy_proxy "$domain_input" "$local_port"
-    elif command -v nginx &>/dev/null; then
+
+    # --- 逻辑顺序已修改：Nginx 优先 ---
+
+    # 1. 首先检查 Nginx
+    if command -v nginx &>/dev/null; then
+        log_info "检测到 Nginx，将使用 Nginx 进行反代。"
+        # 确保 Nginx 相关的依赖已安装
+        ensure_dependencies "python3-certbot-nginx"
         if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             press_any_key
-            return
+            return 1
         fi
         _configure_nginx_proxy "$domain_input" "$local_port"
-    elif command -v apache2 &>/dev/null; then
-        log_error "Apache 自动配置暂未实现。"
+
+    # 2. 如果没有 Nginx，再检查 Caddy
+    elif command -v caddy &>/dev/null; then
+        log_info "未检测到 Nginx，但检测到 Caddy，将使用 Caddy 进行反代。"
+        _configure_caddy_proxy "$domain_input" "$local_port"
+
+    # 3. 如果两者都没有，默认安装 Nginx
     else
-        log_warn "未检测到任何 Web 服务器。将为您自动安装 Caddy..."
-        ensure_dependencies "caddy"
-        if command -v caddy &>/dev/null; then
-            _configure_caddy_proxy "$domain_input" "$local_port"
+        log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx 和 Certbot..."
+        ensure_dependencies "nginx" "python3-certbot-nginx"
+        if command -v nginx &>/dev/null; then
+            log_info "Nginx 安装成功，继续配置..."
+            if ! apply_ssl_certificate "$domain_input"; then
+                log_error "证书处理失败，无法继续配置 Nginx 反代。"
+                press_any_key
+                return 1
+            fi
+            _configure_nginx_proxy "$domain_input" "$local_port"
         else
-            log_error "Caddy 安装失败，无法继续。"
+            log_error "Nginx 安装失败，无法继续。"
+            return 1
         fi
     fi
+
     if [ -z "$1" ]; then
         press_any_key
     fi
