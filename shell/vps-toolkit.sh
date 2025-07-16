@@ -51,7 +51,7 @@ _fetch_geo_info() {
     if [ -n "$GEO_INFO_JSON" ]; then
         return
     fi
-    log_info "首次查询，正在获取公网 IP 及地理信息..."
+    log_info "首次查询，正在获取公网 IP 及地理信息...\n"
     GEO_INFO_JSON=$(curl -s -m 8 http://ip-api.com/json)
     PUBLIC_IPV4=$(echo "$GEO_INFO_JSON" | jq -r '.query')
     # 可以用同样的方式缓存其他信息，如城市、国家等
@@ -1161,18 +1161,12 @@ singbox_do_uninstall() {
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
-# =================================================
-# 函数: substore_setup_reverse_proxy
-# 说明: (新增) 为 Sub-Store 专门设置反向代理
-# =================================================
 substore_setup_reverse_proxy() {
     if ! is_substore_installed; then
         log_error "Sub-Store 尚未安装，无法设置反向代理。"
         press_any_key
         return
     fi
-
-    ensure_dependencies "curl" "nginx" "caddy" "certbot" "python3-certbot-nginx"
 
     echo ""
     local domain
@@ -1187,7 +1181,6 @@ substore_setup_reverse_proxy() {
         fi
     done
 
-    # 从服务文件中自动获取前端端口
     local frontend_port
     frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
 
@@ -1201,20 +1194,16 @@ substore_setup_reverse_proxy() {
     log_info "即将为域名 $domain 设置到本地端口 $frontend_port 的反向代理..."
     echo ""
 
-    # 调用通用的反代设置函数
     if ! setup_auto_reverse_proxy "$domain" "$frontend_port"; then
         log_error "自动反向代理设置失败。"
         press_any_key
         return
     fi
 
-    # 关键：将域名写回服务文件，以便 Sub-Store 自身知晓其公共访问地址
     log_info "正在将反代域名更新到 Sub-Store 服务配置中..."
 
-    # 先删除可能存在的旧配置行
     sed -i '/SUB_STORE_REVERSE_PROXY_DOMAIN=/d' "$SUBSTORE_SERVICE_FILE"
 
-    # 在指定行后添加新配置
     local site_url="https://$domain"
     sed -i "/SUB_STORE_BACKEND_API_PORT=/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=${site_url}\"" "$SUBSTORE_SERVICE_FILE"
 
@@ -1225,7 +1214,12 @@ substore_setup_reverse_proxy() {
     sleep 3
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ Sub-Store 服务重启成功！"
-        log_info "现在您应该可以通过 https://$domain 访问您的 Sub-Store 了。"
+
+        # --- 关键修改点 ---
+        # 不再显示简单的成功信息，而是直接调用显示详细链接的函数
+        echo ""
+        substore_view_access_link
+
     else
         log_error "Sub-Store 服务重启失败！请使用日志功能检查问题。"
     fi
@@ -1733,10 +1727,6 @@ uninstall_maccms() {
     log_info "卸载完成。"
     press_any_key
 }
-
-# =================================================
-# 补全: Sub-Store 管理相关函数
-# =================================================
 substore_view_access_link() {
     if ! is_substore_installed; then
         log_error "Sub-Store 未安装。"
@@ -1747,13 +1737,11 @@ substore_view_access_link() {
     local frontend_port api_key rp_domain ipv4_addr base_url api_url final_link
 
     frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
-
-    # --- 修正点在这里 ---
-    # 使用 [^"]* 代替 .*，意为“匹配所有非双引号的字符”，从而精确地提取出 API 密钥
     api_key=$(grep -oP 'SUB_STORE_FRONTEND_BACKEND_PATH=/\K[^"]*' "$SUBSTORE_SERVICE_FILE")
 
-    # 从服务文件中干净地提取出反代域名 (例如: https://your.domain)
-    rp_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2- | tr -d '"')
+    # --- 关键修正点 ---
+    # 使用更精确的 grep -oP 命令，确保只提取出 URL，不再包含变量名
+    rp_domain=$(grep -oP 'SUB_STORE_REVERSE_PROXY_DOMAIN=\K[^"]*' "$SUBSTORE_SERVICE_FILE")
 
     echo -e "$CYAN---------- Sub-Store 访问信息 ----------$NC\n"
 
@@ -1765,15 +1753,12 @@ substore_view_access_link() {
         # 按照您的要求拼接最终的客户端链接
         final_link="${base_url}/?api=${api_url}"
 
-        log_info "✅ 已配置反向代理，信息如下:"
-        echo -e "   - 前端管理页面: $YELLOW$base_url$NC"
-        echo ""
-        log_info "您的 Sub-Store 客户端完整订阅链接为:"
-        echo -e "$GREEN$final_link$NC\n"
+        log_info "✅ 已配置反向代理-前端管理页面访问链接如下:"
+        echo -e "\n $WHITE$final_link$NC\n"
 
     else
         # --- 未配置反向代理的逻辑 ---
-        _fetch_geo_info # 确保我们已经获取了公网 IP
+        _fetch_geo_info # 确保我们已经获取了公网 IPcho
         ipv4_addr="$PUBLIC_IPV4"
         if [ -z "$ipv4_addr" ]; then
             log_error "无法获取公网 IPv4 地址，无法生成链接。"
@@ -1784,17 +1769,12 @@ substore_view_access_link() {
         api_url="${base_url}/${api_key}"
         # 按照您的要求拼接最终的客户端链接
         final_link="${base_url}/?api=${api_url}"
-
-        log_warn "未配置反向代理，信息如下:"
-        echo -e "   - 前端管理页面: $YELLOW$base_url$NC"
-        echo ""
-        log_warn "您的 Sub-Store 客户端完整订阅链接为:"
-        echo -e "$RED$final_link$NC\n"
+        log_warn "未配置反向代理-前端管理页面访问链接如下:"
+        echo -e "\n$WHITE$final_link$NC\n"
         log_warn "强烈建议使用第九项功能设置反向代理以启用 HTTPS。"
     fi
     echo -e "$CYAN----------------------------------------$NC"
 }
-
 substore_reset_ports() {
     if ! is_substore_installed; then log_error "Sub-Store 未安装。"; return; fi
     log_info "开始重置 Sub-Store 端口..."
