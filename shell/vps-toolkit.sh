@@ -2005,7 +2005,7 @@ install_nezha_agent_v1() {
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
     local server_info="nz.ssong.eu.org:8008"
-    local server_secret="wdptRINwlgBB3kE0U8eDGYjqV56nAhLh"
+    local server_secret="HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1"
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
