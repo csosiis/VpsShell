@@ -1747,7 +1747,10 @@ substore_view_access_link() {
     local frontend_port api_key rp_domain ipv4_addr base_url api_url final_link
 
     frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
-    api_key=$(grep -oP 'SUB_STORE_FRONTEND_BACKEND_PATH=/\K.*' "$SUBSTORE_SERVICE_FILE")
+
+    # --- 修正点在这里 ---
+    # 使用 [^"]* 代替 .*，意为“匹配所有非双引号的字符”，从而精确地提取出 API 密钥
+    api_key=$(grep -oP 'SUB_STORE_FRONTEND_BACKEND_PATH=/\K[^"]*' "$SUBSTORE_SERVICE_FILE")
 
     # 从服务文件中干净地提取出反代域名 (例如: https://your.domain)
     rp_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2- | tr -d '"')
