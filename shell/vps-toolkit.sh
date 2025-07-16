@@ -1737,28 +1737,56 @@ uninstall_maccms() {
 # =================================================
 # 补全: Sub-Store 管理相关函数
 # =================================================
-
 substore_view_access_link() {
     if ! is_substore_installed; then
         log_error "Sub-Store 未安装。"
         return
     fi
     clear
-    local frontend_port api_key backend_path
+    # 使用 local 声明所有内部变量
+    local frontend_port api_key rp_domain ipv4_addr base_url api_url final_link
+
     frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
     api_key=$(grep -oP 'SUB_STORE_FRONTEND_BACKEND_PATH=/\K.*' "$SUBSTORE_SERVICE_FILE")
-    local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-    local rp_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
+
+    # 从服务文件中干净地提取出反代域名 (例如: https://your.domain)
+    rp_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2- | tr -d '"')
 
     echo -e "$CYAN---------- Sub-Store 访问信息 ----------$NC\n"
+
+    # 判断是否配置了反向代理
     if [ -n "$rp_domain" ]; then
-        log_info "✅ 已配置反向代理，推荐使用域名访问:"
-        echo -e "$YELLOW    $rp_domain $NC\n"
-        log_info "后端 API 地址 (用于客户端):"
-        echo -e "$YELLOW    $rp_domain/$api_key $NC\n"
+        # --- 已配置反向代理的逻辑 ---
+        base_url="$rp_domain"
+        api_url="${base_url}/${api_key}"
+        # 按照您的要求拼接最终的客户端链接
+        final_link="${base_url}/?api=${api_url}"
+
+        log_info "✅ 已配置反向代理，信息如下:"
+        echo -e "   - 前端管理页面: $YELLOW$base_url$NC"
+        echo ""
+        log_info "您的 Sub-Store 客户端完整订阅链接为:"
+        echo -e "$GREEN$final_link$NC\n"
+
     else
-        log_warn "未配置反向代理，请使用 IP + 端口访问:"
-        echo -e "$YELLOW    http://$ipv4_addr:$frontend_port $NC\n"
+        # --- 未配置反向代理的逻辑 ---
+        _fetch_geo_info # 确保我们已经获取了公网 IP
+        ipv4_addr="$PUBLIC_IPV4"
+        if [ -z "$ipv4_addr" ]; then
+            log_error "无法获取公网 IPv4 地址，无法生成链接。"
+            return
+        fi
+
+        base_url="http://${ipv4_addr}:${frontend_port}"
+        api_url="${base_url}/${api_key}"
+        # 按照您的要求拼接最终的客户端链接
+        final_link="${base_url}/?api=${api_url}"
+
+        log_warn "未配置反向代理，信息如下:"
+        echo -e "   - 前端管理页面: $YELLOW$base_url$NC"
+        echo ""
+        log_warn "您的 Sub-Store 客户端完整订阅链接为:"
+        echo -e "$RED$final_link$NC\n"
         log_warn "强烈建议使用第九项功能设置反向代理以启用 HTTPS。"
     fi
     echo -e "$CYAN----------------------------------------$NC"
