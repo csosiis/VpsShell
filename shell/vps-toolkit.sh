@@ -1715,7 +1715,7 @@ update_sub_store_app() {
 
 # =================================================
 # 函数: substore_view_access_link
-# 说明: 从服务文件中读取配置并显示访问链接。
+# 说明: 从服务文件中读取配置并显示访问链接。 (已更新为带 ?api= 参数的格式)
 # =================================================
 substore_view_access_link() {
     if ! is_substore_installed; then
@@ -1723,22 +1723,30 @@ substore_view_access_link() {
         return
     fi
     clear
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
-    local api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2 | tr -d '/')
+    # 解析服务文件中的配置
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    # api_key 会包含开头的 / ，例如 /csosiis
+    local api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
     local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-    local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
+    local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
     echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
+
+    # 1. 处理反向代理链接
     if [ -n "$proxy_domain" ]; then
-        log_info "检测到反向代理域名，请优先使用域名访问："
-        echo -e "\n  $YELLOW前端地址: https://$proxy_domain$NC"
-        echo -e "  $YELLOW后端地址: https://$proxy_domain/$api_key$NC\n"
+        log_info "检测到反向代理域名，请使用以下链接访问："
+        local backend_url="https://$proxy_domain$api_key"
+        local final_url="https://$proxy_domain/?api=$backend_url"
+        echo -e "\n  $YELLOW$final_url$NC\n"
         echo -e "$CYAN-----------------------------------------------------------$NC"
     fi
 
+    # 2. 处理 IP 地址链接
     log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
-    echo -e "\n  $YELLOW前端地址: http://$ipv4_addr:$frontend_port$NC"
-    echo -e "  $YELLOW后端地址: http://$ipv4_addr:$frontend_port/$api_key$NC\n"
+    local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
+    local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
+    echo -e "\n  $YELLOW$ip_final_url$NC\n"
+
     echo -e "$CYAN-----------------------------------------------------------$NC"
 }
 
