@@ -1997,8 +1997,9 @@ uninstall_nezha_agent() {
         rm -rf /opt/nezha/agent
     fi
 }
-# --- Generic Installer (FINAL-FINAL VERSION) ---
-# Replicates the user's proven successful command: env VAR=... /path/to/script
+# --- Generic Installer (ULTIMATE-FINAL VERSION) ---
+# This version creates a temporary directory and CDs into it before execution
+# to perfectly mimic the user's manual process.
 _nezha_agent_installer() {
     # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
     local version_id="$1"
@@ -2011,7 +2012,14 @@ _nezha_agent_installer() {
 
     local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
     local agent_dir="/opt/nezha/agent-${version_id}"
-    local SCRIPT_PATH_TMP="/tmp/nezha_install_${version_id}.sh"
+
+    # 【关键修改】创建一个专用的临时工作目录
+    local WORK_DIR="/tmp/nezha-installer-$$" # $$ ensures a unique directory name
+    mkdir -p "$WORK_DIR"
+    if [ ! -d "$WORK_DIR" ]; then
+        log_error "无法创建临时工作目录，操作中止。"; press_any_key; return 1
+    fi
+    local SCRIPT_PATH_IN_WORKDIR="${WORK_DIR}/agent.sh"
 
     log_info "为确保全新安装，将首先清理所有旧的同版本探针..."
     _nezha_agent_uninstaller "$version_id" "$display_name" "silent"
@@ -2023,39 +2031,44 @@ _nezha_agent_installer() {
     log_info "开始安装 ${display_name}..."
     log_info "服务器信息: ${server_addr}:${server_port}"
 
-    log_info "正在下载官方安装脚本..."
-    if ! curl -L "$script_url" -o "$SCRIPT_PATH_TMP"; then
-        log_error "下载官方脚本失败！"; press_any_key; return 1
+    log_info "正在下载官方安装脚本至: ${WORK_DIR}"
+    if ! curl -L "$script_url" -o "$SCRIPT_PATH_IN_WORKDIR"; then
+        log_error "下载官方脚本失败！"; rm -rf "$WORK_DIR"; press_any_key; return 1
     fi
-    chmod +x "$SCRIPT_PATH_TMP"
+    chmod +x "$SCRIPT_PATH_IN_WORKDIR"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
+
+    # 【关键修改】保存当前目录，然后cd进入工作目录
+    local original_dir=$(pwd)
+    cd "$WORK_DIR"
+
     if [[ "$is_v1_style" == "true" ]]; then
         local nz_tls_val="false"
         if [[ "$server_port" == "443" || "$server_port" == "2096" || "$server_port" == "5555" ]]; then
              nz_tls_val="true"
         fi
 
-        # 【最终修复】使用 env 命令配合直接执行脚本的路径，完全复刻用户成功的命令模式
+        # 在当前目录下执行，完全模拟手动操作
         env \
             NZ_SERVER="${server_addr}:${server_port}" \
             NZ_CLIENT_SECRET="$server_key" \
             NZ_TLS="$nz_tls_val" \
-            "$SCRIPT_PATH_TMP" # 直接执行脚本，而不是用 'bash' 去调用
+            ./agent.sh
 
     else
-        # v0 脚本不受影响，保持原样
-        local tls_option="--tls"
-        if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
-            tls_option=""
-        fi
-        bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" "$tls_option"
+        bash ./agent.sh install_agent "$server_addr" "$server_port" "$server_key"
     fi
-    rm "$SCRIPT_PATH_TMP"
+
+    # 【关键修改】返回原始目录并清理
+    cd "$original_dir"
+    rm -rf "$WORK_DIR"
 
     if ! is_nezha_agent_installed; then
         log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return 1
     fi
+
+    # 后续的重命名和配置流程不变
     log_info "标准服务安装成功，即将开始改造以实现共存..."
     sleep 1
 
