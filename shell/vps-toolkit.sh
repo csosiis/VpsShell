@@ -2139,7 +2139,7 @@ install_nezha_agent_v3() {
     fi
     _nezha_agent_installer "v3" "探针 3 (Singapore-West)" \
         "https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh" \
-        "sg.luckywu.eu.org" "2096" "sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp" "true"
+        "sg.luckywu.eu.org" "2096" "sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp" "ture"
 }
 
 uninstall_nezha_agent_v3() {
