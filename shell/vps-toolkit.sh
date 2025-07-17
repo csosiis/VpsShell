@@ -1712,42 +1712,46 @@ update_sub_store_app() {
     fi
     press_any_key
 }
+# =================================================
+# 函数: substore_setup_reverse_proxy
+# 说明: 为 Sub-Store 设置或更换反向代理。(已修正端口解析逻辑)
+# =================================================
+substore_setup_reverse_proxy() {
+    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
 
-# =================================================
-# 函数: substore_view_access_link
-# 说明: 从服务文件中读取配置并显示访问链接。 (已更新为带 ?api= 参数的格式)
-# =================================================
-substore_view_access_link() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无法查看链接。"
+    # 修正了这一行，确保能正确获取端口号
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local domain
+
+    echo ""
+    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
+    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
+    echo ""
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then
+        log_error "域名不能为空，操作已取消。"
+        press_any_key
         return
     fi
-    clear
-    # 解析服务文件中的配置
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    # api_key 会包含开头的 / ，例如 /csosiis
-    local api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-    local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
-    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
+    # 调用通用的反代设置函数
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
 
-    # 1. 处理反向代理链接
-    if [ -n "$proxy_domain" ]; then
-        log_info "检测到反向代理域名，请使用以下链接访问："
-        local backend_url="https://$proxy_domain$api_key"
-        local final_url="https://$proxy_domain/?api=$backend_url"
-        echo -e "\n  $YELLOW$final_url$NC\n"
-        echo -e "$CYAN-----------------------------------------------------------$NC"
+    # 检查反代是否成功 (这是一个简化的检查，主要依赖 setup_auto_reverse_proxy 的返回)
+    if [ $? -eq 0 ]; then
+        log_info "正在将域名保存到服务配置中以供显示..."
+        # 如果已有域名配置行，则替换；否则追加
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
+        else
+            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
+        fi
+        systemctl daemon-reload
+        log_info "✅ Sub-Store 反向代理设置完成！"
+    else
+        log_error "自动反向代理配置失败，请检查之前的错误信息。"
     fi
-
-    # 2. 处理 IP 地址链接
-    log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
-    local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
-    local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
-    echo -e "\n  $YELLOW$ip_final_url$NC\n"
-
-    echo -e "$CYAN-----------------------------------------------------------$NC"
+    press_any_key
 }
 
 # =================================================
