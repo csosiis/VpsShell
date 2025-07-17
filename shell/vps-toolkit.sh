@@ -2194,7 +2194,58 @@ install_nezha_agent_v3() {
 uninstall_nezha_agent_v3() {
     _nezha_agent_uninstaller "v3" "探针 3 (Singapore-West)"
 }
+# =================================================================
+# 专用于探针3的、根据用户成功的命令定制的、最直接的安装函数
+# =================================================================
+install_probe3_directly() {
+    log_info "正在为探针3，使用您提供的、已验证成功的最终安装命令..."
 
+    # 清理旧环境
+    _nezha_agent_uninstaller "v3" "探针 3 (Singapore-West)" "silent"
+    uninstall_nezha_agent &>/dev/null
+    systemctl daemon-reload
+
+    # 直接执行您验证成功的命令，不做任何修改
+    curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o /tmp/agent.sh && \
+    chmod +x /tmp/agent.sh && \
+    env NZ_SERVER='sg.luckywu.eu.org:2096' \
+        NZ_TLS='true' \
+        NZ_CLIENT_SECRET='sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp' \
+        /tmp/agent.sh
+
+    # 检查标准安装是否成功
+    if ! is_nezha_agent_installed; then
+        log_error "最终的直接命令安装仍然失败。问题100%在于您的服务器环境。";
+        log_error "自动化脚本已无法解决，请使用手动命令安装。";
+        press_any_key;
+        return 1
+    fi
+
+    # 如果标准安装成功，则执行后续的重命名和配置
+    log_info "标准探针安装成功！现在进行重命名和配置..."
+    local service_file="/etc/systemd/system/nezha-agent-v3.service"
+    local agent_dir="/opt/nezha/agent-v3"
+
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+    mv /etc/systemd/system/nezha-agent.service "$service_file"
+    mv /opt/nezha/agent "$agent_dir"
+    sed -i "s|/opt/nezha/agent|${agent_dir}|g" "$service_file"
+    systemctl daemon-reload
+    systemctl enable "${service_file##*/}"
+    systemctl start "${service_file##*/}"
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet "${service_file##*/}"; then
+        log_info "✅ 探针 3 (Singapore-West) 已成功安装并启动！"
+    else
+        log_error "探针 3 (Singapore-West) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status "${service_file##*/}" --no-pager -l
+    fi
+    press_any_key
+}
 # --- Main Menu for Agent ---
 nezha_agent_menu() {
     while true; do
@@ -2241,7 +2292,7 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
-        5) install_nezha_agent_v3 ;;
+        5) install_probe3_directly ;;
         6) uninstall_nezha_agent_v3 ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
