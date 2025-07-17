@@ -1976,43 +1976,20 @@ substore_main_menu() {
     done
 }
 # ================= Nezha Management Start =================
+# --- Helper & Check Functions (No changes needed) ---
 is_nezha_agent_installed() {
     [ -f "/etc/systemd/system/nezha-agent.service" ]
 }
-uninstall_nezha_agent_v0() {
-    if ! is_nezha_agent_v0_installed; then
-        log_warn "San Jose V0 探针未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    log_info "正在停止并禁用 nezha-agent-v0 服务..."
-    systemctl stop nezha-agent-v0.service &>/dev/null
-    systemctl disable nezha-agent-v0.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v0.service
-    rm -rf /opt/nezha/agent-v0
-    systemctl daemon-reload
-    log_info "✅ SanJose V0 探针已成功卸载。"
-    press_any_key
+is_nezha_agent_v0_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
 }
-
-uninstall_nezha_agent_v1() {
-    if ! is_nezha_agent_v1_installed; then
-        log_warn "Singapore-West V1 探针未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    log_info "正在停止并禁用 nezha-agent-v1 服务..."
-    systemctl stop nezha-agent-v1.service &>/dev/null
-    systemctl disable nezha-agent-v1.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v1.service
-    rm -rf /opt/nezha/agent-v1
-    systemctl daemon-reload
-    log_info "✅ Singapore-Wes V1 探针已成功卸载。"
-    press_any_key
+is_nezha_agent_v1_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
 }
-
+is_nezha_agent_v3_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
+}
 uninstall_nezha_agent() {
-    # 这是一个辅助函数，确保清理标准版时不会报错
     if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
         systemctl stop nezha-agent.service &>/dev/null
         systemctl disable nezha-agent.service &>/dev/null
@@ -2021,263 +1998,181 @@ uninstall_nezha_agent() {
     fi
 }
 
-install_nezha_agent_v0() {
-    # --- 从函数第一个参数获取密钥 ---
-    local server_key="$1"
+# --- Generic Installer (Core Logic) ---
+_nezha_agent_installer() {
+    # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
+    local version_id="$1"
+    local display_name="$2"
+    local script_url="$3"
+    local server_addr="$4"
+    local server_port="$5"
+    local server_key="$6"
+    local is_v1_style="$7"
 
-    # --- 固定的服务器信息 ---
-    # 您可以在这里修改为您自己的服务器地址和端口
-    local server_addr="nz.wiitwo.eu.org"
-    local server_port="443"
+    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
+    local agent_dir="/opt/nezha/agent-${version_id}"
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_${version_id}.sh"
 
-
-    # --- 获取密钥 ---
-    # 如果没有通过参数传入密钥，则提示用户输入
-    if [ -z "$server_key" ]; then
-        read -p "请输入San Jose V0哪吒面板面板密钥: " server_key
-    fi
-
-    # 最终检查密钥是否为空
-    if [ -z "$server_key" ]; then
-        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
-    fi
-
-    # --- 安装过程 ---
-    local tls_option="--tls"
-    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
-        tls_option="";
-    fi
-
-    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
-
-    log_info "正在下载官方安装脚本..."
-    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
-        log_error "下载官方脚本失败！"; press_any_key; return
-    fi
-
-    chmod +x "$SCRIPT_PATH_TMP"
-
-    log_info "第1步：执行官方原版脚本进行标准安装..."
-    # 执行脚本，传入固定的服务器信息和获取到的密钥
-    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
-    rm "$SCRIPT_PATH_TMP"
-
-    # 检查标准版是否安装成功
-    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
-        log_error "官方脚本未能成功创建标准服务，操作中止。"
-        press_any_key
-        return
-    fi
-    log_info "标准服务安装成功，即将开始改造..."
-    sleep 1
-
-    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
-    systemctl stop nezha-agent.service &>/dev/null
-    systemctl disable nezha-agent.service &>/dev/null
-
-    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v0.service
-    mv /opt/nezha/agent /opt/nezha/agent-v0
-
-    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v0/nezha-agent|g' /etc/systemd/system/nezha-agent-v0.service
-
-    log_info "第4步：重载并启动改造后的 'nezha-agent-v0' 服务..."
-    systemctl daemon-reload
-    systemctl enable nezha-agent-v0.service
-    systemctl start nezha-agent-v0.service
-
-    log_info "检查最终服务状态..."
-    sleep 2
-    if systemctl is-active --quiet nezha-agent-v0; then
-        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
-    else
-        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
-        log_warn "显示详细状态以供诊断:"
-        systemctl status nezha-agent-v0.service --no-pager -l
-    fi
-    press_any_key
-}
-
-
-uninstall_nezha_agent_v1() {
-    if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    log_info "正在停止并禁用 nezha-agent-v1 服务..."
-    systemctl stop nezha-agent-v1.service &>/dev/null
-    systemctl disable nezha-agent-v1.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v1.service
-    rm -rf /opt/nezha/agent-v1
-    systemctl daemon-reload
-    log_info "✅ Nezha V1 探针已成功卸载。"
-    press_any_key
-}
-install_nezha_agent_v1() {
-    # --- 新增：交互式指令输入 ---
-    local user_command
-    read -p "请输入安装指令以继续: " user_command
-
-    # 检查输入的指令是否为 "csos"
-    if [ "$user_command" != "csos" ]; then
-        log_error "指令错误，安装已中止。"
-        press_any_key
-        return 1
-    fi
-
-    # --- 全自动安装配置 ---
-    # (指令正确后，后续流程与之前完全相同)
-    # 所有参数已在此处硬编码，无需手动输入。
-    # 如果需要修改，请直接编辑下面的值。
-    local server_info="nz.ssong.eu.org:8008"
-    local server_secret="HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1"
-    local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
-
-    # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v1 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    log_info "为确保全新安装，将首先清理所有旧的同版本探针..."
+    _nezha_agent_uninstaller "$version_id" "$display_name" >/dev/null 2>&1
+    uninstall_nezha_agent &>/dev/null
     systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
     clear
-    log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
-    log_info "服务器信息: $server_info"
-    log_info "连接密钥: $server_secret"
-    log_info "启用TLS: $NZ_TLS"
+    log_info "开始安装 ${display_name}..."
+    log_info "服务器信息: ${server_addr}:${server_port}"
 
-    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
-
-    log_info "正在下载官方V1安装脚本..."
-    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
-        log_error "下载官方脚本失败！"; press_any_key; return
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L "$script_url" -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return 1
     fi
-
     chmod +x "$SCRIPT_PATH_TMP"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
-    export NZ_SERVER="$server_info"
-    export NZ_TLS="$NZ_TLS"
-    export NZ_CLIENT_SECRET="$server_secret"
-    bash "$SCRIPT_PATH_TMP"
-    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
+    if [[ "$is_v1_style" == "true" ]]; then
+        export NZ_SERVER="${server_addr}:${server_port}"
+        export NZ_CLIENT_SECRET="$server_key"
+        export NZ_TLS="false" # Hardcoded for v1 style
+        if [ "$server_port" == "443" ] || [ "$server_port" == "2096" ]; then
+             export NZ_TLS="true"
+        fi
+        bash "$SCRIPT_PATH_TMP"
+        unset NZ_SERVER NZ_CLIENT_SECRET NZ_TLS
+    else
+        local tls_option="--tls"
+        if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
+            tls_option=""
+        fi
+        bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" "$tls_option"
+    fi
     rm "$SCRIPT_PATH_TMP"
 
-    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
-        log_error "官方脚本未能成功创建标准服务，操作中止。"
-        press_any_key
-        return
+    if ! is_nezha_agent_installed; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return 1
     fi
-    log_info "标准服务安装成功，即将开始改造..."
+    log_info "标准服务安装成功，即将开始改造以实现共存..."
     sleep 1
 
-    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    log_info "第2步：停止标准服务并重命名文件..."
     systemctl stop nezha-agent.service &>/dev/null
     systemctl disable nezha-agent.service &>/dev/null
-
-    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v1.service
-    mv /opt/nezha/agent /opt/nezha/agent-v1
+    mv /etc/systemd/system/nezha-agent.service "$service_file"
+    mv /opt/nezha/agent "$agent_dir"
 
     log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
+    sed -i "s|/opt/nezha/agent|${agent_dir}|g" "$service_file"
 
-    log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
+    log_info "第4步：重载并启动改造后的 '${service_file##*/}' 服务..."
     systemctl daemon-reload
-    systemctl enable nezha-agent-v1.service
-    systemctl start nezha-agent-v1.service
+    systemctl enable "${service_file##*/}"
+    systemctl start "${service_file##*/}"
 
     log_info "检查最终服务状态..."
     sleep 2
-    if systemctl is-active --quiet nezha-agent-v1; then
-        log_info "✅ Nezha V1 探针 (隔离版) 已成功安装并启动！"
+    if systemctl is-active --quiet "${service_file##*/}"; then
+        log_info "✅ ${display_name} 已成功安装并启动！"
     else
-        log_error "Nezha V1 探针 (隔离版) 最终启动失败！"
+        log_error "${display_name} 最终启动失败！"
         log_warn "显示详细状态以供诊断:"
-        systemctl status nezha-agent-v1.service --no-pager -l
+        systemctl status "${service_file##*/}" --no-pager -l
     fi
     press_any_key
 }
-install_nezha_dashboard_v0() {
-    ensure_dependencies "wget"
-    log_info "即将运行 fscarmen 的 V0 面板安装/管理脚本..."
-    press_any_key
-    bash <(wget -qO- https://raw.githubusercontent.com/fscarmen2/Argo-Nezha-Service-Container/main/dashboard.sh)
-    log_info "脚本执行完毕。"
-    press_any_key
-}
-install_nezha_dashboard_v1() {
-    ensure_dependencies "curl"
-    log_info "即将运行官方 V1 面板安装/管理脚本..."
-    press_any_key
-    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && sudo ./nezha.sh
-    log_info "脚本执行完毕。"
-    press_any_key
-}
-is_nezha_agent_v0_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
-}
-is_nezha_agent_v3_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
-}
-is_nezha_agent_v1_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
-}
-# =================================================
-# 补全: 哪吒 V3 探针卸载函数
-# =================================================
-uninstall_nezha_agent_v3() {
-    if ! is_nezha_agent_v3_installed; then
-        log_warn "Singapore-West V0 探针未安装，无需卸载。"
+
+# --- Generic Uninstaller (Core Logic) ---
+_nezha_agent_uninstaller() {
+    # Parameters: 1:version_id, 2:display_name
+    local version_id="$1"
+    local display_name="$2"
+    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
+    local agent_dir="/opt/nezha/agent-${version_id}"
+
+    if [ ! -f "$service_file" ]; then
+        log_warn "${display_name} 未安装，无需卸载。"
         press_any_key
         return
     fi
-    log_info "正在停止并禁用 nezha-agent-v3 服务..."
-    systemctl stop nezha-agent-v3.service &>/dev/null
-    systemctl disable nezha-agent-v3.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v3.service
-    rm -rf /opt/nezha/agent-v3
+    log_info "正在停止并禁用 ${display_name} 服务..."
+    systemctl stop "${service_file##*/}" &>/dev/null
+    systemctl disable "${service_file##*/}" &>/dev/null
+    rm -f "$service_file"
+    rm -rf "$agent_dir"
     systemctl daemon-reload
-    log_info "✅ Singapore-West V0 探针已成功卸载。"
+    log_info "✅ ${display_name} 已成功卸载。"
     press_any_key
 }
-# 修正后的 nezha_agent_menu
+
+# --- Wrapper functions for each probe ---
+install_nezha_agent_v0() {
+    read -p "请输入 探针 1 (San Jose) 的面板密钥: " server_key
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
+    fi
+    _nezha_agent_installer "v0" "探针 1 (San Jose)" \
+        "https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh" \
+        "nz.wiitwo.eu.org" "443" "$server_key" "false"
+}
+
+uninstall_nezha_agent_v0() {
+    _nezha_agent_uninstaller "v0" "探针 1 (San Jose)"
+}
+
+install_nezha_agent_v1() {
+    read -p "请输入安装指令以继续: " user_command
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"; press_any_key; return 1;
+    fi
+    _nezha_agent_installer "v1" "探针 2 (London)" \
+        "https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh" \
+        "nz.ssong.eu.org" "8008" "HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1" "true"
+}
+
+uninstall_nezha_agent_v1() {
+    _nezha_agent_uninstaller "v1" "探针 2 (London)"
+}
+
+install_nezha_agent_v3() {
+    read -p "请输入安装指令以继续: " user_command
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"; press_any_key; return 1;
+    fi
+    _nezha_agent_installer "v3" "探针 3 (Singapore-West)" \
+        "https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh" \
+        "sg.luckywu.eu.org" "2096" "sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp" "true"
+}
+
+uninstall_nezha_agent_v3() {
+    _nezha_agent_uninstaller "v3" "探针 3 (Singapore-West)"
+}
+
+# --- Main Menu for Agent ---
 nezha_agent_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${YELLOW}(未安装)$NC         $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 探针 1 (San Jose)$NC                       $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${GREEN}(已安装)$NC        $CYAN║$NC"
         else
-            # --- 修正行在这里 ---
-            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${YELLOW}(未安装)$NC        $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 探针 2 (London)$NC                      $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v3_installed; then
-            echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${GREEN}(已安装)$NC    $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${GREEN}(已安装)$NC   $CYAN║$NC"
         else
-             echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${YELLOW}(未安装)$NC  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${YELLOW}(未安装)$NC   $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $RED卸载 Singopre-West V0 探针$NC                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 探针 3 (Singapore-West)$NC                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2291,117 +2186,12 @@ nezha_agent_menu() {
         5) install_nezha_agent_v3 ;;
         6) uninstall_nezha_agent_v3 ;;
         0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+        *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
 
-# 修正后的 uninstall_nezha_agent_v3
-uninstall_nezha_agent_v3() {
-    if ! is_nezha_agent_v3_installed; then
-        log_warn "Singapore-West V1 探针未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    log_info "正在停止并禁用 Singapore-West V1 探针服务..."
-    systemctl stop nezha-agent-v3.service &>/dev/null
-    systemctl disable nezha-agent-v3.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v3.service
-    rm -rf /opt/nezha/agent-v3
-    systemctl daemon-reload
-    # --- 修正行在这里 ---
-    log_info "✅ Singapore-West V1 探针已成功卸载。"
-    press_any_key
-}
-
-# 修正后的 install_nezha_agent_v3
-install_nezha_agent_v3() {
-    # --- 新增：交互式指令输入 ---
-    local user_command
-    read -p "请输入安装指令以继续: " user_command
-
-    # 检查输入的指令是否为 "csos"
-    if [ "$user_command" != "csos" ]; then
-        log_error "指令错误，安装已中止。"
-        press_any_key
-        return 1
-    fi
-
-    # --- 全自动安装配置 ---
-    # (指令正确后，后续流程与之前完全相同)
-    # 所有参数已在此处硬编码，无需手动输入。
-    # 如果需要修改，请直接编辑下面的值。
-    local server_info="sg.luckywu.eu.org:2096"
-    local server_secret="sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp"
-    local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
-
-    # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v3 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
-
-    ensure_dependencies "curl" "wget" "unzip"
-    clear
-    log_info "指令正确，开始全自动安装 Singpore-West Nezha V1 探针 (安装后改造模式)..."
-    log_info "服务器信息: $server_info"
-    log_info "连接密钥: $server_secret"
-    log_info "启用TLS: $NZ_TLS"
-
-    local SCRIPT_PATH_TMP="/tmp/agent_v3_install_orig.sh"
-
-    log_info "正在下载官方V1安装脚本..."
-    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
-        log_error "下载官方脚本失败！"; press_any_key; return
-    fi
-
-    chmod +x "$SCRIPT_PATH_TMP"
-
-    log_info "第1步：执行官方原版脚本进行标准安装..."
-    export NZ_SERVER="$server_info"
-    export NZ_TLS="$NZ_TLS"
-    export NZ_CLIENT_SECRET="$server_secret"
-    bash "$SCRIPT_PATH_TMP"
-    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
-    rm "$SCRIPT_PATH_TMP"
-
-    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
-        log_error "官方脚本未能成功创建标准服务，操作中止。"
-        press_any_key
-        return
-    fi
-    log_info "标准服务安装成功，即将开始改造..."
-    sleep 1
-
-    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
-    systemctl stop nezha-agent.service &>/dev/null
-    systemctl disable nezha-agent.service &>/dev/null
-
-    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v3.service
-    mv /opt/nezha/agent /opt/nezha/agent-v3
-
-    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v3|g' /etc/systemd/system/nezha-agent-v3.service
-
-    log_info "第4步：重载并启动改造后的 'nezha-agent-v3' 服务..."
-    systemctl daemon-reload
-    systemctl enable nezha-agent-v3.service
-    systemctl start nezha-agent-v3.service
-
-    log_info "检查最终服务状态..."
-    sleep 2
-    if systemctl is-active --quiet nezha-agent-v3; then
-        log_info "✅ Singapore-West Nezha V1 探针 (隔离版) 已成功安装并启动！"
-    else
-        log_error "Singapore-West Nezha V1 探针 (隔离版) 最终启动失败！"
-        log_warn "显示详细状态以供诊断:"
-        systemctl status nezha-agent-v3.service --no-pager -l
-    fi
-    press_any_key
-}
+# --- Dashboard Menu (No changes needed) ---
 nezha_dashboard_menu() {
     while true; do
         clear
@@ -2425,10 +2215,7 @@ nezha_dashboard_menu() {
         1) install_nezha_dashboard_v0 ;;
         2) install_nezha_dashboard_v1 ;;
         0) break ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+        *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
