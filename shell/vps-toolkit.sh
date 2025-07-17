@@ -6,7 +6,6 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
-
 SUBSTORE_SERVICE_NAME="sub-store.service"
 SUBSTORE_SERVICE_FILE="/etc/systemd/system/$SUBSTORE_SERVICE_NAME"
 SUBSTORE_INSTALL_DIR="/root/sub-store"
@@ -16,9 +15,6 @@ SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/sv"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 FLAG_FILE="/root/.vps_toolkit.initialized"
-GEO_INFO_JSON=""
-PUBLIC_IPV4=""
-PUBLIC_IPV6=""
 log_info() { echo -e "$GREEN[信息] - $1$NC"; }
 log_warn() { echo -e "$YELLOW[注意] - $1$NC"; }
 log_error() { echo -e "$RED[错误] - $1$NC"; }
@@ -32,9 +28,8 @@ check_root() { if [ "$(id -u)" -ne 0 ]; then
 fi; }
 check_port() {
     local port=$1
-    # -tlnu 同时检查 tcp, listening, numeric, udp
-    if ss -tlnu | grep -q -E "(:|:::)$port\b"; then
-        log_error "端口 $port 已被占用 (TCP 或 UDP)。"
+    if ss -tln | grep -q -E "(:|:::)$port\b"; then
+        log_error "端口 $port 已被占用。"
         return 1
     fi
     return 0
@@ -44,17 +39,6 @@ generate_random_port() {
 }
 generate_random_password() {
     tr </dev/urandom -dc 'A-Za-z0-9' | head -c 20
-}
-# 新增函数：获取并缓存IP信息
-_fetch_geo_info() {
-    # 如果 GEO_INFO_JSON 不为空，则说明已经获取过，直接返回
-    if [ -n "$GEO_INFO_JSON" ]; then
-        return
-    fi
-    log_info "首次查询，正在获取公网 IP 及地理信息...\n"
-    GEO_INFO_JSON=$(curl -s -m 8 http://ip-api.com/json)
-    PUBLIC_IPV4=$(echo "$GEO_INFO_JSON" | jq -r '.query')
-    # 可以用同样的方式缓存其他信息，如城市、国家等
 }
 _is_port_available() {
     local port_to_check=$1
@@ -122,6 +106,7 @@ ensure_dependencies() {
     fi
     echo ""
 }
+
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
@@ -132,21 +117,10 @@ show_system_info() {
         return
     fi
     log_info "正在获取网络信息..."
-
-    # --- 优化部分开始 ---
-    # 调用缓存函数
-    _fetch_geo_info
-
-    # 直接使用缓存的变量
-    local ipv4_addr="$PUBLIC_IPV4"
-    local ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com) # 获取IPv6的方式可以保留
+    ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+    ipv6_addr=$(curl -s -m 5 -6 https://ipv6.icanhazip.com)
     if [ -z "$ipv4_addr" ]; then ipv4_addr="获取失败"; fi
     if [ -z "$ipv6_addr" ]; then ipv6_addr="无或获取失败"; fi
-
-    local ip_info=$(echo "$GEO_INFO_JSON" | jq -r '.org')
-    local geo_info=$(echo "$GEO_INFO_JSON" | jq -r '.city + ", " + .country')
-    # --- 优化部分结束 ---
-
     hostname_info=$(hostname)
     os_info=$(lsb_release -d | awk -F: '{print $2}' | sed 's/^[[:space:]]*//')
     kernel_info=$(uname -r)
@@ -161,7 +135,9 @@ show_system_info() {
     net_info_rx=$(vnstat --oneline | awk -F';' '{print $4}')
     net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
     net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+    ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
     dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
+    geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
     timezone=$(timedatectl show --property=Timezone --value)
     uptime_info=$(uptime -p)
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
@@ -238,13 +214,13 @@ optimize_dns() {
     if ping6 -c 1 google.com >/dev/null 2>&1; then
         log_info "检测到IPv6支持，配置IPv6优先的DNS..."
         cat <<EOF >/etc/resolv.conf
-nameserver 1.1.1.1
-nameserver 8.8.8.8
 nameserver 2a00:1098:2b::1
 nameserver 2a00:1098:2c::1
 nameserver 2a01:4f8:c2c:123f::1
 nameserver 2606:4700:4700::1111
 nameserver 2001:4860:4860::8888
+nameserver 1.1.1.1
+nameserver 8.8.8.8
 EOF
     else
         log_info "未检测到IPv6支持，仅配置IPv4 DNS..."
@@ -408,20 +384,20 @@ install_traffmonetizer() {
         docker rm tm >/dev/null 2>&1
     fi
 
-    read -p "请输入您的服务器 CPU 架构 (amd 或 arm): " arch_choice
+    read -p "请输入部署密令 (amd/arm): " arch_choice
 
     local docker_command=""
     case "$arch_choice" in
-        amd|x86_64) # 增加对 x86_64 的识别
-            log_info "选择 amd/x86_64 架构，准备执行命令..."
+        amd)
+            log_info "选择 amd 架构，准备执行命令..."
             docker_command="docker run -d --restart=always --name tm traffmonetizer/cli_v2 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
             ;;
-        arm|aarch64) # 增加对 aarch64 的识别
-            log_info "选择 arm/aarch64 架构，准备执行命令..."
+        arm)
+            log_info "选择 arm 架构，准备执行命令..."
             docker_command="docker run -d --restart=always --name tm traffmonetizer/cli:arm64v8 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
             ;;
         *)
-            log_error "无效的架构！请输入 'amd' 或 'arm'。"
+            log_error "无效的密令！请输入 'amd' 或 'arm'。"
             press_any_key
             return
             ;;
@@ -972,14 +948,6 @@ generate_subscription_link() {
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
 }
-# =================================================
-# 补全: TUIC 客户端配置生成 (占位符)
-# =================================================
-generate_tuic_client_config(){
-    log_warn "抱歉，自动生成 TUIC 客户端配置文件 (JSON 格式) 的功能尚在开发中。"
-    log_info "目前，请直接使用生成的 TUIC 分享链接导入客户端。"
-    press_any_key
-}
 view_node_info() {
     while true; do
         clear; echo "";
@@ -1160,71 +1128,6 @@ singbox_do_uninstall() {
 }
 is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
-}
-substore_setup_reverse_proxy() {
-    if ! is_substore_installed; then
-        log_error "Sub-Store 尚未安装，无法设置反向代理。"
-        press_any_key
-        return
-    fi
-
-    echo ""
-    local domain
-    while true; do
-        read -p "请输入您要用于访问 Sub-Store 的域名: " domain
-        if [[ -z "$domain" ]]; then
-            log_error "域名不能为空！"
-        elif ! _is_domain_valid "$domain"; then
-            log_error "域名格式不正确。"
-        else
-            break
-        fi
-    done
-
-    local frontend_port
-    frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
-
-    if [ -z "$frontend_port" ]; then
-        log_error "无法从服务文件中自动获取 Sub-Store 的前端端口。"
-        press_any_key
-        return
-    fi
-
-    log_info "检测到 Sub-Store 前端端口为: $frontend_port"
-    log_info "即将为域名 $domain 设置到本地端口 $frontend_port 的反向代理..."
-    echo ""
-
-    if ! setup_auto_reverse_proxy "$domain" "$frontend_port"; then
-        log_error "自动反向代理设置失败。"
-        press_any_key
-        return
-    fi
-
-    log_info "正在将反代域名更新到 Sub-Store 服务配置中..."
-
-    sed -i '/SUB_STORE_REVERSE_PROXY_DOMAIN=/d' "$SUBSTORE_SERVICE_FILE"
-
-    local site_url="https://$domain"
-    sed -i "/SUB_STORE_BACKEND_API_PORT=/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=${site_url}\"" "$SUBSTORE_SERVICE_FILE"
-
-    log_info "正在重载 systemd 并重启 Sub-Store 服务以应用新配置..."
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-
-    sleep 3
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ Sub-Store 服务重启成功！"
-
-        # --- 关键修改点 ---
-        # 不再显示简单的成功信息，而是直接调用显示详细链接的函数
-        echo ""
-        substore_view_access_link
-
-    else
-        log_error "Sub-Store 服务重启失败！请使用日志功能检查问题。"
-    fi
-
-    press_any_key
 }
 # 安装 Sub-Store
 substore_do_install() {
@@ -1507,9 +1410,9 @@ EOF
 }
 get_latest_maccms_tag() {
     local repo_api="https://api.github.com/repos/magicblack/maccms10/tags"
-    # 使用 jq 直接、安全地解析第一个元素的 .name 字段
+    # 取第一个标签名
     local latest_tag
-    latest_tag=$(curl -s "$repo_api" | jq -r '.[0].name')
+    latest_tag=$(curl -s "$repo_api" | grep -Po '"name":.*?[^\\]",' | head -1 | awk -F'"' '{print $4}')
     echo "$latest_tag"
 }
 download_maccms_source() {
@@ -1528,6 +1431,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
+
 install_maccms() {
     echo ""
     log_info "开始安装苹果CMS"
@@ -1566,9 +1470,9 @@ install_maccms() {
     mkdir -p "$project_dir/nginx" "$project_dir/source"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # 获取最新 tag (调用已优化的函数)
+    # 获取最新 tag
     local maccms_version
-    maccms_version=$(get_latest_maccms_tag)
+    maccms_version=$(curl -s https://api.github.com/repos/magicblack/maccms10/tags | grep -Po '"name":.*?[^\\]",' | head -1 | awk -F'"' '{print $4}')
     if [ -z "$maccms_version" ]; then
         log_error "获取 maccms 版本失败"
         press_any_key
@@ -1709,6 +1613,8 @@ EOF
     echo "--------------------------------------------"
     press_any_key
 }
+
+
 # 卸载函数
 uninstall_maccms() {
     local project_dir
@@ -1727,129 +1633,8 @@ uninstall_maccms() {
     log_info "卸载完成。"
     press_any_key
 }
-substore_view_access_link() {
-    if ! is_substore_installed; then
-        log_error "Sub-Store 未安装。"
-        return
-    fi
-    clear
-    # 使用 local 声明所有内部变量
-    local frontend_port api_key rp_domain ipv4_addr base_url api_url final_link
 
-    frontend_port=$(grep -oP 'SUB_STORE_FRONTEND_PORT=\K[0-9]+' "$SUBSTORE_SERVICE_FILE")
-    api_key=$(grep -oP 'SUB_STORE_FRONTEND_BACKEND_PATH=/\K[^"]*' "$SUBSTORE_SERVICE_FILE")
 
-    # --- 关键修正点 ---
-    # 使用更精确的 grep -oP 命令，确保只提取出 URL，不再包含变量名
-    rp_domain=$(grep -oP 'SUB_STORE_REVERSE_PROXY_DOMAIN=\K[^"]*' "$SUBSTORE_SERVICE_FILE")
-
-    echo -e "$CYAN---------- Sub-Store 访问信息 ----------$NC\n"
-
-    # 判断是否配置了反向代理
-    if [ -n "$rp_domain" ]; then
-        # --- 已配置反向代理的逻辑 ---
-        base_url="$rp_domain"
-        api_url="${base_url}/${api_key}"
-        # 按照您的要求拼接最终的客户端链接
-        final_link="${base_url}/?api=${api_url}"
-
-        log_info "✅ 已配置反向代理-前端管理页面访问链接如下:"
-        echo -e "\n $WHITE$final_link$NC\n"
-
-    else
-        # --- 未配置反向代理的逻辑 ---
-        _fetch_geo_info # 确保我们已经获取了公网 IPcho
-        ipv4_addr="$PUBLIC_IPV4"
-        if [ -z "$ipv4_addr" ]; then
-            log_error "无法获取公网 IPv4 地址，无法生成链接。"
-            return
-        fi
-
-        base_url="http://${ipv4_addr}:${frontend_port}"
-        api_url="${base_url}/${api_key}"
-        # 按照您的要求拼接最终的客户端链接
-        final_link="${base_url}/?api=${api_url}"
-        log_warn "未配置反向代理-前端管理页面访问链接如下:"
-        echo -e "\n$WHITE$final_link$NC\n"
-        log_warn "强烈建议使用第九项功能设置反向代理以启用 HTTPS。"
-    fi
-    echo -e "$CYAN----------------------------------------$NC"
-}
-substore_reset_ports() {
-    if ! is_substore_installed; then log_error "Sub-Store 未安装。"; return; fi
-    log_info "开始重置 Sub-Store 端口..."
-    local new_frontend_port new_backend_port
-    while true; do
-        read -p "请输入新的前端访问端口 [默认: 3000]: " port_input
-        new_frontend_port=${port_input:-"3000"}
-        if check_port "$new_frontend_port"; then break; fi
-    done
-    while true; do
-        read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input
-        new_backend_port=${backend_port_input:-"3001"}
-        if [ "$new_backend_port" == "$new_frontend_port" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$new_backend_port"; then break; fi
-        fi
-    done
-    sed -i "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${new_frontend_port}/" "$SUBSTORE_SERVICE_FILE"
-    sed -i "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${new_backend_port}/" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ 端口已重置，服务已重启。请使用新端口访问。"
-    press_any_key
-}
-
-substore_reset_api_key() {
-    if ! is_substore_installed; then log_error "Sub-Store 未安装。"; return; fi
-    log_info "开始重置 Sub-Store API 密钥..."
-    local new_api_key=$(generate_random_password)
-    sed -i "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${new_api_key}|" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ API 密钥已重置为: $YELLOW$new_api_key$NC"
-    log_info "服务已重启，请在前端页面使用新密钥。"
-    press_any_key
-}
-
-update_sub_store_app() {
-    if ! is_substore_installed; then log_error "Sub-Store 未安装。"; return; fi
-    log_info "开始更新 Sub-Store 应用文件..."
-    cd "$SUBSTORE_INSTALL_DIR"
-    log_info "正在下载最新的 sub-store.bundle.js..."
-    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    log_info "正在下载最新的前端文件..."
-    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    rm -rf frontend
-    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
-    log_info "文件更新完毕，正在重启服务..."
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ Sub-Store 应用更新完成！"
-    press_any_key
-}
-
-substore_do_uninstall() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    read -p "确定要完全卸载 Sub-Store 吗？所有数据将丢失！ (y/N): " choice
-    if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
-    fi
-    systemctl stop "$SUBSTORE_SERVICE_NAME"
-    systemctl disable "$SUBSTORE_SERVICE_NAME"
-    rm -f "$SUBSTORE_SERVICE_FILE"
-    rm -rf "$SUBSTORE_INSTALL_DIR"
-    # 清理 fnm 和 pnpm (可选，但推荐)
-    rm -rf /root/.fnm
-    rm -rf /root/.local/share/pnpm
-    systemctl daemon-reload
-    log_info "✅ Sub-Store 已成功卸载。"
-    press_any_key
-}
 substore_manage_menu() {
     while true; do
         clear
@@ -1976,20 +1761,57 @@ substore_main_menu() {
     done
 }
 # ================= Nezha Management Start =================
-# --- Helper & Check Functions (No changes needed) ---
 is_nezha_agent_installed() {
     [ -f "/etc/systemd/system/nezha-agent.service" ]
 }
-is_nezha_agent_v0_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
+uninstall_nezha_agent_v0() {
+    if ! is_nezha_agent_v0_installed; then
+        log_warn "San Jose V0 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v0 服务..."
+    systemctl stop nezha-agent-v0.service &>/dev/null
+    systemctl disable nezha-agent-v0.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v0.service
+    rm -rf /opt/nezha/agent-v0
+    systemctl daemon-reload
+    log_info "✅ SanJose V0 探针已成功卸载。"
+    press_any_key
 }
-is_nezha_agent_v1_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
+uninstall_nezha_agent_v3() {
+    if ! is_nezha_agent_v3_installed; then
+        log_warn "Phoenix V0 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v0 服务..."
+    systemctl stop nezha-agent-v3.service &>/dev/null
+    systemctl disable nezha-agent-v3.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v3.service
+    rm -rf /opt/nezha/agent-v3
+    systemctl daemon-reload
+    log_info "✅ Phoeix V0 探针已成功卸载。"
+    press_any_key
 }
-is_nezha_agent_v3_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
+uninstall_nezha_agent_v1() {
+    if ! is_nezha_agent_v1_installed; then
+        log_warn "Singapore-West V1 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v1 服务..."
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
+    systemctl daemon-reload
+    log_info "✅ Singapore-Wes V1 探针已成功卸载。"
+    press_any_key
 }
+
 uninstall_nezha_agent() {
+    # 这是一个辅助函数，确保清理标准版时不会报错
     if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
         systemctl stop nezha-agent.service &>/dev/null
         systemctl disable nezha-agent.service &>/dev/null
@@ -1997,249 +1819,284 @@ uninstall_nezha_agent() {
         rm -rf /opt/nezha/agent
     fi
 }
-# --- Generic Installer (ULTIMATE-FINAL VERSION) ---
-# This version creates a temporary directory and CDs into it before execution
-# to perfectly mimic the user's manual process.
-_nezha_agent_installer() {
-    # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
-    local version_id="$1"
-    local display_name="$2"
-    local script_url="$3"
-    local server_addr="$4"
-    local server_port="$5"
-    local server_key="$6"
-    local is_v1_style="$7"
 
-    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
-    local agent_dir="/opt/nezha/agent-${version_id}"
-
-    # 【关键修改】创建一个专用的临时工作目录
-    local WORK_DIR="/tmp/nezha-installer-$$" # $$ ensures a unique directory name
-    mkdir -p "$WORK_DIR"
-    if [ ! -d "$WORK_DIR" ]; then
-        log_error "无法创建临时工作目录，操作中止。"; press_any_key; return 1
-    fi
-    local SCRIPT_PATH_IN_WORKDIR="${WORK_DIR}/agent.sh"
-
-    log_info "为确保全新安装，将首先清理所有旧的同版本探针..."
-    _nezha_agent_uninstaller "$version_id" "$display_name" "silent"
-    uninstall_nezha_agent &>/dev/null
-    systemctl daemon-reload
-
-    ensure_dependencies "curl" "wget" "unzip" "sed" "coreutils"
-    clear
-    log_info "开始安装 ${display_name}..."
-    log_info "服务器信息: ${server_addr}:${server_port}"
-
-    log_info "正在下载官方安装脚本至: ${WORK_DIR}"
-    if ! curl -L "$script_url" -o "$SCRIPT_PATH_IN_WORKDIR"; then
-        log_error "下载官方脚本失败！"; rm -rf "$WORK_DIR"; press_any_key; return 1
-    fi
-    chmod +x "$SCRIPT_PATH_IN_WORKDIR"
-
-    log_info "第1步：执行官方原版脚本进行标准安装..."
-
-    # 【关键修改】保存当前目录，然后cd进入工作目录
-    local original_dir=$(pwd)
-    cd "$WORK_DIR"
-
-    if [[ "$is_v1_style" == "true" ]]; then
-        local nz_tls_val="false"
-        if [[ "$server_port" == "443" || "$server_port" == "2096" || "$server_port" == "5555" ]]; then
-             nz_tls_val="true"
-        fi
-
-        # 在当前目录下执行，完全模拟手动操作
-        env \
-            NZ_SERVER="${server_addr}:${server_port}" \
-            NZ_CLIENT_SECRET="$server_key" \
-            NZ_TLS="$nz_tls_val" \
-            ./agent.sh
-
-    else
-        bash ./agent.sh install_agent "$server_addr" "$server_port" "$server_key"
-    fi
-
-    # 【关键修改】返回原始目录并清理
-    cd "$original_dir"
-    rm -rf "$WORK_DIR"
-
-    if ! is_nezha_agent_installed; then
-        log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return 1
-    fi
-
-    # 后续的重命名和配置流程不变
-    log_info "标准服务安装成功，即将开始改造以实现共存..."
-    sleep 1
-
-    log_info "第2步：停止标准服务并重命名文件..."
-    systemctl stop nezha-agent.service &>/dev/null
-    systemctl disable nezha-agent.service &>/dev/null
-    mv /etc/systemd/system/nezha-agent.service "$service_file"
-    mv /opt/nezha/agent "$agent_dir"
-
-    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i "s|/opt/nezha/agent|${agent_dir}|g" "$service_file"
-
-    log_info "第4步：重载并启动改造后的 '${service_file##*/}' 服务..."
-    systemctl daemon-reload
-    systemctl enable "${service_file##*/}"
-    systemctl start "${service_file##*/}"
-
-    log_info "检查最终服务状态..."
-    sleep 2
-    if systemctl is-active --quiet "${service_file##*/}"; then
-        log_info "✅ ${display_name} 已成功安装并启动！"
-    else
-        log_error "${display_name} 最终启动失败！"
-        log_warn "显示详细状态以供诊断:"
-        systemctl status "${service_file##*/}" --no-pager -l
-    fi
-    press_any_key
-}
-# 同时，为 _nezha_agent_uninstaller 增加一个静默模式参数，以优化体验
-_nezha_agent_uninstaller() {
-    # Parameters: 1:version_id, 2:display_name, 3:mode
-    local version_id="$1"
-    local display_name="$2"
-    local mode="$3" # "silent" or ""
-    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
-    local agent_dir="/opt/nezha/agent-${version_id}"
-
-    if [ ! -f "$service_file" ]; then
-        if [ "$mode" != "silent" ]; then
-            log_warn "${display_name} 未安装，无需卸载。"
-            press_any_key
-        fi
-        return
-    fi
-
-    if [ "$mode" != "silent" ]; then
-        log_info "正在停止并禁用 ${display_name} 服务..."
-    fi
-    systemctl stop "${service_file##*/}" &>/dev/null
-    systemctl disable "${service_file##*/}" &>/dev/null
-    rm -f "$service_file"
-    rm -rf "$agent_dir"
-    systemctl daemon-reload
-
-    if [ "$mode" != "silent" ]; then
-        log_info "✅ ${display_name} 已成功卸载。"
-        press_any_key
-    fi
-}
-
-# --- Generic Uninstaller (Core Logic) ---
-_nezha_agent_uninstaller() {
-    # Parameters: 1:version_id, 2:display_name
-    local version_id="$1"
-    local display_name="$2"
-    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
-    local agent_dir="/opt/nezha/agent-${version_id}"
-
-    if [ ! -f "$service_file" ]; then
-        log_warn "${display_name} 未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    log_info "正在停止并禁用 ${display_name} 服务..."
-    systemctl stop "${service_file##*/}" &>/dev/null
-    systemctl disable "${service_file##*/}" &>/dev/null
-    rm -f "$service_file"
-    rm -rf "$agent_dir"
-    systemctl daemon-reload
-    log_info "✅ ${display_name} 已成功卸载。"
-    press_any_key
-}
-
-# --- Wrapper functions for each probe ---
 install_nezha_agent_v0() {
-    read -p "请输入 探针 1 (San Jose) 的面板密钥: " server_key
+    # --- 从函数第一个参数获取密钥 ---
+    local server_key="$1"
+
+    # --- 固定的服务器信息 ---
+    # 您可以在这里修改为您自己的服务器地址和端口
+    local server_addr="nz.wiitwo.eu.org"
+    local server_port="443"
+
+
+    # --- 获取密钥 ---
+    # 如果没有通过参数传入密钥，则提示用户输入
+    if [ -z "$server_key" ]; then
+        read -p "请输入San Jose V0哪吒面板面板密钥: " server_key
+    fi
+
+    # 最终检查密钥是否为空
     if [ -z "$server_key" ]; then
         log_error "面板密钥不能为空！操作中止。"; press_any_key; return
     fi
-    _nezha_agent_installer "v0" "探针 1 (San Jose)" \
-        "https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh" \
-        "nz.wiitwo.eu.org" "443" "$server_key" "false"
-}
 
-uninstall_nezha_agent_v0() {
-    _nezha_agent_uninstaller "v0" "探针 1 (San Jose)"
-}
-
-install_nezha_agent_v1() {
-    read -p "请输入安装指令以继续: " user_command
-    if [ "$user_command" != "csos" ]; then
-        log_error "指令错误，安装已中止。"; press_any_key; return 1;
-    fi
-    _nezha_agent_installer "v1" "探针 2 (London)" \
-        "https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh" \
-        "nz.ssong.eu.org" "8008" "HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1" "true"
-}
-
-uninstall_nezha_agent_v1() {
-    _nezha_agent_uninstaller "v1" "探针 2 (London)"
-}
-
-install_nezha_agent_v3() {
-    read -p "请输入安装指令以继续: " user_command
-    if [ "$user_command" != "csos" ]; then
-        log_error "指令错误，安装已中止。"; press_any_key; return 1;
-    fi
-    _nezha_agent_installer "v3" "探针 3 (Singapore-West)" \
-        "https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh" \
-        "sg.luckywu.eu.org" "2096" "sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp" "ture"
-}
-
-uninstall_nezha_agent_v3() {
-    _nezha_agent_uninstaller "v3" "探针 3 (Singapore-West)"
-}
-# =================================================================
-# 专用于探针3的、根据用户成功的命令定制的、最直接的安装函数
-# =================================================================
-install_probe3_directly() {
-
-    # 直接执行您验证成功的命令，不做任何修改
-    curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o /tmp/agent.sh && \
-    chmod +x /tmp/agent.sh && \
-    env NZ_SERVER='sg.luckywu.eu.org:2096' \
-        NZ_TLS='false' \
-        NZ_CLIENT_SECRET='sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp' \
-        /tmp/agent.sh
-
-    # 检查标准安装是否成功
-    if ! is_nezha_agent_installed; then
-        log_error "自动化脚本已无法解决，请使用手动命令安装。";
-        press_any_key;
-        return 1
+    # --- 安装过程 ---
+    local tls_option="--tls"
+    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
+        tls_option="";
     fi
 
-    # 如果标准安装成功，则执行后续的重命名和配置
-    log_info "标准探针安装成功！现在进行重命名和配置..."
-    local service_file="/etc/systemd/system/nezha-agent-v3.service"
-    local agent_dir="/opt/nezha/agent-v3"
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
 
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 执行脚本，传入固定的服务器信息和获取到的密钥
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    rm "$SCRIPT_PATH_TMP"
+
+    # 检查标准版是否安装成功
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
     systemctl stop nezha-agent.service &>/dev/null
     systemctl disable nezha-agent.service &>/dev/null
-    mv /etc/systemd/system/nezha-agent.service "$service_file"
-    mv /opt/nezha/agent "$agent_dir"
-    sed -i "s|/opt/nezha/agent|${agent_dir}|g" "$service_file"
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v0.service
+    mv /opt/nezha/agent /opt/nezha/agent-v0
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v0/nezha-agent|g' /etc/systemd/system/nezha-agent-v0.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v0' 服务..."
     systemctl daemon-reload
-    systemctl enable "${service_file##*/}"
-    systemctl start "${service_file##*/}"
+    systemctl enable nezha-agent-v0.service
+    systemctl start nezha-agent-v0.service
 
     log_info "检查最终服务状态..."
     sleep 2
-    if systemctl is-active --quiet "${service_file##*/}"; then
-        log_info "✅ 探针 3 (Singapore-West) 已成功安装并启动！"
+    if systemctl is-active --quiet nezha-agent-v0; then
+        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
     else
-        log_error "探针 3 (Singapore-West) 最终启动失败！"
+        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
         log_warn "显示详细状态以供诊断:"
-        systemctl status "${service_file##*/}" --no-pager -l
+        systemctl status nezha-agent-v0.service --no-pager -l
     fi
     press_any_key
 }
-# --- Main Menu for Agent ---
+install_nezha_agent_v3() {
+    # --- 从函数第一个参数获取密钥 ---
+    local server_key="$1"
+
+    # --- 固定的服务器信息 ---
+    # 您可以在这里修改为您自己的服务器地址和端口
+    local server_addr="nz.csosm.ip-ddns.com"
+    local server_port="443"
+
+
+    # --- 获取密钥 ---
+    # 如果没有通过参数传入密钥，则提示用户输入
+    if [ -z "$server_key" ]; then
+        read -p "请输入 Phoenix V0哪吒面板密钥: " server_key
+    fi
+
+    # 最终检查密钥是否为空
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"; press_any_key; return
+    fi
+
+    # --- 安装过程 ---
+    local tls_option="--tls"
+    if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
+        tls_option="";
+    fi
+
+    local SCRIPT_PATH_TMP="/tmp/nezha_install_orig.sh"
+
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    # 执行脚本，传入固定的服务器信息和获取到的密钥
+    bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" $tls_option
+    rm "$SCRIPT_PATH_TMP"
+
+    # 检查标准版是否安装成功
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v3.service
+    mv /opt/nezha/agent /opt/nezha/agent-v3
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent/nezha-agent|/opt/nezha/agent-v3/nezha-agent|g' /etc/systemd/system/nezha-agent-v3.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v3' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v3.service
+    systemctl start nezha-agent-v3.service
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet nezha-agent-v3; then
+        log_info "✅ Nezha V0 探针 (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha V0 探针 (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status nezha-agent-v3.service --no-pager -l
+    fi
+    press_any_key
+}
+
+uninstall_nezha_agent_v1() {
+    if ! is_nezha_agent_v1_installed; then
+        log_warn "Nezha V1 探针未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    log_info "正在停止并禁用 nezha-agent-v1 服务..."
+    systemctl stop nezha-agent-v1.service &>/dev/null
+    systemctl disable nezha-agent-v1.service &>/dev/null
+    rm -f /etc/systemd/system/nezha-agent-v1.service
+    rm -rf /opt/nezha/agent-v1
+    systemctl daemon-reload
+    log_info "✅ Nezha V1 探针已成功卸载。"
+    press_any_key
+}
+install_nezha_agent_v1() {
+    # --- 新增：交互式指令输入 ---
+    local user_command
+    read -p "请输入安装指令以继续: " user_command
+
+    # 检查输入的指令是否为 "csos"
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"
+        press_any_key
+        return 1
+    fi
+
+    # --- 全自动安装配置 ---
+    # (指令正确后，后续流程与之前完全相同)
+    # 所有参数已在此处硬编码，无需手动输入。
+    # 如果需要修改，请直接编辑下面的值。
+    local server_info="nz.ssong.eu.org:8008"
+    local server_secret="HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1"
+    local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
+
+    # --- 基础准备 ---
+    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    uninstall_nezha_agent_v1 &>/dev/null
+    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    systemctl daemon-reload
+
+    ensure_dependencies "curl" "wget" "unzip"
+    clear
+    log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
+    log_info "服务器信息: $server_info"
+    log_info "连接密钥: $server_secret"
+    log_info "启用TLS: $NZ_TLS"
+
+    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
+
+    log_info "正在下载官方V1安装脚本..."
+    if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
+        log_error "下载官方脚本失败！"; press_any_key; return
+    fi
+
+    chmod +x "$SCRIPT_PATH_TMP"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    export NZ_SERVER="$server_info"
+    export NZ_TLS="$NZ_TLS"
+    export NZ_CLIENT_SECRET="$server_secret"
+    bash "$SCRIPT_PATH_TMP"
+    unset NZ_SERVER NZ_TLS NZ_CLIENT_SECRET
+    rm "$SCRIPT_PATH_TMP"
+
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+
+    mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v1.service
+    mv /opt/nezha/agent /opt/nezha/agent-v1
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v1.service
+
+    log_info "第4步：重载并启动改造后的 'nezha-agent-v1' 服务..."
+    systemctl daemon-reload
+    systemctl enable nezha-agent-v1.service
+    systemctl start nezha-agent-v1.service
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet nezha-agent-v1; then
+        log_info "✅ Nezha V1 探针 (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha V1 探针 (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status nezha-agent-v1.service --no-pager -l
+    fi
+    press_any_key
+}
+install_nezha_dashboard_v0() {
+    ensure_dependencies "wget"
+    log_info "即将运行 fscarmen 的 V0 面板安装/管理脚本..."
+    press_any_key
+    bash <(wget -qO- https://raw.githubusercontent.com/fscarmen2/Argo-Nezha-Service-Container/main/dashboard.sh)
+    log_info "脚本执行完毕。"
+    press_any_key
+}
+install_nezha_dashboard_v1() {
+    ensure_dependencies "curl"
+    log_info "即将运行官方 V1 面板安装/管理脚本..."
+    press_any_key
+    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && sudo ./nezha.sh
+    log_info "脚本执行完毕。"
+    press_any_key
+}
+is_nezha_agent_v0_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
+}
+is_nezha_agent_v3_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
+}
+is_nezha_agent_v1_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
+}
 nezha_agent_menu() {
     while true; do
         clear
@@ -2248,32 +2105,32 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${GREEN}(已安装)$NC        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $RED卸载 探针 1 (San Jose)$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${YELLOW}(未安装)$NC        $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 ${YELLOW}(未安装)$NC         $CYAN║$NC"
         fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${GREEN}(已安装)$NC          $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. $RED卸载 探针 2 (London)$NC                        $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${YELLOW}(未安装)$NC          $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
         fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v3_installed; then
-            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${GREEN}(已安装)$NC  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   6. $RED卸载 探针 3 (Singapore-West)$NC                $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${GREEN}(已安装)$NC          $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${YELLOW}(未安装)$NC  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V0 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
         fi
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
@@ -2285,15 +2142,16 @@ nezha_agent_menu() {
         2) uninstall_nezha_agent_v0 ;;
         3) install_nezha_agent_v1 ;;
         4) uninstall_nezha_agent_v1 ;;
-        5) install_probe3_directly ;;
+        5) install_nezha_agent_v3 ;;
         6) uninstall_nezha_agent_v3 ;;
         0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
-
-# --- Dashboard Menu (No changes needed) ---
 nezha_dashboard_menu() {
     while true; do
         clear
@@ -2317,7 +2175,10 @@ nezha_dashboard_menu() {
         1) install_nezha_dashboard_v0 ;;
         2) install_nezha_dashboard_v1 ;;
         0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
         esac
     done
 }
@@ -2629,44 +2490,26 @@ setup_auto_reverse_proxy() {
     else
         log_info "将代理到预设的本地端口: $local_port"
     fi
-
-    # --- 逻辑顺序已修改：Nginx 优先 ---
-
-    # 1. 首先检查 Nginx
-    if command -v nginx &>/dev/null; then
-        log_info "检测到 Nginx，将使用 Nginx 进行反代。"
-        # 确保 Nginx 相关的依赖已安装
-        ensure_dependencies "python3-certbot-nginx"
+    if command -v caddy &>/dev/null; then
+        _configure_caddy_proxy "$domain_input" "$local_port"
+    elif command -v nginx &>/dev/null; then
         if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             press_any_key
-            return 1
+            return
         fi
         _configure_nginx_proxy "$domain_input" "$local_port"
-
-    # 2. 如果没有 Nginx，再检查 Caddy
-    elif command -v caddy &>/dev/null; then
-        log_info "未检测到 Nginx，但检测到 Caddy，将使用 Caddy 进行反代。"
-        _configure_caddy_proxy "$domain_input" "$local_port"
-
-    # 3. 如果两者都没有，默认安装 Nginx
+    elif command -v apache2 &>/dev/null; then
+        log_error "Apache 自动配置暂未实现。"
     else
-        log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx 和 Certbot..."
-        ensure_dependencies "nginx" "python3-certbot-nginx"
-        if command -v nginx &>/dev/null; then
-            log_info "Nginx 安装成功，继续配置..."
-            if ! apply_ssl_certificate "$domain_input"; then
-                log_error "证书处理失败，无法继续配置 Nginx 反代。"
-                press_any_key
-                return 1
-            fi
-            _configure_nginx_proxy "$domain_input" "$local_port"
+        log_warn "未检测到任何 Web 服务器。将为您自动安装 Caddy..."
+        ensure_dependencies "caddy"
+        if command -v caddy &>/dev/null; then
+            _configure_caddy_proxy "$domain_input" "$local_port"
         else
-            log_error "Nginx 安装失败，无法继续。"
-            return 1
+            log_error "Caddy 安装失败，无法继续。"
         fi
     fi
-
     if [ -z "$1" ]; then
         press_any_key
     fi
