@@ -2198,24 +2198,17 @@ uninstall_nezha_agent_v3() {
 # 专用于探针3的、根据用户成功的命令定制的、最直接的安装函数
 # =================================================================
 install_probe3_directly() {
-    log_info "正在为探针3，使用您提供的、已验证成功的最终安装命令..."
-
-    # 清理旧环境
-    _nezha_agent_uninstaller "v3" "探针 3 (Singapore-West)" "silent"
-    uninstall_nezha_agent &>/dev/null
-    systemctl daemon-reload
 
     # 直接执行您验证成功的命令，不做任何修改
     curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o /tmp/agent.sh && \
     chmod +x /tmp/agent.sh && \
-    env NZ_SERVER='sg.luckywu.eu.org:2096' \
+    env NZ_SERVER='nz.luckywu.eu.org:8008' \
         NZ_TLS='true' \
         NZ_CLIENT_SECRET='sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp' \
         /tmp/agent.sh
 
     # 检查标准安装是否成功
     if ! is_nezha_agent_installed; then
-        log_error "最终的直接命令安装仍然失败。问题100%在于您的服务器环境。";
         log_error "自动化脚本已无法解决，请使用手动命令安装。";
         press_any_key;
         return 1
