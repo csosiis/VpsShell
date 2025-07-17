@@ -2153,26 +2153,34 @@ nezha_agent_menu() {
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${GREEN}(已安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${GREEN}(已安装)$NC        $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${YELLOW}(未安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装/重装 探针 1 (San Jose) ${YELLOW}(未安装)$NC        $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC   2. $RED卸载 探针 1 (San Jose)$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 探针 1 (San Jose)$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${GREEN}(已安装)$NC        $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${GREEN}(已安装)$NC            $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${YELLOW}(未安装)$NC        $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 探针 2 (London) ${YELLOW}(未安装)$NC            $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC   4. $RED卸载 探针 2 (London)$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 探针 2 (London)$NC                          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         if is_nezha_agent_v3_installed; then
-            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${GREEN}(已安装)$NC   $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${GREEN}(已安装)$NC  $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${YELLOW}(未安装)$NC   $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 探针 3 (Singapore-West) ${YELLOW}(未安装)$NC  $CYAN║$NC"
         fi
-        echo -e "$CYAN║$NC   6. $RED卸载 探针 3 (Singapore-West)$NC                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 探针 3 (Singapore-West)$NC                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
