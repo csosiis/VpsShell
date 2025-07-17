@@ -1997,8 +1997,8 @@ uninstall_nezha_agent() {
         rm -rf /opt/nezha/agent
     fi
 }
-# --- Generic Installer (FINAL VERSION) ---
-# This version writes variables directly into the script to bypass sudo env reset issues.
+# --- Generic Installer (FINAL-FINAL VERSION) ---
+# Replicates the user's proven successful command: env VAR=... /path/to/script
 _nezha_agent_installer() {
     # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
     local version_id="$1"
@@ -2018,7 +2018,7 @@ _nezha_agent_installer() {
     uninstall_nezha_agent &>/dev/null
     systemctl daemon-reload
 
-    ensure_dependencies "curl" "wget" "unzip"
+    ensure_dependencies "curl" "wget" "unzip" "sed" "coreutils"
     clear
     log_info "开始安装 ${display_name}..."
     log_info "服务器信息: ${server_addr}:${server_port}"
@@ -2036,24 +2036,22 @@ _nezha_agent_installer() {
              nz_tls_val="true"
         fi
 
-        # 【关键修复】将 export 命令直接写入官方脚本的顶部，绕过 sudo 的环境变量清理
-        log_info "正在向官方脚本注入配置..."
-        sed -i "1i export NZ_TLS='${nz_tls_val}'" "$SCRIPT_PATH_TMP"
-        sed -i "1i export NZ_CLIENT_SECRET='${server_key}'" "$SCRIPT_PATH_TMP"
-        sed -i "1i export NZ_SERVER='${server_addr}:${server_port}'" "$SCRIPT_PATH_TMP"
+        # 【最终修复】使用 env 命令配合直接执行脚本的路径，完全复刻用户成功的命令模式
+        env \
+            NZ_SERVER="${server_addr}:${server_port}" \
+            NZ_CLIENT_SECRET="$server_key" \
+            NZ_TLS="$nz_tls_val" \
+            "$SCRIPT_PATH_TMP" # 直接执行脚本，而不是用 'bash' 去调用
 
-        # 现在直接执行脚本，无需再传递任何变量
-        bash "$SCRIPT_PATH_TMP"
     else
-        # v0 脚本不受 sudo 影响，因为它通过命令行参数传递，所以保持原样
+        # v0 脚本不受影响，保持原样
         local tls_option="--tls"
         if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
             tls_option=""
         fi
         bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" "$tls_option"
     fi
-    # 清理临时文件
-    # rm "$SCRIPT_PATH_TMP"
+    rm "$SCRIPT_PATH_TMP"
 
     if ! is_nezha_agent_installed; then
         log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return 1
