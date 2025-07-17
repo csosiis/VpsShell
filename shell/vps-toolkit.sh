@@ -2202,8 +2202,8 @@ install_probe3_directly() {
     # 直接执行您验证成功的命令，不做任何修改
     curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o /tmp/agent.sh && \
     chmod +x /tmp/agent.sh && \
-    env NZ_SERVER='nz.luckywu.eu.org:8008' \
-        NZ_TLS='true' \
+    env NZ_SERVER='sg.luckywu.eu.org:2096' \
+        NZ_TLS='false' \
         NZ_CLIENT_SECRET='sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp' \
         /tmp/agent.sh
 
