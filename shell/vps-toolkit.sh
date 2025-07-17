@@ -2273,7 +2273,7 @@ nezha_agent_menu() {
         if is_nezha_agent_v3_installed; then
             echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${GREEN}(已安装)$NC    $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${YELLOW}(未安装)$NC   $CYAN║$NC"
+             echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${YELLOW}(未安装)$NC  $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. $RED卸载 Singopre-West V0 探针$NC                  $CYAN║$NC"
@@ -2302,18 +2302,18 @@ nezha_agent_menu() {
 # 修正后的 uninstall_nezha_agent_v3
 uninstall_nezha_agent_v3() {
     if ! is_nezha_agent_v3_installed; then
-        log_warn "Singapore-West V3 探针未安装，无需卸载。"
+        log_warn "Singapore-West V1 探针未安装，无需卸载。"
         press_any_key
         return
     fi
-    log_info "正在停止并禁用 nezha-agent-v3 服务..."
+    log_info "正在停止并禁用 Singapore-West V1 探针服务..."
     systemctl stop nezha-agent-v3.service &>/dev/null
     systemctl disable nezha-agent-v3.service &>/dev/null
     rm -f /etc/systemd/system/nezha-agent-v3.service
     rm -rf /opt/nezha/agent-v3
     systemctl daemon-reload
     # --- 修正行在这里 ---
-    log_info "✅ Singapore-West V3 探针已成功卸载。"
+    log_info "✅ Singapore-West V1 探针已成功卸载。"
     press_any_key
 }
 
@@ -2334,8 +2334,8 @@ install_nezha_agent_v3() {
     # (指令正确后，后续流程与之前完全相同)
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
-    local server_info="nz.luckywu.eu.org:8443"
-    local server_secret="Igx7ilBklWhhY4MT3zfVOwaClVbLpFY6"
+    local server_info="sg.luckywu.eu.org:2096"
+    local server_secret="sWQ1TZ36eeJjlNcIdgTz1PsOQwYgP3Hp"
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
@@ -2351,7 +2351,7 @@ install_nezha_agent_v3() {
     log_info "连接密钥: $server_secret"
     log_info "启用TLS: $NZ_TLS"
 
-    local SCRIPT_PATH_TMP="/tmp/agent_v1_install_orig.sh"
+    local SCRIPT_PATH_TMP="/tmp/agent_v3_install_orig.sh"
 
     log_info "正在下载官方V1安装脚本..."
     if ! curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh -o "$SCRIPT_PATH_TMP"; then
@@ -2381,10 +2381,10 @@ install_nezha_agent_v3() {
     systemctl disable nezha-agent.service &>/dev/null
 
     mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v3.service
-    mv /opt/nezha/agent /opt/nezha/agent-v1
+    mv /opt/nezha/agent /opt/nezha/agent-v3
 
     log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v1|g' /etc/systemd/system/nezha-agent-v3.service
+    sed -i 's|/opt/nezha/agent|/opt/nezha/agent-v3|g' /etc/systemd/system/nezha-agent-v3.service
 
     log_info "第4步：重载并启动改造后的 'nezha-agent-v3' 服务..."
     systemctl daemon-reload
