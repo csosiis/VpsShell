@@ -1999,6 +1999,7 @@ uninstall_nezha_agent() {
 }
 
 # --- Generic Installer (Core Logic) ---
+# 使用了更可靠的环境变量传递方式来提高兼容性
 _nezha_agent_installer() {
     # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
     local version_id="$1"
@@ -2014,7 +2015,8 @@ _nezha_agent_installer() {
     local SCRIPT_PATH_TMP="/tmp/nezha_install_${version_id}.sh"
 
     log_info "为确保全新安装，将首先清理所有旧的同版本探针..."
-    _nezha_agent_uninstaller "$version_id" "$display_name" >/dev/null 2>&1
+    # 调用内部卸载函数，并抑制其输出，避免不必要的提示
+    _nezha_agent_uninstaller "$version_id" "$display_name" "silent"
     uninstall_nezha_agent &>/dev/null
     systemctl daemon-reload
 
@@ -2031,14 +2033,15 @@ _nezha_agent_installer() {
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
     if [[ "$is_v1_style" == "true" ]]; then
-        export NZ_SERVER="${server_addr}:${server_port}"
-        export NZ_CLIENT_SECRET="$server_key"
-        export NZ_TLS="false" # Hardcoded for v1 style
-        if [ "$server_port" == "443" ] || [ "$server_port" == "2096" ]; then
-             export NZ_TLS="true"
+        local nz_tls_val="false"
+        if [[ "$server_port" == "443" || "$server_port" == "2096" || "$server_port" == "5555" ]]; then
+             nz_tls_val="true"
         fi
+        # 【关键修改】将环境变量与执行命令放在同一行，以确保传递成功
+        NZ_SERVER="${server_addr}:${server_port}" \
+        NZ_CLIENT_SECRET="$server_key" \
+        NZ_TLS="$nz_tls_val" \
         bash "$SCRIPT_PATH_TMP"
-        unset NZ_SERVER NZ_CLIENT_SECRET NZ_TLS
     else
         local tls_option="--tls"
         if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
@@ -2078,6 +2081,38 @@ _nezha_agent_installer() {
         systemctl status "${service_file##*/}" --no-pager -l
     fi
     press_any_key
+}
+
+# 同时，为 _nezha_agent_uninstaller 增加一个静默模式参数，以优化体验
+_nezha_agent_uninstaller() {
+    # Parameters: 1:version_id, 2:display_name, 3:mode
+    local version_id="$1"
+    local display_name="$2"
+    local mode="$3" # "silent" or ""
+    local service_file="/etc/systemd/system/nezha-agent-${version_id}.service"
+    local agent_dir="/opt/nezha/agent-${version_id}"
+
+    if [ ! -f "$service_file" ]; then
+        if [ "$mode" != "silent" ]; then
+            log_warn "${display_name} 未安装，无需卸载。"
+            press_any_key
+        fi
+        return
+    fi
+
+    if [ "$mode" != "silent" ]; then
+        log_info "正在停止并禁用 ${display_name} 服务..."
+    fi
+    systemctl stop "${service_file##*/}" &>/dev/null
+    systemctl disable "${service_file##*/}" &>/dev/null
+    rm -f "$service_file"
+    rm -rf "$agent_dir"
+    systemctl daemon-reload
+
+    if [ "$mode" != "silent" ]; then
+        log_info "✅ ${display_name} 已成功卸载。"
+        press_any_key
+    fi
 }
 
 # --- Generic Uninstaller (Core Logic) ---
