@@ -1997,8 +1997,8 @@ uninstall_nezha_agent() {
         rm -rf /opt/nezha/agent
     fi
 }
-# --- Generic Installer (FINAL DEBUGGING VERSION) ---
-# Added a debug step to see the environment inside the official script.
+# --- Generic Installer (FINAL VERSION) ---
+# This version writes variables directly into the script to bypass sudo env reset issues.
 _nezha_agent_installer() {
     # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
     local version_id="$1"
@@ -2029,34 +2029,31 @@ _nezha_agent_installer() {
     fi
     chmod +x "$SCRIPT_PATH_TMP"
 
-    # ===================== 新增的终极调试步骤 =====================
-    log_info "正在注入调试代码到官方脚本中..."
-    # 在官方脚本的第一行前插入几行调试命令
-    sed -i '1i echo "--- DEBUG START ---"' "$SCRIPT_PATH_TMP"
-    sed -i '2i echo "Current Shell: $SHELL"' "$SCRIPT_PATH_TMP"
-    sed -i '3i echo "--- ENV VARS ---"' "$SCRIPT_PATH_TMP"
-    sed -i '4i env' "$SCRIPT_PATH_TMP" # 打印所有环境变量
-    sed -i '5i echo "--- DEBUG END ---"' "$SCRIPT_PATH_TMP"
-    # ==============================================================
-
     log_info "第1步：执行官方原版脚本进行标准安装..."
     if [[ "$is_v1_style" == "true" ]]; then
         local nz_tls_val="false"
         if [[ "$server_port" == "443" || "$server_port" == "2096" || "$server_port" == "5555" ]]; then
              nz_tls_val="true"
         fi
-        NZ_SERVER="${server_addr}:${server_port}" \
-        NZ_CLIENT_SECRET="$server_key" \
-        NZ_TLS="$nz_tls_val" \
+
+        # 【关键修复】将 export 命令直接写入官方脚本的顶部，绕过 sudo 的环境变量清理
+        log_info "正在向官方脚本注入配置..."
+        sed -i "1i export NZ_TLS='${nz_tls_val}'" "$SCRIPT_PATH_TMP"
+        sed -i "1i export NZ_CLIENT_SECRET='${server_key}'" "$SCRIPT_PATH_TMP"
+        sed -i "1i export NZ_SERVER='${server_addr}:${server_port}'" "$SCRIPT_PATH_TMP"
+
+        # 现在直接执行脚本，无需再传递任何变量
         bash "$SCRIPT_PATH_TMP"
     else
+        # v0 脚本不受 sudo 影响，因为它通过命令行参数传递，所以保持原样
         local tls_option="--tls"
         if [[ "$server_port" == "80" || "$server_port" == "8080" ]]; then
             tls_option=""
         fi
         bash "$SCRIPT_PATH_TMP" install_agent "$server_addr" "$server_port" "$server_key" "$tls_option"
     fi
-    rm "$SCRIPT_PATH_TMP"
+    # 清理临时文件
+    # rm "$SCRIPT_PATH_TMP"
 
     if ! is_nezha_agent_installed; then
         log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return 1
