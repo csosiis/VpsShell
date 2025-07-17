@@ -1634,7 +1634,203 @@ uninstall_maccms() {
     press_any_key
 }
 
+# =================================================
+# 函数: substore_do_uninstall
+# 说明: 卸载 Sub-Store，包括服务文件和安装目录。
+# =================================================
+substore_do_uninstall() {
+    if ! is_substore_installed; then
+        log_warn "Sub-Store 未安装，无需卸载。"
+        press_any_key
+        return
+    fi
+    echo ""
+    read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+    set -e
+    log_info "正在停止并禁用 Sub-Store 服务..."
+    systemctl stop "$SUBSTORE_SERVICE_NAME"
+    systemctl disable "$SUBSTORE_SERVICE_NAME"
+    log_info "正在删除服务文件..."
+    rm -f "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload
+    log_info "正在删除 Sub-Store 安装目录..."
+    rm -rf "$SUBSTORE_INSTALL_DIR"
+    set +e
+    log_info "✅ Sub-Store 已成功卸载。"
+    press_any_key
+}
 
+# =================================================
+# 函数: update_sub_store_app
+# 说明: 从 GitHub 下载最新的 JS 文件和前端资源来更新 Sub-Store。
+# =================================================
+update_sub_store_app() {
+    if ! is_substore_installed; then
+        log_warn "Sub-Store 未安装，无法更新。"
+        press_any_key
+        return
+    fi
+    log_info "正在准备更新 Sub-Store..."
+    cd "$SUBSTORE_INSTALL_DIR" || { log_error "无法进入安装目录: $SUBSTORE_INSTALL_DIR"; return; }
+
+    log_info "正在下载最新的后端 bundle..."
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new; then
+        log_error "下载后端文件失败！"
+        rm -f sub-store.bundle.js.new
+        press_any_key
+        return
+    fi
+
+    log_info "正在下载最新的前端资源..."
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip.new; then
+        log_error "下载前端资源失败！"
+        rm -f dist.zip.new sub-store.bundle.js.new
+        press_any_key
+        return
+    fi
+
+    log_info "正在备份旧文件并应用更新..."
+    mv sub-store.bundle.js sub-store.bundle.js.bak
+    mv sub-store.bundle.js.new sub-store.bundle.js
+
+    rm -rf frontend.bak
+    mv frontend frontend.bak
+    unzip -q -o dist.zip.new && mv dist frontend && rm dist.zip.new
+
+    log_info "文件更新完毕，正在重启服务..."
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    sleep 3
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ Sub-Store 更新成功并已重启！"
+    else
+        log_error "服务重启失败，请使用日志功能排查问题。"
+    fi
+    press_any_key
+}
+
+# =================================================
+# 函数: substore_view_access_link
+# 说明: 从服务文件中读取配置并显示访问链接。
+# =================================================
+substore_view_access_link() {
+    if ! is_substore_installed; then
+        log_warn "Sub-Store 未安装，无法查看链接。"
+        return
+    fi
+    clear
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
+    local api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2 | tr -d '/')
+    local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
+    local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
+
+    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
+    if [ -n "$proxy_domain" ]; then
+        log_info "检测到反向代理域名，请优先使用域名访问："
+        echo -e "\n  $YELLOW前端地址: https://$proxy_domain$NC"
+        echo -e "  $YELLOW后端地址: https://$proxy_domain/$api_key$NC\n"
+        echo -e "$CYAN-----------------------------------------------------------$NC"
+    fi
+
+    log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
+    echo -e "\n  $YELLOW前端地址: http://$ipv4_addr:$frontend_port$NC"
+    echo -e "  $YELLOW后端地址: http://$ipv4_addr:$frontend_port/$api_key$NC\n"
+    echo -e "$CYAN-----------------------------------------------------------$NC"
+}
+
+# =================================================
+# 函数: substore_reset_ports
+# 说明: 重新设置 Sub-Store 的前端和后端端口。
+# =================================================
+substore_reset_ports() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    log_info "准备重置 Sub-Store 端口..."
+    local NEW_FRONTEND_PORT
+    while true; do
+        read -p "请输入新的前端访问端口 [默认: 3000]: " port_input
+        NEW_FRONTEND_PORT=${port_input:-"3000"}
+        if check_port "$NEW_FRONTEND_PORT"; then break; fi
+    done
+    local NEW_BACKEND_PORT
+    while true; do
+        read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input
+        NEW_BACKEND_PORT=${backend_port_input:-"3001"}
+        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
+            if check_port "$NEW_BACKEND_PORT"; then break; fi
+        fi
+    done
+
+    sed -i "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    sed -i "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"
+    press_any_key
+}
+
+# =================================================
+# 函数: substore_reset_api_key
+# 说明: 重置 Sub-Store 的 API 密钥。
+# =================================================
+substore_reset_api_key() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    log_info "准备重置 API 密钥..."
+    local NEW_API_KEY
+    read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
+    NEW_API_KEY=${user_api_key:-$(generate_random_password)}
+
+    sed -i "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload
+    systemctl restart "$SUBSTORE_SERVICE_NAME"
+    log_info "✅ API 密钥已更新，服务已重启。"
+    log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
+    press_any_key
+}
+
+# =================================================
+# 函数: substore_setup_reverse_proxy
+# 说明: 为 Sub-Store 设置或更换反向代理。
+# =================================================
+substore_setup_reverse_proxy() {
+    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
+
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | cut -d'=' -f2)
+    local domain
+
+    echo ""
+    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
+    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
+    echo ""
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then
+        log_error "域名不能为空，操作已取消。"
+        press_any_key
+        return
+    fi
+
+    # 调用通用的反代设置函数
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
+
+    # 检查反代是否成功 (这是一个简化的检查，主要依赖 setup_auto_reverse_proxy 的返回)
+    if [ $? -eq 0 ]; then
+        log_info "正在将域名保存到服务配置中以供显示..."
+        # 如果已有域名配置行，则替换；否则追加
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
+        else
+            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
+        fi
+        systemctl daemon-reload
+        log_info "✅ Sub-Store 反向代理设置完成！"
+    else
+        log_error "自动反向代理配置失败，请检查之前的错误信息。"
+    fi
+    press_any_key
+}
 substore_manage_menu() {
     while true; do
         clear
