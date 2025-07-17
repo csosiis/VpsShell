@@ -1997,9 +1997,8 @@ uninstall_nezha_agent() {
         rm -rf /opt/nezha/agent
     fi
 }
-
-# --- Generic Installer (Core Logic) ---
-# 使用了更可靠的环境变量传递方式来提高兼容性
+# --- Generic Installer (FINAL DEBUGGING VERSION) ---
+# Added a debug step to see the environment inside the official script.
 _nezha_agent_installer() {
     # Parameters: 1:version_id, 2:display_name, 3:script_url, 4:server_addr, 5:server_port, 6:server_key, 7:is_v1_style
     local version_id="$1"
@@ -2015,7 +2014,6 @@ _nezha_agent_installer() {
     local SCRIPT_PATH_TMP="/tmp/nezha_install_${version_id}.sh"
 
     log_info "为确保全新安装，将首先清理所有旧的同版本探针..."
-    # 调用内部卸载函数，并抑制其输出，避免不必要的提示
     _nezha_agent_uninstaller "$version_id" "$display_name" "silent"
     uninstall_nezha_agent &>/dev/null
     systemctl daemon-reload
@@ -2031,13 +2029,22 @@ _nezha_agent_installer() {
     fi
     chmod +x "$SCRIPT_PATH_TMP"
 
+    # ===================== 新增的终极调试步骤 =====================
+    log_info "正在注入调试代码到官方脚本中..."
+    # 在官方脚本的第一行前插入几行调试命令
+    sed -i '1i echo "--- DEBUG START ---"' "$SCRIPT_PATH_TMP"
+    sed -i '2i echo "Current Shell: $SHELL"' "$SCRIPT_PATH_TMP"
+    sed -i '3i echo "--- ENV VARS ---"' "$SCRIPT_PATH_TMP"
+    sed -i '4i env' "$SCRIPT_PATH_TMP" # 打印所有环境变量
+    sed -i '5i echo "--- DEBUG END ---"' "$SCRIPT_PATH_TMP"
+    # ==============================================================
+
     log_info "第1步：执行官方原版脚本进行标准安装..."
     if [[ "$is_v1_style" == "true" ]]; then
         local nz_tls_val="false"
         if [[ "$server_port" == "443" || "$server_port" == "2096" || "$server_port" == "5555" ]]; then
              nz_tls_val="true"
         fi
-        # 【关键修改】将环境变量与执行命令放在同一行，以确保传递成功
         NZ_SERVER="${server_addr}:${server_port}" \
         NZ_CLIENT_SECRET="$server_key" \
         NZ_TLS="$nz_tls_val" \
@@ -2082,7 +2089,6 @@ _nezha_agent_installer() {
     fi
     press_any_key
 }
-
 # 同时，为 _nezha_agent_uninstaller 增加一个静默模式参数，以优化体验
 _nezha_agent_uninstaller() {
     # Parameters: 1:version_id, 2:display_name, 3:mode
