@@ -2228,7 +2228,7 @@ is_nezha_agent_v1_installed() {
 # =================================================
 uninstall_nezha_agent_v3() {
     if ! is_nezha_agent_v3_installed; then
-        log_warn "Phoenix V0 探针未安装，无需卸载。"
+        log_warn "Singapore-West V0 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -2238,7 +2238,7 @@ uninstall_nezha_agent_v3() {
     rm -f /etc/systemd/system/nezha-agent-v3.service
     rm -rf /opt/nezha/agent-v3
     systemctl daemon-reload
-    log_info "✅ Phoenix V0 探针已成功卸载。"
+    log_info "✅ Singapore-West V0 探针已成功卸载。"
     press_any_key
 }
 # 修正后的 nezha_agent_menu
@@ -2273,10 +2273,10 @@ nezha_agent_menu() {
         if is_nezha_agent_v3_installed; then
             echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${GREEN}(已安装)$NC    $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 安装/重装 Singopre-West V1 探针 ${YELLOW}(未安装)$NC   $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V0 探针$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Singopre-West V0 探针$NC                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
@@ -2302,7 +2302,7 @@ nezha_agent_menu() {
 # 修正后的 uninstall_nezha_agent_v3
 uninstall_nezha_agent_v3() {
     if ! is_nezha_agent_v3_installed; then
-        log_warn "Phoenix V3 探针未安装，无需卸载。"
+        log_warn "Singapore-West V3 探针未安装，无需卸载。"
         press_any_key
         return
     fi
@@ -2313,7 +2313,7 @@ uninstall_nezha_agent_v3() {
     rm -rf /opt/nezha/agent-v3
     systemctl daemon-reload
     # --- 修正行在这里 ---
-    log_info "✅ Phoenix V3 探针已成功卸载。"
+    log_info "✅ Singapore-West V3 探针已成功卸载。"
     press_any_key
 }
 
@@ -2334,7 +2334,7 @@ install_nezha_agent_v3() {
     # (指令正确后，后续流程与之前完全相同)
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
-    local server_info="140.245.36.228:2052"
+    local server_info="nz.luckywu.eu.org:8443"
     local server_secret="Igx7ilBklWhhY4MT3zfVOwaClVbLpFY6"
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
