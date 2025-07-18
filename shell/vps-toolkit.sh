@@ -2617,6 +2617,7 @@ ssl_session_tickets off;
 ssl_stapling on;
 ssl_stapling_verify on;
 resolver 8.8.8.8 8.8.4.4 valid=300s;
+client_max_body_size 512M;
 resolver_timeout 5s;
 EOF
         log_info "Nginx 公共 SSL 参数文件创建成功。"
