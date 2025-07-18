@@ -362,7 +362,7 @@ ui_panels_menu() {
             2) install_3xui; break ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
-        esac
+        esolac
     done
 }
 # =================================================
@@ -589,6 +589,14 @@ _handle_standalone_cert() {
 apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/$domain_name"
+    local certbot_email="temp@$domain_name" # 默认值
+    read -p "请输入您的 Let's Encrypt 注册邮箱 (用于接收过期通知，可留空): " user_email
+    if [[ -n "$user_email" ]]; then
+        certbot_email="$user_email"
+    else
+        log_warn "未输入邮箱，将使用临时邮箱: $certbot_email。请注意证书过期通知！"
+    fi
+
     if [ -d "$cert_dir" ]; then
         echo ""
         log_info "检测到域名 $domain_name 的证书已存在，跳过申请流程。"
@@ -604,7 +612,14 @@ apply_ssl_certificate() {
     else
         log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
         ensure_dependencies "nginx" "python3-certbot-nginx"
-        _handle_nginx_cert "$domain_name"
+        certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email "$certbot_email" --redirect
+        if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
+            log_info "✅ Nginx 模式证书申请成功！"
+            return 0
+        else
+            log_error "Nginx 模式证书申请失败！"
+            return 1
+        fi
     fi
     return $?
 }
@@ -2319,12 +2334,12 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 ${GREEN}(已安装)$NC           $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 ${YELLOW}(未安装)$N           $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 London V1 探针$NC                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2585,6 +2600,29 @@ _add_protocol_inbound() {
     log_info "✅ [$protocol] 协议配置添加成功！"
     return 0
 }
+
+# 新增函数：确保Nginx公共SSL参数文件存在
+_ensure_nginx_ssl_params_conf() {
+    local ssl_params_file="/etc/nginx/conf.d/ssl_params.conf"
+    if [ ! -f "$ssl_params_file" ]; then
+        log_info "创建 Nginx 公共 SSL 参数文件: $ssl_params_file"
+        cat <<'EOF' >"$ssl_params_file"
+# /etc/nginx/conf.d/ssl_params.conf
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+ssl_prefer_server_ciphers off;
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+EOF
+        log_info "Nginx 公共 SSL 参数文件创建成功。"
+    fi
+}
+
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -2613,8 +2651,7 @@ server {
     # SSL 证书配置
     ssl_certificate $cert_path;
     ssl_certificate_key $key_path;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+    include /etc/nginx/conf.d/ssl_params.conf; # 引入公共 SSL 配置
 
     # 反向代理配置
     location / {
@@ -2697,6 +2734,7 @@ setup_auto_reverse_proxy() {
     if command -v caddy &>/dev/null; then
         _configure_caddy_proxy "$domain_input" "$local_port"
     elif command -v nginx &>/dev/null; then
+        _ensure_nginx_ssl_params_conf # 确保公共 SSL 配置存在
         if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             press_any_key
@@ -3171,6 +3209,7 @@ initial_setup_check() {
         echo ""
         log_info "脚本首次运行，开始自动设置..."
         _create_shortcut "sv"
+        _ensure_nginx_ssl_params_conf # 在首次运行时创建公共 SSL 配置
         log_info "创建标记文件以跳过下次检查。"
         touch "$FLAG_FILE"
         echo ""
