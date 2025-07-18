@@ -1,4 +1,3 @@
-root@sanjose:~/sub-store/data# cat handler.js
 // 引入所需模块
 const http = require('http');
 const fs = require('fs').promises;
@@ -65,16 +64,14 @@ async function handleUpdateRequest(requestData) {
 
     // 步骤 3: 使用 rsync 同步文件到远程服务器
     const remoteServer = `${REMOTE_SERVER_USER}@${REMOTE_SERVER_IP}`;
-    const sshOptions = `-o 'StrictHostKeyChecking=no'`; // 新增！SSH 非交互式选项
+    const sshOptions = `-o 'StrictHostKeyChecking=no'`;
     console.log(`⏳ 步骤 3/4: 正在使用 rsync 同步文件到 ${remoteServer}...`);
-    // 修正！在 ssh 命令中加入 sshOptions
     const rsyncCommand = `rsync -avzP -e "ssh -i ${IDENTITY_FILE_PATH} ${sshOptions}" --rsync-path="sudo rsync" ${TARGET_FILE_PATH} ${remoteServer}:${REMOTE_TARGET_PATH}`;
     await executeCommand(rsyncCommand);
     console.log(`👍 步骤 3/4: 文件同步成功。`);
 
     // 步骤 4: 重启远程服务器上的服务
     console.log(`⏳ 步骤 4/4: 正在重启远程服务器上的 ${SERVICE_TO_RESTART}...`);
-    // 修正！在 ssh 命令中加入 sshOptions
     const sshCommand = `ssh -i ${IDENTITY_FILE_PATH} ${sshOptions} ${remoteServer} "sudo systemctl restart ${SERVICE_TO_RESTART}"`;
     await executeCommand(sshCommand);
     console.log(`👍 步骤 4/4: 远程服务重启成功。`);
@@ -84,7 +81,6 @@ async function handleUpdateRequest(requestData) {
   }
 }
 
-// HTTP 服务器部分保持不变...
 const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/') {
         let body = '';
