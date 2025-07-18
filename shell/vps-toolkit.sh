@@ -589,14 +589,6 @@ _handle_standalone_cert() {
 apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/$domain_name"
-    local certbot_email="temp@$domain_name" # 默认值
-    read -p "请输入您的 Let's Encrypt 注册邮箱 (用于接收过期通知，可留空): " user_email
-    if [[ -n "$user_email" ]]; then
-        certbot_email="$user_email"
-    else
-        log_warn "未输入邮箱，将使用临时邮箱: $certbot_email。请注意证书过期通知！"
-    fi
-
     if [ -d "$cert_dir" ]; then
         echo ""
         log_info "检测到域名 $domain_name 的证书已存在，跳过申请流程。"
@@ -612,14 +604,7 @@ apply_ssl_certificate() {
     else
         log_info "未检测到 Caddy 或 Apache，将默认使用 Nginx 模式。"
         ensure_dependencies "nginx" "python3-certbot-nginx"
-        certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email "$certbot_email" --redirect
-        if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
-            log_info "✅ Nginx 模式证书申请成功！"
-            return 0
-        else
-            log_error "Nginx 模式证书申请失败！"
-            return 1
-        fi
+        _handle_nginx_cert "$domain_name"
     fi
     return $?
 }
@@ -1649,211 +1634,7 @@ uninstall_maccms() {
     press_any_key
 }
 
-# =================================================
-# 函数: substore_do_uninstall
-# 说明: 卸载 Sub-Store，包括服务文件和安装目录。
-# =================================================
-substore_do_uninstall() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-    echo ""
-    read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
-    fi
-    set -e
-    log_info "正在停止并禁用 Sub-Store 服务..."
-    systemctl stop "$SUBSTORE_SERVICE_NAME"
-    systemctl disable "$SUBSTORE_SERVICE_NAME"
-    log_info "正在删除服务文件..."
-    rm -f "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    log_info "正在删除 Sub-Store 安装目录..."
-    rm -rf "$SUBSTORE_INSTALL_DIR"
-    set +e
-    log_info "✅ Sub-Store 已成功卸载。"
-    press_any_key
-}
 
-# =================================================
-# 函数: update_sub_store_app
-# 说明: 从 GitHub 下载最新的 JS 文件和前端资源来更新 Sub-Store。
-# =================================================
-update_sub_store_app() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无法更新。"
-        press_any_key
-        return
-    fi
-    log_info "正在准备更新 Sub-Store..."
-    cd "$SUBSTORE_INSTALL_DIR" || { log_error "无法进入安装目录: $SUBSTORE_INSTALL_DIR"; return; }
-
-    log_info "正在下载最新的后端 bundle..."
-    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new; then
-        log_error "下载后端文件失败！"
-        rm -f sub-store.bundle.js.new
-        press_any_key
-        return
-    fi
-
-    log_info "正在下载最新的前端资源..."
-    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip.new; then
-        log_error "下载前端资源失败！"
-        rm -f dist.zip.new sub-store.bundle.js.new
-        press_any_key
-        return
-    fi
-
-    log_info "正在备份旧文件并应用更新..."
-    mv sub-store.bundle.js sub-store.bundle.js.bak
-    mv sub-store.bundle.js.new sub-store.bundle.js
-
-    rm -rf frontend.bak
-    mv frontend frontend.bak
-    unzip -q -o dist.zip.new && mv dist frontend && rm dist.zip.new
-
-    log_info "文件更新完毕，正在重启服务..."
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    sleep 3
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ Sub-Store 更新成功并已重启！"
-    else
-        log_error "服务重启失败，请使用日志功能排查问题。"
-    fi
-    press_any_key
-}
-
-# =================================================
-# 函数: substore_view_access_link
-# 说明: 从服务文件中读取配置并显示访问链接。 (已更新为带 ?api= 参数的格式)
-# =================================================
-substore_view_access_link() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无法查看链接。"
-        return
-    fi
-    clear
-    # 解析服务文件中的配置
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    # api_key 会包含开头的 / ，例如 /csosiis
-    local api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
-    local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-
-    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
-
-    # 1. 处理反向代理链接
-    if [ -n "$proxy_domain" ]; then
-        log_info "检测到反向代理域名，请使用以下链接访问："
-        local backend_url="https://$proxy_domain$api_key"
-        local final_url="https://$proxy_domain/?api=$backend_url"
-        echo -e "\n  $YELLOW$final_url$NC\n"
-        echo -e "$CYAN-----------------------------------------------------------$NC"
-    fi
-
-    # 2. 处理 IP 地址链接
-    log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
-    local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
-    local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
-    echo -e "\n  $YELLOW$ip_final_url$NC\n"
-
-    echo -e "$CYAN-----------------------------------------------------------$NC"
-}
-
-# =================================================
-# 函数: substore_reset_ports
-# 说明: 重新设置 Sub-Store 的前端和后端端口。
-# =================================================
-substore_reset_ports() {
-    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
-    log_info "准备重置 Sub-Store 端口..."
-    local NEW_FRONTEND_PORT
-    while true; do
-        read -p "请输入新的前端访问端口 [默认: 3000]: " port_input
-        NEW_FRONTEND_PORT=${port_input:-"3000"}
-        if check_port "$NEW_FRONTEND_PORT"; then break; fi
-    done
-    local NEW_BACKEND_PORT
-    while true; do
-        read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input
-        NEW_BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$NEW_BACKEND_PORT"; then break; fi
-        fi
-    done
-
-    sed -i "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    sed -i "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"
-    press_any_key
-}
-
-# =================================================
-# 函数: substore_reset_api_key
-# 说明: 重置 Sub-Store 的 API 密钥。
-# =================================================
-substore_reset_api_key() {
-    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
-    log_info "准备重置 API 密钥..."
-    local NEW_API_KEY
-    read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
-    NEW_API_KEY=${user_api_key:-$(generate_random_password)}
-
-    sed -i "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ API 密钥已更新，服务已重启。"
-    log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
-    press_any_key
-}
-# =================================================
-# 函数: substore_setup_reverse_proxy
-# 说明: 为 Sub-Store 设置或更换反向代理。(已修正端口解析逻辑)
-# =================================================
-substore_setup_reverse_proxy() {
-    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
-
-    # 修正了这一行，确保能正确获取端口号
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local domain
-
-    echo ""
-    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
-    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
-    echo ""
-    read -p "请输入您的域名: " domain
-    if [ -z "$domain" ]; then
-        log_error "域名不能为空，操作已取消。"
-        press_any_key
-        return
-    fi
-
-    # 调用通用的反代设置函数
-    setup_auto_reverse_proxy "$domain" "$frontend_port"
-
-    # 检查反代是否成功 (这是一个简化的检查，主要依赖 setup_auto_reverse_proxy 的返回)
-    if [ $? -eq 0 ]; then
-        log_info "正在将域名保存到服务配置中以供显示..."
-        # 如果已有域名配置行，则替换；否则追加
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
-        else
-            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
-        fi
-        systemctl daemon-reload
-        log_info "✅ Sub-Store 反向代理设置完成！"
-    else
-        log_error "自动反向代理配置失败，请检查之前的错误信息。"
-    fi
-    press_any_key
-}
 substore_manage_menu() {
     while true; do
         clear
@@ -2334,12 +2115,12 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         if is_nezha_agent_v1_installed; then
-            echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 ${GREEN}(已安装)$NC           $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${GREEN}(已安装)$NC         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 ${YELLOW}(未安装)$N           $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 安装/重装 Singpore V1 探针 ${YELLOW}(未安装)$N         $CYAN║$NC"
         fi
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 London V1 探针$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 Singpore V1 探针$NC                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2600,45 +2381,6 @@ _add_protocol_inbound() {
     log_info "✅ [$protocol] 协议配置添加成功！"
     return 0
 }
-
-# 新增函数：确保Nginx公共SSL参数文件存在
-_ensure_nginx_ssl_params_conf() {
-    local ssl_params_file="/etc/nginx/conf.d/ssl_params.conf"
-
-    # Option 1: Overwrite the file if it exists, ensuring unique content
-    # This is the safest approach if you want to enforce a specific SSL configuration
-    # every time this function runs.
-    log_info "创建或更新 Nginx 公共 SSL 参数文件: $ssl_params_file"
-    cat <<'EOF' >"$ssl_params_file"
-# /etc/nginx/conf.d/ssl_params.conf
-# This file is managed by vps-toolkit.sh. Please edit with caution.
-client_max_body_size 512M;
-ssl_protocols TLSv1.2 TLSv1.3;
-ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
-ssl_prefer_server_ciphers off;
-ssl_session_cache shared:SSL:10m;
-ssl_session_timeout 1d;
-ssl_session_tickets off;
-ssl_stapling on;
-ssl_stapling_verify on;
-resolver 8.8.8.8 8.8.4.4 valid=300s; # For OCSP stapling if needed
-resolver_timeout 5s;
-EOF
-    log_info "Nginx 公共 SSL 参数文件已创建或更新成功。"
-
-    # Option 2 (Less preferred for this scenario, as it doesn't fix existing duplicates):
-    # If you only want to create it once and not touch it again:
-    # if [ ! -f "$ssl_params_file" ]; then
-    #     log_info "创建 Nginx 公共 SSL 参数文件: $ssl_params_file"
-    #     cat <<'EOF' >"$ssl_params_file"
-    #     # ... (content as above) ...
-    #     EOF
-    #     log_info "Nginx 公共 SSL 参数文件创建成功。"
-    # else
-    #     log_info "Nginx 公共 SSL 参数文件已存在，跳过创建。"
-    # fi
-}
-
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -2667,7 +2409,8 @@ server {
     # SSL 证书配置
     ssl_certificate $cert_path;
     ssl_certificate_key $key_path;
-    include /etc/nginx/conf.d/ssl_params.conf; # 引入公共 SSL 配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
 
     # 反向代理配置
     location / {
@@ -2750,7 +2493,6 @@ setup_auto_reverse_proxy() {
     if command -v caddy &>/dev/null; then
         _configure_caddy_proxy "$domain_input" "$local_port"
     elif command -v nginx &>/dev/null; then
-        _ensure_nginx_ssl_params_conf # 确保公共 SSL 配置存在
         if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             press_any_key
@@ -3225,7 +2967,6 @@ initial_setup_check() {
         echo ""
         log_info "脚本首次运行，开始自动设置..."
         _create_shortcut "sv"
-        _ensure_nginx_ssl_params_conf # 在首次运行时创建公共 SSL 配置
         log_info "创建标记文件以跳过下次检查。"
         touch "$FLAG_FILE"
         echo ""
