@@ -2604,10 +2604,15 @@ _add_protocol_inbound() {
 # 新增函数：确保Nginx公共SSL参数文件存在
 _ensure_nginx_ssl_params_conf() {
     local ssl_params_file="/etc/nginx/conf.d/ssl_params.conf"
-    if [ ! -f "$ssl_params_file" ]; then
-        log_info "创建 Nginx 公共 SSL 参数文件: $ssl_params_file"
-        cat <<'EOF' >"$ssl_params_file"
+
+    # Option 1: Overwrite the file if it exists, ensuring unique content
+    # This is the safest approach if you want to enforce a specific SSL configuration
+    # every time this function runs.
+    log_info "创建或更新 Nginx 公共 SSL 参数文件: $ssl_params_file"
+    cat <<'EOF' >"$ssl_params_file"
 # /etc/nginx/conf.d/ssl_params.conf
+# This file is managed by vps-toolkit.sh. Please edit with caution.
+client_max_body_size 512M;
 ssl_protocols TLSv1.2 TLSv1.3;
 ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
 ssl_prefer_server_ciphers off;
@@ -2616,12 +2621,22 @@ ssl_session_timeout 1d;
 ssl_session_tickets off;
 ssl_stapling on;
 ssl_stapling_verify on;
-resolver 8.8.8.8 8.8.4.4 valid=300s;
-client_max_body_size 512M;
+resolver 8.8.8.8 8.8.4.4 valid=300s; # For OCSP stapling if needed
 resolver_timeout 5s;
 EOF
-        log_info "Nginx 公共 SSL 参数文件创建成功。"
-    fi
+    log_info "Nginx 公共 SSL 参数文件已创建或更新成功。"
+
+    # Option 2 (Less preferred for this scenario, as it doesn't fix existing duplicates):
+    # If you only want to create it once and not touch it again:
+    # if [ ! -f "$ssl_params_file" ]; then
+    #     log_info "创建 Nginx 公共 SSL 参数文件: $ssl_params_file"
+    #     cat <<'EOF' >"$ssl_params_file"
+    #     # ... (content as above) ...
+    #     EOF
+    #     log_info "Nginx 公共 SSL 参数文件创建成功。"
+    # else
+    #     log_info "Nginx 公共 SSL 参数文件已存在，跳过创建。"
+    # fi
 }
 
 _configure_nginx_proxy() {
