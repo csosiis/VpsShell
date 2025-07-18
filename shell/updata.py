@@ -13,7 +13,7 @@ WORKING_DIR = "/root/sub-store/"
 
 # 备份服务器配置
 REMOTE_USER = "ubuntu"
-REMOTE_HOST = "140.245.36.228"
+REMOTE_HOST = "79.72.72.95"
 REMOTE_PORT = "22"
 SSH_KEY_PATH = "/root/.ssh/server"
 REMOTE_DEST_DIR = "/root/sub-store/"
@@ -94,7 +94,7 @@ def main():
             "✅ **Oracle-San Jose Sub-Store 自动化任务全部完成！**\n\n"
             "1️⃣ 文件已更新到最新版本。\n"
             "2️⃣ **本地Sub-Store服务**已成功重启。\n"
-            f"3️⃣ 文件已**镜像同步**到Oralce-Singapore West。\n"
+            "3️⃣ 文件已**镜像同步**到Oracle-Singapore West。\n"
             "4️⃣ **远程Sub-Store服务**已成功重启。"
         )
         send_telegram_notification(success_message)

@@ -1,3 +1,4 @@
+root@sanjose:~/sub-store/data# cat handler.js
 // 引入所需模块
 const http = require('http');
 const fs = require('fs').promises;
@@ -11,7 +12,7 @@ const SECRET_TOKEN = 'sanjose';
 
 // 远程服务器配置
 const REMOTE_SERVER_USER = 'ubuntu';
-const REMOTE_SERVER_IP = '140.245.36.228';
+const REMOTE_SERVER_IP = '79.72.72.95';
 const REMOTE_TARGET_PATH = '/root/sub-store/';
 const IDENTITY_FILE_PATH = '/root/.ssh/server';
 // --- 配置区结束 ---
