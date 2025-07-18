@@ -362,7 +362,7 @@ ui_panels_menu() {
             2) install_3xui; break ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
-        esolac
+        esac
     done
 }
 # =================================================
