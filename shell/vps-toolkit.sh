@@ -1912,17 +1912,16 @@ install_nezha_agent_v1() {
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
     local server_info="nz.ssong.eu.org:8008"
-    local server_secret="HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1"
+    local server_secret="Pln0X91X18urAudToiwDGVlZhkpUb0Qv"
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v1 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_v1 &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
-    clear
     log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
     log_info "服务器信息: $server_info"
     log_info "连接密钥: $server_secret"
@@ -2016,13 +2015,12 @@ install_nezha_agent_phoenix() {
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_phoenix &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_phoenix &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
-    clear
     log_info "指令正确，开始全自动安装 Phoenix Nezha V1 探针 (安装后改造模式)..."
     log_info "服务器信息: $server_info"
     log_info "连接密钥: $server_secret"
