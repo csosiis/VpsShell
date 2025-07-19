@@ -582,10 +582,17 @@ select_nodes_for_push() {
 }
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
-    if ! select_nodes_for_push; then
+
+    # --- 新增：自动读取所有节点 ---
+    mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    if [ ${#all_node_lines[@]} -eq 0 ]; then
+        log_warn "没有可推送的节点。"
         press_any_key
         return
     fi
+    log_info "已自动选择所有 ${#all_node_lines[@]} 个节点进行推送。"
+    # --- 修改结束 ---
+
     local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
     local sub_store_subs
     if [ -f "$sub_store_config_file" ]; then
@@ -599,14 +606,20 @@ push_to_sub_store() {
         press_any_key
         return
     fi
+
     local links_str
-    links_str=$(printf "%s\n" "${selected_links[@]}")
+    links_str=$(printf "%s\n" "${all_node_lines[@]}") # 使用 all_node_lines
+
     local node_json
+    # --- 修改：在 JSON 中增加 action 参数 ---
     node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" '{
         "token": "sanjose",
+        "action": "update",
         "name": $name,
         "link": $link
     }')
+    # --- 修改结束 ---
+
     echo ""
     log_info "正在推送到 Sub-Store..."
     local response
@@ -627,65 +640,7 @@ push_to_sub_store() {
     fi
     press_any_key
 }
-push_to_telegram() {
-    if ! select_nodes_for_push; then
-        press_any_key
-        return
-    fi
-    local tg_config_file="/etc/sing-box/telegram-bot-config.txt"
-    local tg_api_token
-    local tg_chat_id
-    if [ -f "$tg_config_file" ]; then
-        source "$tg_config_file"
-    fi
-    if [ -z "$tg_api_token" ] || [ -z "$tg_chat_id" ]; then
-        log_info "首次推送到 Telegram，请输入您的 Bot 信息。"
-        read -p "请输入 Telegram Bot API Token: " tg_api_token
-        read -p "请输入 Telegram Chat ID: " tg_chat_id
-    fi
-    local message_lines=("节点推送成功，详情如下：" "")
-    message_lines+=("${selected_links[@]}")
-    local IFS=$'\n'
-    local message_text="${message_lines[*]}"
-    unset IFS
-    echo ""
-    log_info "正在将节点合并为单条消息推送到 Telegram..."
-    response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
-        --data-urlencode "chat_id=$tg_chat_id" \
-        --data-urlencode "text=$message_text")
-    if ! echo "$response" | jq -e '.ok' >/dev/null; then
-        log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
-        read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
-            rm -f "$tg_config_file"
-        fi
-        press_any_key
-        return
-    fi
-    echo "tg_api_token=$tg_api_token" >"$tg_config_file"
-    echo "tg_chat_id=$tg_chat_id" >>"$tg_config_file"
-    log_info "✅ 节点信息已成功推送到 Telegram！"
-    press_any_key
-}
-push_nodes() {
-    ensure_dependencies "jq" "curl"
-    clear
-    echo -e "$WHITE--- 推送节点 ---$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo "2. 推送到 Telegram Bot"
-    echo ""
-    echo "0. 返回"
-    read -p "请选择推送方式: " push_choice
-    case $push_choice in
-    1) push_to_sub_store ;;
-    2) push_to_telegram ;;
-    0) return ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        ;;
-    esac
-}
+
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -776,7 +731,7 @@ view_node_info() {
         case $choice in
             1) singbox_add_node_orchestrator; continue ;;
             2) delete_nodes; continue ;;
-            3) push_nodes; continue ;;
+            3)  push_to_sub_store; continue ;;
             4) generate_subscription_link; continue ;;
             5) generate_tuic_client_config; continue ;;
             0) break ;;
