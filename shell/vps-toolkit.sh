@@ -418,19 +418,6 @@ install_traffmonetizer() {
 is_singbox_installed() {
     if command -v sing-box &>/dev/null; then return 0; else return 1; fi
 }
-check_and_prompt_install_singbox() {
-    if ! is_singbox_installed; then
-        log_warn "Sing-Box 尚未安装。"
-        read -p "您是否希望先安装 Sing-Box？(y/n): " install_choice
-        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
-            singbox_do_install
-        else
-            log_info "操作已取消。"
-            return 1
-        fi
-    fi
-    return 0
-}
 singbox_do_install() {
     ensure_dependencies "curl"
     if is_singbox_installed; then
@@ -564,28 +551,6 @@ _handle_apache_cert() {
     log_error "Apache 模式暂未完全实现，请先安装 Nginx 或使用独立模式。"
     return 1
 }
-_handle_standalone_cert() {
-    local domain_name="$1"
-    log_info "未检测到支持的 Web 服务器，回退到 '--standalone' 独立模式。"
-    log_warn "此模式需要临时占用 80 端口，可能会暂停其他服务。"
-    if systemctl is-active --quiet nginx; then
-        log_info "临时停止 Nginx..."
-        systemctl stop nginx
-        local stopped_service="nginx"
-    fi
-    certbot certonly --standalone -d "$domain_name" --non-interactive --agree-tos --email "temp@$domain_name"
-    if [ -n "$stopped_service" ]; then
-        log_info "正在重启 $stopped_service..."
-        systemctl start "$stopped_service"
-    fi
-    if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
-        log_info "✅ Standalone 模式证书申请成功！"
-        return 0
-    else
-        log_error "Standalone 模式证书申请失败！"
-        return 1
-    fi
-}
 apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/$domain_name"
@@ -607,136 +572,6 @@ apply_ssl_certificate() {
         _handle_nginx_cert "$domain_name"
     fi
     return $?
-}
-get_domain_and_common_config() {
-    ensure_dependencies "jq" "uuid-runtime"
-    local type_flag=$1
-    echo
-    while true; do
-        echo ""
-        read -p "请输入您已解析到本机的域名 (用于TLS): " domain_name
-        if [[ -z "$domain_name" ]]; then
-            log_error "\n域名不能为空"
-            continue
-        fi
-        if ! echo "$domain_name" | grep -Pq "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"; then
-            log_error "\n无效的域名格式"
-            continue
-        fi
-        break
-    done
-    if [[ $type_flag -eq 2 ]]; then
-        echo ""
-        log_warn "Hysteria2 协议需要关闭域名在Cloudflare的DNS代理(小黄云)。"
-    else
-        echo ""
-        log_warn "若域名开启了CF代理(小黄云), 请确保端口在Cloudflare支持的范围内。"
-        echo ""
-        log_warn "支持的HTTPS端口: 443, 2053, 2083, 2087, 2096, 8443。"
-    fi
-    echo ""
-    log_warn "请确保防火墙已放行所需端口！"
-    echo
-    while true; do
-        if [[ $type_flag -eq 2 ]]; then
-            read -p "请输入一个 UDP 端口 (回车则随机生成): " port
-        else
-            read -p "请输入一个 TCP 端口 (回车则随机生成): " port
-        fi
-        if [[ -z "$port" ]]; then
-            echo ""
-            port=$(generate_random_port)
-            log_info "已生成随机端口: $port"
-            break
-        fi
-        if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
-            echo ""
-            log_error "无效的端口号，请输入 1-65535 之间的数字。"
-        else
-            break
-        fi
-    done
-    echo
-    log_info "正在自动获取当前服务器位置..."
-    location=$(curl -s ip-api.com/json | jq -r '.city' | sed 's/ //g')
-    if [ -z "$location" ] || [ "$location" == "null" ]; then
-        log_warn "自动获取位置失败，请手动输入。"
-        read -p "请输入当前服务器位置 (例如: HongKong): " location
-    else
-        log_info "成功获取到位置: $location"
-    fi
-    echo
-    read -p "请输入自定义节点标识 (例如: GCP): " custom_id
-    echo
-    cert_dir="/etc/letsencrypt/live/$domain_name"
-    if [[ ! -d "$cert_dir" ]]; then
-        log_info "证书不存在，开始申请证书..."
-        if ! apply_ssl_certificate "$domain_name"; then
-            return 1
-        fi
-    else
-        log_info "证书已存在，跳过申请。"
-    fi
-    echo
-    uuid=$(uuidgen)
-    cert_path="$cert_dir/fullchain.pem"
-    key_path="$cert_dir/privkey.pem"
-    local protocol_name=""
-    case $type_flag in
-    1) protocol_name="VLESS" ;;
-    2) protocol_name="Hysteria2" ;;
-    3) protocol_name="VMess" ;;
-    4) protocol_name="Trojan" ;;
-    *) protocol_name="UNKNOWN" ;;
-    esac
-    tag="$location-$custom_id-$protocol_name"
-    return 0
-}
-add_protocol_node() {
-    local protocol=$1
-    local config=$2
-    local node_link=""
-    log_info "正在将新的入站配置添加到 config.json..."
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp"; then
-        log_error "更新配置文件失败！请检查JSON格式和文件权限。"
-        rm -f "$SINGBOX_CONFIG_FILE.tmp"
-        return 1
-    fi
-    mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-    case $protocol in
-    VLESS)
-        node_link="vless://$uuid@$domain_name:$port?type=ws&security=tls&sni=$domain_name&host=$domain_name&path=%2F#$tag"
-        ;;
-    Hysteria2)
-        node_link="hysteria2://$password@$domain_name:$port?upmbps=100&downmbps=1000&sni=$domain_name&obfs=salamander&obfs-password=$obfs_password#$tag"
-        ;;
-    VMess)
-        vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$domain_name\",\"port\":\"$port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$domain_name\",\"path\":\"/\",\"tls\":\"tls\"}"
-        base64_vmess_link=$(echo -n "$vmess_json" | base64 -w 0)
-        node_link="vmess://$base64_vmess_link"
-        ;;
-    Trojan)
-        node_link="trojan://$password@$domain_name:$port?security=tls&sni=$domain_name&type=ws&host=$domain_name&path=/#$tag"
-        ;;
-    *)
-        log_error "未知的协议类型！"
-        return 1
-        ;;
-    esac
-    echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
-    log_info "正在重启 Sing-Box 使配置生效..."
-    systemctl restart sing-box
-    sleep 2
-    if systemctl is-active --quiet sing-box; then
-        log_info "Sing-Box 重启成功。"
-    else
-        log_error "Sing-Box 重启失败！请使用日志功能查看错误。"
-        press_any_key
-        return
-    fi
-    log_info "✅ 节点添加成功！正在显示所有节点信息..."
-    sleep 1
-    view_node_info
 }
 select_nodes_for_push() {
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
@@ -948,6 +783,17 @@ generate_subscription_link() {
     rm -f "$sub_filepath"
     log_info "临时订阅文件已删除。"
 }
+# =================================================
+# 函数: generate_tuic_client_config (新增)
+# 说明: 为 TUIC 节点生成客户端配置文件。
+# =================================================
+generate_tuic_client_config() {
+    clear
+    log_warn "TUIC 客户端配置生成功能正在开发中..."
+    log_info "此功能旨在为您选择的 TUIC 节点生成一个可以直接在客户端使用的 config.json 文件。"
+    # 可以在这里添加未来的实现逻辑
+    press_any_key
+}
 view_node_info() {
     while true; do
         clear; echo "";
@@ -974,7 +820,7 @@ view_node_info() {
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
 
-        echo -e "\n1. 新增节点  2. 删除节点 3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}    0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}  5. ${BLUE}生成TUIC客户端配置(开发中)${NC}\n\n0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -1426,6 +1272,7 @@ download_maccms_source() {
     # 判断文件是否为zip格式
     if ! file source.zip | grep -q "Zip archive data"; then
         log_error "下载的文件不是有效的zip压缩包，可能下载失败或版本号错误！"
+        rm -f source.zip
         return 1
     fi
     log_info "源码压缩包下载并校验通过。"
@@ -1435,6 +1282,7 @@ download_maccms_source() {
 install_maccms() {
     echo ""
     log_info "开始安装苹果CMS"
+    ensure_dependencies "curl" "unzip" "file"
 
     # 输入安装目录
     local project_dir
@@ -1470,9 +1318,9 @@ install_maccms() {
     mkdir -p "$project_dir/nginx" "$project_dir/source"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # 获取最新 tag
+    # 获取最新 tag (Refactored)
     local maccms_version
-    maccms_version=$(curl -s https://api.github.com/repos/magicblack/maccms10/tags | grep -Po '"name":.*?[^\\]",' | head -1 | awk -F'"' '{print $4}')
+    maccms_version=$(get_latest_maccms_tag)
     if [ -z "$maccms_version" ]; then
         log_error "获取 maccms 版本失败"
         press_any_key
@@ -1480,10 +1328,12 @@ install_maccms() {
     fi
     log_info "获取到最新版标签: $maccms_version"
 
-    # 下载并解压
-    local zip_url="https://github.com/magicblack/maccms10/archive/refs/tags/${maccms_version}.zip"
-    log_info "开始下载..."
-    curl -L -o source.zip "$zip_url" || { log_error "下载失败"; return 1; }
+    # 下载并解压 (Refactored)
+    if ! download_maccms_source "$maccms_version"; then
+        press_any_key
+        return 1
+    fi
+
     unzip -q source.zip || { log_error "解压失败"; return 1; }
     rm -f source.zip
 
@@ -1621,16 +1471,22 @@ uninstall_maccms() {
     read -p "请输入苹果CMS安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
 
+    if [ ! -f "$project_dir/docker-compose.yml" ]; then
+        log_error "目录 $project_dir 下未找到 docker-compose.yml 文件，请确认路径。"
+        press_any_key
+        return
+    fi
+
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
+
     echo "停止并移除容器..."
-    docker compose -f "$project_dir/docker-compose.yml" down
+    docker compose down --volumes
 
-    echo "删除网络卷（如果有）..."
-    docker volume rm $(docker volume ls -q | grep "${project_dir##*/}") 2>/dev/null || true
-
-    echo "删除目录 $project_dir ..."
+    cd ..
+    echo "删除项目目录 $project_dir ..."
     rm -rf "$project_dir"
 
-    log_info "卸载完成。"
+    log_info "✅ 苹果CMS卸载完成。"
     press_any_key
 }
 
@@ -1965,9 +1821,6 @@ substore_main_menu() {
     done
 }
 # ================= Nezha Management Start =================
-is_nezha_agent_installed() {
-    [ -f "/etc/systemd/system/nezha-agent.service" ]
-}
 uninstall_nezha_agent() {
     # 这是一个辅助函数，确保清理标准版时不会报错
     if [ -f "/etc/systemd/system/nezha-agent.service" ]; then
@@ -2377,6 +2230,37 @@ nezha_dashboard_menu() {
         esac
     done
 }
+# =================================================
+# 函数: nezha_main_menu (新增)
+# 说明: 哪吒监控的总管理菜单，区分 Agent 和 Dashboard。
+# =================================================
+nezha_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                    哪吒监控管理                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
 # ================= Nezha Management End ===================
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
@@ -2722,7 +2606,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 哪吒探针管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 安装 Traffmonetizer (Docker)                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2738,7 +2622,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   11. $GREEN卸载Maccms$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   11. $RED卸载苹果CMS$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   99. $GREEN更新此脚本$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2753,7 +2637,7 @@ main_menu() {
         1) sys_manage_menu ;;
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
-        4) nezha_agent_menu ;;
+        4) nezha_main_menu ;;
         5) install_traffmonetizer ;;
         6) ui_panels_menu ;;
         7) install_maccms ;;
@@ -2765,31 +2649,6 @@ main_menu() {
         0) exit 0 ;;
         *)
             log_error "无效选项！"
-            sleep 1
-            ;;
-        esac
-    done
-}
-post_add_node_menu() {
-    while true; do
-        echo ""
-        echo -e "请选择接下来的操作：\n"
-        echo -e "${GREEN}1. 继续新增节点$NC  ${YELLOW}2. 管理已有节点 (查看/删除/推送)$NC    ${RED}0. 返回上一级菜单$NC\n"
-        read -p "请输入选项: " next_choice
-        case $next_choice in
-        1)
-            singbox_add_node_orchestrator
-            break
-            ;;
-        2)
-            view_node_info
-            break
-            ;;
-        0)
-            break
-            ;;
-        *)
-            log_error "无效选项，请重新输入。"
             sleep 1
             ;;
         esac
