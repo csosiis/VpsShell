@@ -15,9 +15,9 @@ SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/sv"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 FLAG_FILE="/root/.vps_toolkit.initialized"
-log_info() { echo -e "$GREEN[信息] - $1$NC"; }
-log_warn() { echo -e "$YELLOW[注意] - $1$NC"; }
-log_error() { echo -e "$RED[错误] - $1$NC"; }
+log_info() { echo -e "\n$GREEN[信息] - $1$NC"; }
+log_warn() { echo -e "\n$YELLOW[注意] - $1$NC"; }
+log_error() { echo -e "\n$RED[错误] - $1$NC"; }
 press_any_key() {
     echo ""
     read -n 1 -s -r -p "按任意键返回..."
@@ -615,7 +615,7 @@ push_to_sub_store() {
             selected_links+=("${all_node_lines[$((index - 1))]}")
         done
     else
-        log_info "已选择推送所有 ${#all_node_lines[@]} 个节点。"
+        echo -e "\n${GREEN}已选择推送所有 ${#all_node_lines[@]} 个节点。${NC}"
         # 将所有节点赋值给 selected_links 数组
         for line in "${all_node_lines[@]}"; do
             selected_links+=("$line")
