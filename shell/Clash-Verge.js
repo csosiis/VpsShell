@@ -281,7 +281,7 @@ function main(config) {
       "name": "TikTok",
       "type": "select",
       "include-all": true,
-      "icon": "https://github.com/csosiis/VpsShell/blob/main/icons/tiktok.png"
+      "icon": "https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/icons/tiktok.png"
     },
     {
       ...groupBaseOption,

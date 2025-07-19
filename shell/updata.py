@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+#sudo visudo
+#ubuntu ALL=(ALL) NOPASSWD: /usr/bin/rsync
+#ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart sub-store.service
 import os
 import subprocess
 import requests
@@ -11,12 +13,28 @@ TELEGRAM_TOKEN = "7189461669:AAFJJk4JO0rhSV4wRMxcWsY4e3eG7o-x7DE"
 TELEGRAM_CHAT_ID = "7457253104"
 WORKING_DIR = "/root/sub-store/"
 
-# 备份服务器配置
-REMOTE_USER = "ubuntu"
-REMOTE_HOST = "79.72.72.95"
-REMOTE_PORT = "22"
-SSH_KEY_PATH = "/root/.ssh/server"
-REMOTE_DEST_DIR = "/root/sub-store/"
+# 【修改】将单个服务器配置改为服务器列表
+# 在这里添加您所有需要同步的服务器信息
+SERVERS = [
+    {
+        "name": "Oracle-London(伦敦)",  # 服务器的友好名称，用于日志和通知
+        "user": "ubuntu",
+        "host": "79.72.72.95",
+        "port": "22",
+        "ssh_key_path": "/root/.ssh/server",
+        "dest_dir": "/root/sub-store/"
+    },
+    {
+        "name": "Oracle-Phoenix(凤凰城)", # 比如 "服务器B"
+        "user": "ubuntu",
+        "host": "137.131.41.2",
+        "port": "22",
+        "ssh_key_path": "/root/.ssh/id_ed25519_phoenix",
+        "dest_dir": "/root/sub-store/"
+    }
+    # 如果还有更多服务器，继续在这里添加
+]
+
 
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -58,48 +76,62 @@ def main():
             "curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip",
             "unzip -o dist.zip && mv dist frontend && rm dist.zip"
         ]
-        logging.info("--- 步骤 1/4: 开始更新 Sub-Store 文件 ---")
+        logging.info("--- 步骤 1/3: 开始更新 Sub-Store 文件 ---")
         for cmd in update_commands:
             run_command(cmd)
         logging.info("--- 文件更新完成 ---")
 
         # 2. 重启本地服务
-        logging.info("--- 步骤 2/4: 正在重启本地 sub-store 服务 ---")
+        logging.info("--- 步骤 2/3: 正在重启本地 sub-store 服务 ---")
         run_command("systemctl restart sub-store.service")
         logging.info("--- 本地服务重启成功 ---")
 
-        # 3. 镜像同步到另一台服务器
-        logging.info("--- 步骤 3/4: 开始镜像同步文件到备份服务器 ---")
-        # ✨ 新增 --delete 选项，实现镜像同步
-        rsync_command = (
-            f'rsync -avzP --delete -e "ssh -p {REMOTE_PORT} -i {SSH_KEY_PATH}" '
-            f'--rsync-path="sudo rsync" {WORKING_DIR} '
-            f'{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DEST_DIR}'
-        )
-        run_command(rsync_command)
-        logging.info("--- 文件镜像同步成功 ---")
+        # 【修改】循环处理所有远程服务器
+        logging.info("--- 步骤 3/3: 开始同步文件并重启远程服务 ---")
 
-        # 4. ✨ 新增功能：重启远程服务器上的服务
-        logging.info("--- 步骤 4/4: 正在重启远程服务器上的 sub-store 服务 ---")
-        remote_restart_command = (
-            f'ssh -p {REMOTE_PORT} -i {SSH_KEY_PATH} {REMOTE_USER}@{REMOTE_HOST} '
-            f'"sudo /bin/systemctl restart sub-store.service"'
-        )
-        run_command(remote_restart_command)
-        logging.info("--- 远程服务重启成功 ---")
+        synced_servers_details = [] # 用于在通知中显示处理详情
 
-        # 5. 发送最终成功通知
-        # ✨ 更新了成功消息
+        for server in SERVERS:
+            server_name = server["name"]
+            logging.info(f"--- 正在处理服务器: {server_name} ---")
+
+            # 3a. 镜像同步到服务器
+            logging.info(f"开始镜像同步文件到 {server_name}...")
+            rsync_command = (
+                f'rsync -avzP --delete -e "ssh -p {server["port"]} -i {server["ssh_key_path"]}" '
+                f'--rsync-path="sudo rsync" {WORKING_DIR} '
+                f'{server["user"]}@{server["host"]}:{server["dest_dir"]}'
+            )
+            run_command(rsync_command)
+            logging.info(f"文件到 {server_name} 的镜像同步成功。")
+
+            # 3b. 重启远程服务器上的服务
+            logging.info(f"正在重启 {server_name} 上的 sub-store 服务...")
+            remote_restart_command = (
+                f'ssh -p {server["port"]} -i {server["ssh_key_path"]} {server["user"]}@{server["host"]} '
+                f'"sudo /bin/systemctl restart sub-store.service"'
+            )
+            run_command(remote_restart_command)
+            logging.info(f"{server_name} 上的远程服务重启成功。")
+
+            synced_servers_details.append(f"✅ **{server_name}**: 同步并重启成功")
+
+        logging.info("--- 所有远程服务器处理完毕 ---")
+
+        # 【修改】更新成功消息，动态显示所有处理过的服务器
+        remote_servers_status = "\n".join(synced_servers_details)
         success_message = (
             "✅ **Oracle-San Jose Sub-Store 自动化任务全部完成！**\n\n"
             "1️⃣ 文件已更新到最新版本。\n"
             "2️⃣ **本地Sub-Store服务**已成功重启。\n"
-            "3️⃣ 文件已**镜像同步**到Oracle-Singapore West。\n"
-            "4️⃣ **远程Sub-Store服务**已成功重启。"
+            "3️⃣ **远程服务器**同步和重启状态如下:\n"
+            f"{remote_servers_status}"
         )
         send_telegram_notification(success_message)
 
     except subprocess.CalledProcessError as e:
+        # 【修改】错误消息中包含服务器信息
+        # 注意：这里的错误处理会在第一个失败的服务器处停止。
         error_details = f"命令 `{e.cmd}` 执行失败。\n\n**错误信息**:\n```\n{e.stderr}\n```"
         error_message = f"❌ **自动化任务失败**\n\n{error_details}"
         logging.error(error_message)
