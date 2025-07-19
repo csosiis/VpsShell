@@ -2188,7 +2188,7 @@ nezha_main_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                    哪吒监控管理                   $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
