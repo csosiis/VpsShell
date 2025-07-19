@@ -2286,11 +2286,11 @@ install_nezha_dashboard_v1() {
 is_nezha_agent_v0_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v0.service" ]
 }
-is_nezha_agent_v3_installed() {
-    [ -f "/etc/systemd/system/nezha-agent-v3.service" ]
-}
 is_nezha_agent_v1_installed() {
     [ -f "/etc/systemd/system/nezha-agent-v1.service" ]
+}
+is_nezha_agent_phoenix_installed() {
+    [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]
 }
 nezha_agent_menu() {
     while true; do
@@ -2319,7 +2319,7 @@ nezha_agent_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        if is_nezha_agent_v3_installed; then
+        if is_nezha_agent_phoenix_installed; then
             echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V1 探针 ${GREEN}(已安装)$NC          $CYAN║$NC"
         else
             echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V1 探针 ${YELLOW}(未安装)$NC          $CYAN║$NC"
