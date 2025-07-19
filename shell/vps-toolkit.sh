@@ -72,7 +72,6 @@ ensure_dependencies() {
     if [ ${#dependencies[@]} -eq 0 ]; then
         return 0
     fi
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
     for pkg in "${dependencies[@]}"; do
         if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
             missing_dependencies+=("$pkg")
@@ -94,7 +93,6 @@ ensure_dependencies() {
             fi
         done
         if [ "$install_fail" -eq 0 ]; then
-            log_info "所有依赖包安装完成。"
             return 0
         else
             log_error "部分依赖包安装失败，请手动检查。"
@@ -582,16 +580,54 @@ select_nodes_for_push() {
 }
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
-
-    # --- 新增：自动读取所有节点 ---
     mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
     if [ ${#all_node_lines[@]} -eq 0 ]; then
         log_warn "没有可推送的节点。"
         press_any_key
         return
     fi
-    log_info "已自动选择所有 ${#all_node_lines[@]} 个节点进行推送。"
-    # --- 修改结束 ---
+
+    # --- 再次修改：重新引入节点选择逻辑 ---
+    local selected_links=()
+    echo ""
+    read -p "是否要手动选择节点? (默认推送全部, 输入 'y' 手动选择): " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        echo ""
+        log_info "请选择要推送的节点 (可多选，用空格分隔):"
+        echo ""
+        for i in "${!all_node_lines[@]}"; do
+            local line="${all_node_lines[$i]}"
+            local node_name
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
+            fi
+            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC\n"
+        done
+        read -p "请输入编号 (输入 0 返回): " -a selected_indices
+        for index in "${selected_indices[@]}"; do
+            if [[ "$index" == "0" ]]; then press_any_key; return; fi
+            if ! [[ "$index" =~ ^[0-9]+$ ]] || [[ $index -lt 1 || $index -gt ${#all_node_lines[@]} ]]; then
+                log_error "包含无效编号: $index"
+                press_any_key
+                return
+            fi
+            selected_links+=("${all_node_lines[$((index - 1))]}")
+        done
+    else
+        log_info "已选择推送所有 ${#all_node_lines[@]} 个节点。"
+        # 将所有节点赋值给 selected_links 数组
+        for line in "${all_node_lines[@]}"; do
+            selected_links+=("$line")
+        done
+    fi
+
+    if [ ${#selected_links[@]} -eq 0 ]; then
+        log_warn "未选择任何有效节点。"
+        press_any_key
+        return
+    fi
+    # --- 节点选择逻辑结束 ---
 
     local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
     local sub_store_subs
@@ -607,25 +643,33 @@ push_to_sub_store() {
         return
     fi
 
+    local action
+    read -p "请输入 action 参数 [默认: update]: " action
+    action=${action:-"update"}
+
     local links_str
-    links_str=$(printf "%s\n" "${all_node_lines[@]}") # 使用 all_node_lines
+    links_str=$(printf "%s\n" "${selected_links[@]}")
 
     local node_json
-    # --- 修改：在 JSON 中增加 action 参数 ---
-    node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" '{
-        "token": "sanjose",
-        "action": "update",
-        "name": $name,
-        "link": $link
-    }')
-    # --- 修改结束 ---
+    node_json=$(jq -n \
+        --arg name "$sub_store_subs" \
+        --arg link "$links_str" \
+        --arg action "$action" \
+        '{
+            "token": "sanjose",
+            "action": $action,
+            "name": $name,
+            "link": $link
+        }')
 
     echo ""
+    log_info "准备推送数据, action 为: $action"
     log_info "正在推送到 Sub-Store..."
     local response
     response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
         -d "$node_json")
+
     if echo "$response" | jq -e '.success' >/dev/null; then
         echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
