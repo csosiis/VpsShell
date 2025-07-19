@@ -1519,10 +1519,8 @@ update_sub_store_app() {
     press_any_key
 }
 
-# =================================================
-# 函数: substore_view_access_link
-# 说明: 从服务文件中读取配置并显示访问链接。 (已更新为带 ?api= 参数的格式)
-# =================================================
+# 函数: substore_view_access_link (无修改，仅供参考)
+# 说明: 从服务文件中读取配置并显示访问链接。
 substore_view_access_link() {
     if ! is_substore_installed; then
         log_warn "Sub-Store 未安装，无法查看链接。"
@@ -1556,6 +1554,57 @@ substore_view_access_link() {
     echo -e "$CYAN-----------------------------------------------------------$NC"
 }
 
+
+# =================================================
+# 函数: substore_setup_reverse_proxy (已优化)
+# 说明: 为 Sub-Store 设置或更换反向代理，并在成功后立即显示访问链接。
+# =================================================
+substore_setup_reverse_proxy() {
+    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
+
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local domain
+
+    echo ""
+    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
+    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
+    echo ""
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then
+        log_error "域名不能为空，操作已取消。"
+        press_any_key
+        return
+    fi
+
+    # 调用通用的反代设置函数
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
+
+    # 检查反代是否成功
+    if [ $? -eq 0 ]; then
+        log_info "正在将域名保存到服务配置中以供显示..."
+        # 如果已有域名配置行，则替换；否则追加
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
+        else
+            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
+        fi
+        systemctl daemon-reload
+        log_info "✅ Sub-Store 反向代理设置完成！"
+
+        # ==================== 新增逻辑 ====================
+        # 设置成功后，立即调用函数显示最新的访问链接
+        echo ""
+        log_info "正在显示最新的访问链接..."
+        sleep 1
+        substore_view_access_link
+        # ================================================
+
+    else
+        log_error "自动反向代理配置失败，请检查之前的错误信息。"
+    fi
+
+    press_any_key
+}
 # =================================================
 # 函数: substore_reset_ports
 # 说明: 重新设置 Sub-Store 的前端和后端端口。
@@ -1604,47 +1653,7 @@ substore_reset_api_key() {
     log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
     press_any_key
 }
-# =================================================
-# 函数: substore_setup_reverse_proxy
-# 说明: 为 Sub-Store 设置或更换反向代理。(已修正端口解析逻辑)
-# =================================================
-substore_setup_reverse_proxy() {
-    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
 
-    # 修正了这一行，确保能正确获取端口号
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local domain
-
-    echo ""
-    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
-    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
-    echo ""
-    read -p "请输入您的域名: " domain
-    if [ -z "$domain" ]; then
-        log_error "域名不能为空，操作已取消。"
-        press_any_key
-        return
-    fi
-
-    # 调用通用的反代设置函数
-    setup_auto_reverse_proxy "$domain" "$frontend_port"
-
-    # 检查反代是否成功 (这是一个简化的检查，主要依赖 setup_auto_reverse_proxy 的返回)
-    if [ $? -eq 0 ]; then
-        log_info "正在将域名保存到服务配置中以供显示..."
-        # 如果已有域名配置行，则替换；否则追加
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
-        else
-            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
-        fi
-        systemctl daemon-reload
-        log_info "✅ Sub-Store 反向代理设置完成！"
-    else
-        log_error "自动反向代理配置失败，请检查之前的错误信息。"
-    fi
-    press_any_key
-}
 substore_manage_menu() {
     while true; do
         clear
@@ -2410,6 +2419,10 @@ _add_protocol_inbound() {
     log_info "✅ [$protocol] 协议配置添加成功！"
     return 0
 }
+# =================================================
+# 函数: _configure_nginx_proxy (已优化)
+# 说明: 为指定域名和端口创建 Nginx 配置文件，并增加上传文件大小限制。
+# =================================================
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -2440,6 +2453,11 @@ server {
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+
+    # ==================== 新增优化 ====================
+    # 增加允许的客户端请求正文大小，适用于上传大文件
+    client_max_body_size 512M;
+    # ================================================
 
     # 反向代理配置
     location / {

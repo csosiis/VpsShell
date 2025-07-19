@@ -353,7 +353,7 @@ ui_panels_menu() {
         echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
         echo -e "$CYAN╟                                                  ╢$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
         echo ""
         read -p "请输入选项: " choice
@@ -364,56 +364,6 @@ ui_panels_menu() {
             *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
-}
-# =================================================
-# 函数: install_traffmonetizer
-# 说明: (新增) 安装 Traffmonetizer 容器，并根据输入的密令选择amd或arm架构。
-# =================================================
-install_traffmonetizer() {
-    log_info "开始部署 Traffmonetizer..."
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续部署 Traffmonetizer。"
-        press_any_key
-        return
-    fi
-
-    # 检查并移除已存在的同名容器
-    if docker ps -a --format '{{.Names}}' | grep -q "^tm$"; then
-        log_warn "检测到已存在的 Traffmonetizer 容器 (tm)，将停止并删除它以进行重新部署。"
-        docker stop tm >/dev/null 2>&1
-        docker rm tm >/dev/null 2>&1
-    fi
-
-    read -p "请输入部署密令 (amd/arm): " arch_choice
-
-    local docker_command=""
-    case "$arch_choice" in
-        amd)
-            log_info "选择 amd 架构，准备执行命令..."
-            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli_v2 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
-            ;;
-        arm)
-            log_info "选择 arm 架构，准备执行命令..."
-            docker_command="docker run -d --restart=always --name tm traffmonetizer/cli:arm64v8 start accept --token nX8AO46w05qbB8Jhg60j9d0jiKSz1F/xwQ7Nk7nO2lI="
-            ;;
-        *)
-            log_error "无效的密令！请输入 'amd' 或 'arm'。"
-            press_any_key
-            return
-            ;;
-    esac
-
-    log_info "正在执行 Docker 命令..."
-    eval "$docker_command"
-
-    sleep 3
-    if docker ps --format '{{.Names}}' | grep -q "^tm$"; then
-        log_info "✅ Traffmonetizer 容器 (tm) 已成功启动！"
-        docker ps | grep "tm"
-    else
-        log_error "Traffmonetizer 容器启动失败！请使用 'docker logs tm' 查看错误日志。"
-    fi
-    press_any_key
 }
 is_singbox_installed() {
     if command -v sing-box &>/dev/null; then return 0; else return 1; fi
@@ -2231,14 +2181,14 @@ nezha_dashboard_menu() {
     done
 }
 # =================================================
-# 函数: nezha_main_menu (新增)
+# 函数: nezha_main_menu (已修复)
 # 说明: 哪吒监控的总管理菜单，区分 Agent 和 Dashboard。
 # =================================================
 nezha_main_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                    哪吒监控管理                   $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
@@ -2593,6 +2543,45 @@ setup_auto_reverse_proxy() {
         press_any_key
     fi
 }
+# =================================================
+# 函数: docker_apps_menu (新增)
+# 说明: 整合了所有 Docker 应用和面板安装的菜单。
+# =================================================
+docker_apps_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 搭建 WordPress (Docker)                     $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE苹果CMS$CYAN ──────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 搭建苹果CMS影视站 (Docker)                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载苹果CMS$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        echo ""
+        read -p "请输入选项: " choice
+        case $choice in
+        1) ui_panels_menu ;;
+        2) install_wordpress ;;
+        3) install_maccms ;;
+        4) uninstall_maccms ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
 main_menu() {
     while true; do
         clear
@@ -2608,21 +2597,11 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 Traffmonetizer (Docker)                $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE面板安装$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 搭建苹果CMS影视站 (Docker)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. 搭建 WordPress (Docker)                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. 自动配置网站反向代理                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. ${GREEN}自动配置网站反向代理$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   11. $RED卸载苹果CMS$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   99. $GREEN更新此脚本$NC                                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2638,12 +2617,8 @@ main_menu() {
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
         4) nezha_main_menu ;;
-        5) install_traffmonetizer ;;
-        6) ui_panels_menu ;;
-        7) install_maccms ;;
-        8) install_wordpress ;;
-        9) setup_auto_reverse_proxy ;;
-        11) uninstall_maccms ;;
+        5) docker_apps_menu ;;
+        6) setup_auto_reverse_proxy ;;
         99) do_update_script ;;
         66) setup_shortcut ;;
         0) exit 0 ;;
