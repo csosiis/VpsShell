@@ -1534,7 +1534,7 @@ substore_view_access_link() {
     local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
     local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
-    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
+    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
 
     # 1. 处理反向代理链接
     if [ -n "$proxy_domain" ]; then
