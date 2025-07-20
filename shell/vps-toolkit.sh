@@ -2236,14 +2236,6 @@ _create_shortcut() {
     log_info "✅ 快捷命令 '$shortcut_name' 已设置！"
     log_info "现在您可以随时随地输入 '$shortcut_name' 来运行此脚本。"
 }
-setup_shortcut() {
-
-    local default_shortcut="sv"
-    read -p "请输入您想要的快捷命令名称 [默认: $default_shortcut]: " input_name
-    local shortcut_name=${input_name:-$default_shortcut}
-    _create_shortcut "$shortcut_name"
-    press_any_key
-}
 manage_bbr() {
     clear
     log_info "开始检查并管理 BBR..."
@@ -2438,7 +2430,7 @@ certificate_management_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  证书管理 (Certbot)                $CYAN║$NC"
+        echo -e "$CYAN║$WHITE               证书管理 (Certbot)                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 申请新证书 (自动配置反代)                   $CYAN║$NC"
@@ -2447,7 +2439,7 @@ certificate_management_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 手动续签所有证书                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${RED}删除证书 (并清理反代配置)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${RED}删除证书 (并清理反代配置)${NC}                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -2654,7 +2646,7 @@ setup_auto_reverse_proxy() {
     local domain_input="$1"
     local local_port="$2"
     clear
-    log_info "欢迎使用通用反向代理设置向导。"
+    log_info "欢迎使用通用反向代理设置向导。\n"
 
     if [ -z "$domain_input" ]; then
         while true; do
@@ -2758,15 +2750,13 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}证书管理 & 网站反代$NC                        $CYAN║$NC" # <-- 修改点
+        echo -e "$CYAN║$NC   6. ${GREEN}证书管理 & 网站反代$NC                         $CYAN║$NC" # <-- 修改点
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   99. $GREEN更新此脚本$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   66. $YELLOW设置快捷命令 (默认: sv)$NC                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC    0. $RED退出脚本$NC                                   $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
@@ -2778,8 +2768,7 @@ main_menu() {
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
         6) certificate_management_menu ;; # <-- 修改点
-        99) do_update_script ;;
-        66) setup_shortcut ;;
+        9) do_update_script ;;
         0) exit 0 ;;
         *)
             log_error "无效选项！"
