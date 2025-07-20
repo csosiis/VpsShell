@@ -2931,7 +2931,7 @@ main_menu() {
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
         6) certificate_management_menu ;;
-        99) do_update_script ;;
+        9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
