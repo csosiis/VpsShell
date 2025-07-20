@@ -15,9 +15,9 @@ SCRIPT_PATH=$(realpath "$0")
 SHORTCUT_PATH="/usr/local/bin/sv"
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 FLAG_FILE="/root/.vps_toolkit.initialized"
-log_info() { echo -e "$GREEN[信息] - $1$NC"; }
-log_warn() { echo -e "$YELLOW[注意] - $1$NC"; }
-log_error() { echo -e "$RED[错误] - $1$NC"; }
+log_info() { echo -e "\n$GREEN[信息] - $1$NC"; }
+log_warn() { echo -e "\n$YELLOW[注意] - $1$NC"; }
+log_error() { echo -e "\n$RED[错误] - $1$NC"; }
 press_any_key() {
     echo ""
     read -n 1 -s -r -p "按任意键返回..."
@@ -45,13 +45,11 @@ _is_port_available() {
     local used_ports_array_name=$2
     eval "local used_ports=(\"\${$used_ports_array_name[@]}\")"
     if ss -tlnu | grep -q -E ":$port_to_check\s"; then
-        echo ""
         log_warn "端口 $port_to_check 已被系统其他服务占用。"
         return 1
     fi
     for used_port in "${used_ports[@]}"; do
         if [ "$port_to_check" == "$used_port" ]; then
-            echo ""
             log_warn "端口 $port_to_check 即将被本次操作中的其他协议使用。"
             return 1
         fi
@@ -72,7 +70,6 @@ ensure_dependencies() {
     if [ ${#dependencies[@]} -eq 0 ]; then
         return 0
     fi
-    log_info "正在按需检查依赖: ${dependencies[*]}..."
     for pkg in "${dependencies[@]}"; do
         if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
             missing_dependencies+=("$pkg")
@@ -94,7 +91,6 @@ ensure_dependencies() {
             fi
         done
         if [ "$install_fail" -eq 0 ]; then
-            log_info "所有依赖包安装完成。"
             return 0
         else
             log_error "部分依赖包安装失败，请手动检查。"
@@ -104,7 +100,6 @@ ensure_dependencies() {
         log_info "所需依赖均已安装。"
         return 0
     fi
-    echo ""
 }
 
 show_system_info() {
@@ -143,8 +138,7 @@ show_system_info() {
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
     clear
-    echo ""
-    echo -e "$CYAN-------------------- 系统信息查询 ---------------------$NC"
+    echo -e "\n$CYAN-------------------- 系统信息查询 ---------------------$NC"
     printf "$GREEN主机名　　　  : $WHITE%s$NC\n" "$hostname_info"
     printf "$GREEN系统版本　　  : $WHITE%s$NC\n" "$os_info"
     printf "${GREEN}Linux版本　 　: $WHITE%s$NC\n" "$kernel_info"
@@ -184,7 +178,6 @@ clean_system() {
     press_any_key
 }
 change_hostname() {
-    echo ""
     log_info "准备修改主机名...\n"
     read -p "请输入新的主机名: " new_hostname
     if [ -z "$new_hostname" ]; then
@@ -267,7 +260,6 @@ setup_ssh_key() {
     touch ~/.ssh/authorized_keys
     chmod 700 ~/.ssh
     chmod 600 ~/.ssh/authorized_keys
-    echo ""
     log_warn "请粘贴您的公公钥 (例如 id_rsa.pub 的内容)，粘贴完成后，按 Enter 换行，再按一次 Enter 即可结束输入:"
     local public_key=""
     local line
@@ -285,8 +277,7 @@ setup_ssh_key() {
     fi
     printf "%s\n" "$public_key" >>~/.ssh/authorized_keys
     sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
-    log_info "公钥已成功添加到 authorized_keys 文件中。"
-    echo ""
+    log_info "公钥已成功添加到 authorized_keys 文件中。\n"
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" == "y" || "$disable_pwd" == "Y" ]]; then
         sed -i 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
@@ -302,13 +293,10 @@ set_timezone() {
     local current_timezone
     current_timezone=$(timedatectl show --property=Timezone --value)
     log_info "当前系统时区是: $current_timezone"
-    echo ""
-    log_info "请选择新的时区："
-    echo ""
+    log_info "请选择新的时区：\n"
     options=("Asia/Shanghai" "Asia/Taipei" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
     for i in "${!options[@]}"; do
-        echo "$((i + 1))) ${options[$i]}"
-        echo ""
+        echo -e "$((i + 1))) ${options[$i]}\n"
     done
     PS3="请输入选项 (1-8): "
     select opt in "${options[@]}"; do
@@ -354,8 +342,7 @@ ui_panels_menu() {
         echo -e "$CYAN╟                                                  ╢$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC\n"
         read -p "请输入选项: " choice
         case $choice in
             1) install_sui; break ;;
@@ -371,7 +358,6 @@ is_singbox_installed() {
 singbox_do_install() {
     ensure_dependencies "curl"
     if is_singbox_installed; then
-        echo ""
         log_info "Sing-Box 已经安装，跳过安装过程。"
         press_any_key
         return
@@ -384,7 +370,6 @@ singbox_do_install() {
         log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
         exit 1
     fi
-    echo ""
     log_info "✅ Sing-Box 安装成功！"
     log_info "正在自动定位服务文件并修改运行权限..."
     local service_file_path
@@ -435,14 +420,10 @@ singbox_do_install() {
 }
 EOL
     fi
-    echo ""
     log_info "正在启用并重启 Sing-Box 服务..."
-    echo ""
     systemctl enable sing-box.service
     systemctl restart sing-box
-    echo ""
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
-    echo ""
     press_any_key
 }
 _handle_caddy_cert() {
@@ -505,7 +486,6 @@ apply_ssl_certificate() {
     local domain_name="$1"
     local cert_dir="/etc/letsencrypt/live/$domain_name"
     if [ -d "$cert_dir" ]; then
-        echo ""
         log_info "检测到域名 $domain_name 的证书已存在，跳过申请流程。"
         return 0
     fi
@@ -538,16 +518,16 @@ select_nodes_for_push() {
     selected_links=()
     case $push_choice in
     1)
-        echo ""
+
         log_info "已选择推送所有节点。"
         for line in "${node_lines[@]}"; do
             selected_links+=("$line")
         done
         ;;
     2)
-        echo ""
+
         log_info "请选择要推送的节点 (可多选，用空格分隔):"
-        echo ""
+
         for i in "${!node_lines[@]}"; do
             line="${node_lines[$i]}"
             node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
@@ -582,10 +562,55 @@ select_nodes_for_push() {
 }
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
-    if ! select_nodes_for_push; then
+    mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
+    if [ ${#all_node_lines[@]} -eq 0 ]; then
+        log_warn "没有可推送的节点。"
         press_any_key
         return
     fi
+
+    # --- 再次修改：重新引入节点选择逻辑 ---
+    local selected_links=()
+    echo ""
+    read -p "是否要手动选择节点? (默认推送全部, 输入 'y' 手动选择): " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+
+        log_info "请选择要推送的节点 (可多选，用空格分隔):"
+        echo ""
+        for i in "${!all_node_lines[@]}"; do
+            local line="${all_node_lines[$i]}"
+            local node_name
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then
+                node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
+            fi
+            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC\n"
+        done
+        read -p "请输入编号 (输入 0 返回): " -a selected_indices
+        for index in "${selected_indices[@]}"; do
+            if [[ "$index" == "0" ]]; then press_any_key; return; fi
+            if ! [[ "$index" =~ ^[0-9]+$ ]] || [[ $index -lt 1 || $index -gt ${#all_node_lines[@]} ]]; then
+                log_error "包含无效编号: $index"
+                press_any_key
+                return
+            fi
+            selected_links+=("${all_node_lines[$((index - 1))]}")
+        done
+    else
+        log_info "已选择推送所有 ${#all_node_lines[@]} 个节点。"
+        # 将所有节点赋值给 selected_links 数组
+        for line in "${all_node_lines[@]}"; do
+            selected_links+=("$line")
+        done
+    fi
+
+    if [ ${#selected_links[@]} -eq 0 ]; then
+        log_warn "未选择任何有效节点。"
+        press_any_key
+        return
+    fi
+    # --- 节点选择逻辑结束 ---
+
     local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
     local sub_store_subs
     if [ -f "$sub_store_config_file" ]; then
@@ -599,20 +624,31 @@ push_to_sub_store() {
         press_any_key
         return
     fi
+
+    echo ""
+    local action
+    read -p "请输入 action 参数 [默认: update]: " action
+    action=${action:-"update"}
+
     local links_str
     links_str=$(printf "%s\n" "${selected_links[@]}")
+
     local node_json
-    node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" '{
-        "token": "sanjose",
-        "name": $name,
-        "link": $link
-    }')
-    echo ""
-    log_info "正在推送到 Sub-Store..."
+    node_json=$(jq -n \
+        --arg name "$sub_store_subs" \
+        --arg link "$links_str" \
+        --arg action "$action" \
+        '{
+            "token": "sanjose",
+            "action": $action,
+            "name": $name,
+            "link": $link
+        }')
     local response
     response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
         -d "$node_json")
+
     if echo "$response" | jq -e '.success' >/dev/null; then
         echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
@@ -622,70 +658,12 @@ push_to_sub_store() {
     else
         local error_message
         error_message=$(echo "$response" | jq -r '.message // "未知错误"')
-        echo ""
+
         log_error "推送到 Sub-Store 失败，服务器响应: $error_message"
     fi
     press_any_key
 }
-push_to_telegram() {
-    if ! select_nodes_for_push; then
-        press_any_key
-        return
-    fi
-    local tg_config_file="/etc/sing-box/telegram-bot-config.txt"
-    local tg_api_token
-    local tg_chat_id
-    if [ -f "$tg_config_file" ]; then
-        source "$tg_config_file"
-    fi
-    if [ -z "$tg_api_token" ] || [ -z "$tg_chat_id" ]; then
-        log_info "首次推送到 Telegram，请输入您的 Bot 信息。"
-        read -p "请输入 Telegram Bot API Token: " tg_api_token
-        read -p "请输入 Telegram Chat ID: " tg_chat_id
-    fi
-    local message_lines=("节点推送成功，详情如下：" "")
-    message_lines+=("${selected_links[@]}")
-    local IFS=$'\n'
-    local message_text="${message_lines[*]}"
-    unset IFS
-    echo ""
-    log_info "正在将节点合并为单条消息推送到 Telegram..."
-    response=$(curl -s -X POST "https://api.telegram.org/bot$tg_api_token/sendMessage" \
-        --data-urlencode "chat_id=$tg_chat_id" \
-        --data-urlencode "text=$message_text")
-    if ! echo "$response" | jq -e '.ok' >/dev/null; then
-        log_error "推送失败！ Telegram API 响应: $(echo "$response" | jq -r '.description // .')"
-        read -p "是否要清除已保存的 Telegram 配置并重试? (y/N): " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
-            rm -f "$tg_config_file"
-        fi
-        press_any_key
-        return
-    fi
-    echo "tg_api_token=$tg_api_token" >"$tg_config_file"
-    echo "tg_chat_id=$tg_chat_id" >>"$tg_config_file"
-    log_info "✅ 节点信息已成功推送到 Telegram！"
-    press_any_key
-}
-push_nodes() {
-    ensure_dependencies "jq" "curl"
-    clear
-    echo -e "$WHITE--- 推送节点 ---$NC\n"
-    echo "1. 推送到 Sub-Store"
-    echo "2. 推送到 Telegram Bot"
-    echo ""
-    echo "0. 返回"
-    read -p "请选择推送方式: " push_choice
-    case $push_choice in
-    1) push_to_sub_store ;;
-    2) push_to_telegram ;;
-    0) return ;;
-    *)
-        log_error "无效选项！"
-        press_any_key
-        ;;
-    esac
-}
+
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -746,7 +724,7 @@ generate_tuic_client_config() {
 }
 view_node_info() {
     while true; do
-        clear; echo "";
+        clear;
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
@@ -776,7 +754,7 @@ view_node_info() {
         case $choice in
             1) singbox_add_node_orchestrator; continue ;;
             2) delete_nodes; continue ;;
-            3) push_nodes; continue ;;
+            3)  push_to_sub_store; continue ;;
             4) generate_subscription_link; continue ;;
             5) generate_tuic_client_config; continue ;;
             0) break ;;
@@ -799,17 +777,17 @@ delete_nodes() {
             tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
             node_tags_map[$i]=$tag
         done
-        echo ""
-        log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
-        echo ""
+
+        log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):\n"
+
         for i in "${!node_lines[@]}"; do
             line="${node_lines[$i]}"
             node_name=${node_tags_map[$i]}
             if [[ "$line" =~ ^vmess:// ]]; then
                 node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
             fi
-            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC"
-            echo ""
+            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC\n"
+
         done
         read -p "请输入编号 (输入 0 返回上一级菜单): " -a nodes_to_delete
         is_cancel=false
@@ -896,7 +874,7 @@ singbox_do_uninstall() {
         press_any_key
         return
     fi
-    echo ""
+
     log_info "正在停止并禁用 Sing-Box 服务..."
     systemctl stop sing-box &>/dev/null
     systemctl disable sing-box &>/dev/null
@@ -929,7 +907,7 @@ is_substore_installed() {
 substore_do_install() {
     ensure_dependencies "curl" "unzip" "git"
 
-    echo ""
+
     log_info "开始执行 Sub-Store 安装流程..."
     set -e
 
@@ -966,7 +944,7 @@ substore_do_install() {
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
     log_info "开始配置系统服务..."
-    echo ""
+
     local API_KEY
     local random_api_key
     random_api_key=$(generate_random_password)
@@ -1031,7 +1009,7 @@ EOF
     else
         log_error "服务启动失败！请使用日志功能排查。"
     fi
-    echo ""
+
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
@@ -1074,7 +1052,7 @@ install_wordpress() {
     fi
     clear
     log_info "开始使用 Docker Compose 搭建 WordPress..."
-    echo ""
+
     local project_dir
     while true; do
         read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
@@ -1082,7 +1060,7 @@ install_wordpress() {
         if [ -f "$project_dir/docker-compose.yml" ]; then
             log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
             log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
-            echo ""
+
             continue
         else
             break
@@ -1099,15 +1077,15 @@ install_wordpress() {
         return 1
     }
     log_info "新的 WordPress 将被安装在: $(pwd)"
-    echo ""
-    echo ""
+
+
     local db_password
     local db_password_default="123456"
     read -s -p "请输入新的数据库 root 和用户密码 [默认: 123456]: " db_password
-    echo ""
+
     db_password=${db_password:-$db_password_default}
     log_info "数据库密码已设置为: $db_password"
-    echo ""
+
     local wp_port
     while true; do
         read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
@@ -1117,7 +1095,7 @@ install_wordpress() {
             :
         else break; fi
     done
-    echo ""
+
     local domain
     while true; do
         read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
@@ -1175,21 +1153,21 @@ EOF
         press_any_key
         return
     fi
-    echo ""
+
     log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
     log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
     docker compose up -d
-    echo ""
+
     log_info "正在检查服务状态..."
     sleep 5
     docker compose ps
-    echo ""
+
     log_info "✅ WordPress 容器已成功启动！"
-    echo ""
+
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
     if [[ "$setup_proxy_choice" != "n" && "$setup_proxy_choice" != "N" ]]; then
         setup_auto_reverse_proxy "$domain" "$wp_port"
-        echo ""
+
         log_info "WordPress 配置流程完毕！您现在应该可以通过 $site_url 访问您的网站了。"
     else
         log_info "好的，您选择不设置反向代理。"
@@ -1230,7 +1208,7 @@ download_maccms_source() {
 }
 
 install_maccms() {
-    echo ""
+
     log_info "开始安装苹果CMS"
     ensure_dependencies "curl" "unzip" "file"
 
@@ -1249,11 +1227,11 @@ install_maccms() {
     # 输入数据库密码
     local db_root_password db_user_password
     read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password
-    echo ""
+
     db_root_password=${db_root_password:-$(generate_random_password)}
 
     read -s -p "请输入 maccms_user 用户密码 [默认随机]: " db_user_password
-    echo ""
+
     db_user_password=${db_user_password:-$(generate_random_password 20)}
 
     # 其它信息
@@ -1398,11 +1376,11 @@ EOF
 "
 
     # 输出连接信息
-    echo ""
+
     log_info "✅ 安装完成，信息如下："
     echo "--------------------------------------------"
     echo "网站地址: http://<服务器IP>:$web_port"
-    echo ""
+
     echo "数据库信息："
     echo "  主机: db"
     echo "  端口: $db_port"
@@ -1450,7 +1428,7 @@ substore_do_uninstall() {
         press_any_key
         return
     fi
-    echo ""
+
     read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         log_info "操作已取消。"
@@ -1519,10 +1497,8 @@ update_sub_store_app() {
     press_any_key
 }
 
-# =================================================
-# 函数: substore_view_access_link
-# 说明: 从服务文件中读取配置并显示访问链接。 (已更新为带 ?api= 参数的格式)
-# =================================================
+# 函数: substore_view_access_link (无修改，仅供参考)
+# 说明: 从服务文件中读取配置并显示访问链接。
 substore_view_access_link() {
     if ! is_substore_installed; then
         log_warn "Sub-Store 未安装，无法查看链接。"
@@ -1536,7 +1512,7 @@ substore_view_access_link() {
     local ipv4_addr=$(curl -s -m 5 -4 https://ipv4.icanhazip.com)
     local proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
-    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC"
+    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
 
     # 1. 处理反向代理链接
     if [ -n "$proxy_domain" ]; then
@@ -1556,6 +1532,57 @@ substore_view_access_link() {
     echo -e "$CYAN-----------------------------------------------------------$NC"
 }
 
+
+# =================================================
+# 函数: substore_setup_reverse_proxy (已优化)
+# 说明: 为 Sub-Store 设置或更换反向代理，并在成功后立即显示访问链接。
+# =================================================
+substore_setup_reverse_proxy() {
+    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
+
+    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local domain
+
+
+    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
+    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
+
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then
+        log_error "域名不能为空，操作已取消。"
+        press_any_key
+        return
+    fi
+
+    # 调用通用的反代设置函数
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
+
+    # 检查反代是否成功
+    if [ $? -eq 0 ]; then
+        log_info "正在将域名保存到服务配置中以供显示..."
+        # 如果已有域名配置行，则替换；否则追加
+        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
+            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
+        else
+            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
+        fi
+        systemctl daemon-reload
+        log_info "✅ Sub-Store 反向代理设置完成！"
+
+        # ==================== 新增逻辑 ====================
+        # 设置成功后，立即调用函数显示最新的访问链接
+
+        log_info "正在显示最新的访问链接..."
+        sleep 1
+        substore_view_access_link
+        # ================================================
+
+    else
+        log_error "自动反向代理配置失败，请检查之前的错误信息。"
+    fi
+
+    press_any_key
+}
 # =================================================
 # 函数: substore_reset_ports
 # 说明: 重新设置 Sub-Store 的前端和后端端口。
@@ -1604,47 +1631,7 @@ substore_reset_api_key() {
     log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
     press_any_key
 }
-# =================================================
-# 函数: substore_setup_reverse_proxy
-# 说明: 为 Sub-Store 设置或更换反向代理。(已修正端口解析逻辑)
-# =================================================
-substore_setup_reverse_proxy() {
-    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
 
-    # 修正了这一行，确保能正确获取端口号
-    local frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local domain
-
-    echo ""
-    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
-    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。"
-    echo ""
-    read -p "请输入您的域名: " domain
-    if [ -z "$domain" ]; then
-        log_error "域名不能为空，操作已取消。"
-        press_any_key
-        return
-    fi
-
-    # 调用通用的反代设置函数
-    setup_auto_reverse_proxy "$domain" "$frontend_port"
-
-    # 检查反代是否成功 (这是一个简化的检查，主要依赖 setup_auto_reverse_proxy 的返回)
-    if [ $? -eq 0 ]; then
-        log_info "正在将域名保存到服务配置中以供显示..."
-        # 如果已有域名配置行，则替换；否则追加
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-            sed -i "s/SUB_STORE_REVERSE_PROXY_DOMAIN=.*/SUB_STORE_REVERSE_PROXY_DOMAIN=$domain/" "$SUBSTORE_SERVICE_FILE"
-        else
-            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
-        fi
-        systemctl daemon-reload
-        log_info "✅ Sub-Store 反向代理设置完成！"
-    else
-        log_error "自动反向代理配置失败，请检查之前的错误信息。"
-    fi
-    press_any_key
-}
 substore_manage_menu() {
     while true; do
         clear
@@ -1658,29 +1645,29 @@ substore_manage_menu() {
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
         echo -e "当前状态: $STATUS_COLOR\n"
         echo "-----------------------------"
-        echo ""
+
         echo "1. 启动服务"
-        echo ""
+
         echo "2. 停止服务"
-        echo ""
+
         echo "3. 重启服务"
-        echo ""
+
         echo "4. 查看状态"
-        echo ""
+
         echo "5. 查看日志"
-        echo ""
+
         echo "-----------------------------"
-        echo ""
+
         echo "6. 查看访问链接"
-        echo ""
+
         echo "7. 重置端口"
-        echo ""
+
         echo "8. 重置 API 密钥"
-        echo ""
+
         echo -e "9. $YELLOW$rp_menu_text$NC"
-        echo ""
+
         echo "0. 返回主菜单"
-        echo ""
+
         echo -e "$WHITE-----------------------------$NC\n"
         read -p "请输入选项: " choice
         case $choice in
@@ -1903,17 +1890,16 @@ install_nezha_agent_v1() {
     # 所有参数已在此处硬编码，无需手动输入。
     # 如果需要修改，请直接编辑下面的值。
     local server_info="nz.ssong.eu.org:8008"
-    local server_secret="HZ3zqF44V2Jo26fwnpJpMYDs8I18V0v1"
+    local server_secret="Pln0X91X18urAudToiwDGVlZhkpUb0Qv"
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_v1 &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_v1 &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
-    clear
     log_info "指令正确，开始全自动安装 Nezha V1 探针 (安装后改造模式)..."
     log_info "服务器信息: $server_info"
     log_info "连接密钥: $server_secret"
@@ -2007,13 +1993,12 @@ install_nezha_agent_phoenix() {
     local NZ_TLS="false" # 是否为gRPC连接启用TLS? ("true" 或 "false")
 
     # --- 基础准备 ---
-    log_info "为确保全新安装，将首先清理所有旧的探针安装..."
-    uninstall_nezha_agent_phoenix &>/dev/null
-    uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
-    systemctl daemon-reload
+    #log_info "为确保全新安装，将首先清理所有旧的探针安装..."
+    #uninstall_nezha_agent_phoenix &>/dev/null
+    #uninstall_nezha_agent &>/dev/null # 清理标准版，以防万一
+    #systemctl daemon-reload
 
     ensure_dependencies "curl" "wget" "unzip"
-    clear
     log_info "指令正确，开始全自动安装 Phoenix Nezha V1 探针 (安装后改造模式)..."
     log_info "服务器信息: $server_info"
     log_info "连接密钥: $server_secret"
@@ -2133,7 +2118,7 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) install_nezha_agent_v0 ;;
@@ -2164,10 +2149,10 @@ nezha_dashboard_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
         log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) install_nezha_dashboard_v0 ;;
@@ -2198,7 +2183,7 @@ nezha_main_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) nezha_agent_menu ;;
@@ -2244,7 +2229,7 @@ _create_shortcut() {
         log_error "无效的命令名称！只能包含字母、数字、下划线和连字符。"
         return 1
     fi
-    echo ""
+
     log_info "正在为脚本创建快捷命令: $shortcut_name"
     ln -sf "$SCRIPT_PATH" "$full_path"
     chmod +x "$full_path"
@@ -2252,7 +2237,7 @@ _create_shortcut() {
     log_info "现在您可以随时随地输入 '$shortcut_name' 来运行此脚本。"
 }
 setup_shortcut() {
-    echo ""
+
     local default_shortcut="sv"
     read -p "请输入您想要的快捷命令名称 [默认: $default_shortcut]: " input_name
     local shortcut_name=${input_name:-$default_shortcut}
@@ -2273,15 +2258,15 @@ manage_bbr() {
     log_info "当前 TCP 拥塞控制算法为: $YELLOW$current_congestion_control$NC"
     local current_queue_discipline=$(sysctl -n net.core.default_qdisc)
     log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
-    echo ""
+
     echo "请选择要执行的操作:"
-    echo ""
+
     echo "1. 启用 BBR (原始版本)"
-    echo ""
+
     echo "2. 启用 BBR + FQ"
-    echo ""
+
     echo "0. 返回"
-    echo ""
+
     read -p "请输入选项: " choice
     local sysctl_conf="/etc/sysctl.conf"
     sed -i '/net.core.default_qdisc/d' "$sysctl_conf"
@@ -2351,7 +2336,7 @@ sys_manage_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) show_system_info ;; 2) clean_system ;; 3) change_hostname ;; 4) optimize_dns ;;
@@ -2369,7 +2354,7 @@ _create_self_signed_cert() {
     cert_path="$cert_dir/$domain_name.cert.pem"
     key_path="$cert_dir/$domain_name.key.pem"
     if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
-        echo ""
+
         log_info "检测到已存在的自签名证书，将直接使用。"
         return 0
     fi
@@ -2410,6 +2395,10 @@ _add_protocol_inbound() {
     log_info "✅ [$protocol] 协议配置添加成功！"
     return 0
 }
+# =================================================
+# 函数: _configure_nginx_proxy (已优化)
+# 说明: 为指定域名和端口创建 Nginx 配置文件，并增加上传文件大小限制。
+# =================================================
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -2440,6 +2429,11 @@ server {
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+
+    # ==================== 新增优化 ====================
+    # 增加允许的客户端请求正文大小，适用于上传大文件
+    client_max_body_size 512M;
+    # ================================================
 
     # 反向代理配置
     location / {
@@ -2496,7 +2490,7 @@ setup_auto_reverse_proxy() {
     local local_port="$2"
     clear
     log_info "欢迎使用通用反向代理设置向导。"
-    echo ""
+
     if [ -z "$domain_input" ]; then
         while true; do
             read -p "请输入您要设置反代的域名: " domain_input
@@ -2567,7 +2561,7 @@ docker_apps_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) ui_panels_menu ;;
@@ -2610,7 +2604,7 @@ main_menu() {
         echo -e "$CYAN║$NC    0. $RED退出脚本$NC                                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        echo ""
+
         read -p "请输入选项: " choice
         case $choice in
         1) sys_manage_menu ;;
@@ -2662,7 +2656,7 @@ singbox_add_node_orchestrator() {
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-    echo ""
+
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
@@ -2697,15 +2691,12 @@ singbox_add_node_orchestrator() {
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
             if [[ -z "$domain" ]]; then
-                echo ""
                 log_error "域名不能为空！"
             elif ! _is_domain_valid "$domain"; then
-                echo ""
                 log_error "域名格式不正确。"
             else break; fi
         done
         if ! apply_ssl_certificate "$domain"; then
-            echo ""
             log_error "证书处理失败。"
             press_any_key
             return
@@ -2728,24 +2719,24 @@ singbox_add_node_orchestrator() {
             read -p "请输入选项 (1-2): " ip_choice
             if [ "$ip_choice" == "2" ]; then connect_addr="[$ipv6_addr]"; else connect_addr="$ipv4_addr"; fi
         elif [ -n "$ipv4_addr" ]; then
-            echo ""
+
             log_info "将自动使用 IPv4 地址。"
             connect_addr="$ipv4_addr"
         elif [ -n "$ipv6_addr" ]; then
-            echo ""
+
             log_info "将自动使用 IPv6 地址。"
             connect_addr="[$ipv6_addr]"
         else
-            echo ""
+
             log_error "无法获取任何公网 IP 地址！"
             press_any_key
             return
         fi
-        echo ""
+
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
         sni_domain=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain"; then
-            echo ""
+
             log_error "自签名证书处理失败。"
             press_any_key
             return
@@ -2759,21 +2750,21 @@ singbox_add_node_orchestrator() {
     fi
     local used_ports_for_this_run=()
     if $is_one_click; then
-        echo ""
+
         log_info "您已选择一键模式，请为每个协议指定端口。"
         for p in "${protocols_to_create[@]}"; do
             while true; do
-                echo ""
+
                 local port_prompt="请输入 [$p] 的端口 [回车则随机]: "
                 if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [$p] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
                 read -p "$(echo -e "$port_prompt")" port_input
                 if [ -z "$port_input" ]; then
                     port_input=$(generate_random_port)
-                    echo ""
+
                     log_info "已为 [$p] 生成随机端口: $port_input"
                 fi
                 if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                    echo ""
+
                     log_error "端口号需为 1-65535。"
                 elif _is_port_available "$port_input" "used_ports_for_this_run"; then
                     ports[$p]=$port_input
@@ -2787,15 +2778,15 @@ singbox_add_node_orchestrator() {
         while true; do
             local port_prompt="请输入 [$protocol_name] 的端口 [回车则随机]: "
             if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [$protocol_name] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
-            echo ""
+
             read -p "$(echo -e "$port_prompt")" port_input
             if [ -z "$port_input" ]; then
                 port_input=$(generate_random_port)
-                echo ""
+
                 log_info "已生成随机端口: $port_input"
             fi
             if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                echo ""
+
                 log_error "端口号需为 1-65535。"
             elif _is_port_available "$port_input" "used_ports_for_this_run"; then
                 ports[$protocol_name]=$port_input
@@ -2804,7 +2795,7 @@ singbox_add_node_orchestrator() {
             fi
         done
     fi
-    echo ""
+
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
     custom_id=${custom_id:-"Jcole"}
     local geo_info_json
@@ -2817,7 +2808,7 @@ singbox_add_node_orchestrator() {
     if [ -z "$region_name" ]; then region_name="N/A"; fi
     local success_count=0
     for protocol in "${protocols_to_create[@]}"; do
-        echo ""
+
         local tag_base="$country_code-$region_name-$custom_id"
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag
@@ -2865,7 +2856,7 @@ singbox_add_node_orchestrator() {
         if systemctl is-active --quiet sing-box; then
             log_info "Sing-Box 重启成功。"
             if [ "$success_count" -eq 1 ] && ! $is_one_click; then
-                echo ""
+
                 log_info "✅ 节点添加成功！分享链接如下："
                 echo -e "$CYAN--------------------------------------------------------------$NC"
                 echo -e "\n$YELLOW$final_node_link$NC\n"
@@ -2943,7 +2934,7 @@ singbox_main_menu() {
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            echo ""
+
             read -p "请输入选项: " choice
             case $choice in
             1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
@@ -2980,7 +2971,7 @@ singbox_main_menu() {
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            echo ""
+
             read -p "请输入选项: " choice
             case $choice in
             1) singbox_do_install ;; 0) break ;; *)
@@ -2993,12 +2984,12 @@ singbox_main_menu() {
 }
 initial_setup_check() {
     if [ ! -f "$FLAG_FILE" ]; then
-        echo ""
+
         log_info "脚本首次运行，开始自动设置..."
         _create_shortcut "sv"
         log_info "创建标记文件以跳过下次检查。"
         touch "$FLAG_FILE"
-        echo ""
+
         log_info "首次设置完成！正在进入主菜单..."
         sleep 2
     fi

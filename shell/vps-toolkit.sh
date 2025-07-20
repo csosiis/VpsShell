@@ -2306,6 +2306,171 @@ install_warp() {
     log_info "WARP 脚本执行完毕。按任意键返回主菜单。"
     press_any_key
 }
+# =================================================
+# 函数: list_certificates
+# 说明: 列出 Certbot 管理的所有证书及其域名。
+# =================================================
+list_certificates() {
+    if ! command -v certbot &> /dev/null; then
+        log_error "Certbot 未安装，无法管理证书。"
+        return 1
+    fi
+
+    log_info "正在获取所有证书列表..."
+    local certs_output
+    certs_output=$(certbot certificates 2>/dev/null)
+
+    if [[ -z "$certs_output" || ! "$certs_output" =~ "Found the following certs:" ]]; then
+        log_warn "未找到任何由 Certbot 管理的证书。"
+        return 2
+    fi
+
+    # 使用 awk 来解析和格式化输出
+    echo "$certs_output" | awk '
+        /Certificate Name:/ {
+            cert_name = $3
+        }
+        /Domains:/ {
+            domains = $2
+            for (i=3; i<=NF; i++) domains = domains " " $i
+        }
+        /Expiry Date:/ {
+            expiry_date = $3 " " $4 " " $5
+            # 移除括号和其中的内容
+            gsub(/\(.*\)/, "", expiry_date)
+            # 整理字符串，移除多余空格
+            gsub(/^[ \t]+|[ \t]+$/, "", expiry_date)
+
+            # 获取状态
+            status = ""
+            if (index($0, "VALID")) {
+                status = "\033[0;32m(VALID)\033[0m" # 绿色
+            } else if (index($0, "EXPIRED")) {
+                status = "\033[0;31m(EXPIRED)\033[0m" # 红色
+            }
+
+            printf "\n  - 证书名称: \033[1;37m%s\033[0m\n", cert_name
+            printf "    域名: \033[0;33m%s\033[0m\n", domains
+            printf "    到期时间: %s %s\n", expiry_date, status
+        }
+    '
+    echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
+    return 0
+}
+
+
+# =================================================
+# 函数: delete_certificate_and_proxy
+# 说明: 删除指定的证书，并自动清理关联的Nginx反代配置。
+# =================================================
+delete_certificate_and_proxy() {
+    clear
+    log_info "准备删除证书及其关联配置..."
+
+    if ! list_certificates; then
+        press_any_key
+        return
+    fi
+
+    read -p "请输入要删除的证书名称 (Certificate Name): " cert_name
+    if [ -z "$cert_name" ]; then
+        log_error "证书名称不能为空！"
+        press_any_key
+        return
+    fi
+
+    read -p "警告：这将永久删除证书 '$cert_name' 及其相关的 Nginx 配置文件。此操作不可逆！是否继续？(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在执行删除操作..."
+    set -e
+
+    # 使用 certbot delete 命令
+    certbot delete --cert-name "$cert_name" --non-interactive
+
+    # 检查并删除关联的 Nginx 配置文件
+    # certbot delete 通常会自动移除 Nginx 配置，但我们做一个双重检查
+    local nginx_conf="/etc/nginx/sites-available/$cert_name.conf"
+    if [ -f "$nginx_conf" ]; then
+        log_warn "检测到残留的 Nginx 配置文件，正在清理..."
+        rm -f "/etc/nginx/sites-enabled/$cert_name.conf"
+        rm -f "$nginx_conf"
+        nginx -t && systemctl reload nginx
+        log_info "✅ Nginx 残留配置已清理。"
+    fi
+
+    set +e
+    log_info "✅ 证书 '$cert_name' 已成功删除。"
+    press_any_key
+}
+
+
+# =================================================
+# 函数: renew_certificates
+# 说明: 手动触发所有证书的续签检查。
+# =================================================
+renew_certificates() {
+    if ! command -v certbot &> /dev/null; then
+        log_error "Certbot 未安装，无法续签。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在尝试为所有证书续期..."
+    log_warn "Certbot 会自动跳过那些距离到期日还很长的证书。"
+
+    certbot renew
+
+    log_info "✅ 证书续期检查完成。"
+    press_any_key
+}
+
+
+# =================================================
+# 函数: certificate_management_menu
+# 说明: 证书管理的主菜单。
+# =================================================
+certificate_management_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  证书管理 (Certbot)                $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 申请新证书 (自动配置反代)                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 查看/列出所有证书                           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 手动续签所有证书                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${RED}删除证书 (并清理反代配置)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) setup_auto_reverse_proxy ;;
+        2)
+           clear
+           list_certificates
+           press_any_key
+           ;;
+        3) renew_certificates ;;
+        4) delete_certificate_and_proxy ;;
+        0) break ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
+}
 sys_manage_menu() {
     while true; do
         clear
@@ -2593,7 +2758,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}自动配置网站反向代理$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. ${GREEN}证书管理 & 网站反代$NC                        $CYAN║$NC" # <-- 修改点
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2612,7 +2777,7 @@ main_menu() {
         3) substore_main_menu ;;
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
-        6) setup_auto_reverse_proxy ;;
+        6) certificate_management_menu ;; # <-- 修改点
         99) do_update_script ;;
         66) setup_shortcut ;;
         0) exit 0 ;;
@@ -2687,19 +2852,16 @@ singbox_add_node_orchestrator() {
     local tuic_insecure_param=""
 
     if [ "$cert_choice" == "1" ]; then
-
+        echo ""
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
             if [[ -z "$domain" ]]; then
-
                 log_error "域名不能为空！"
             elif ! _is_domain_valid "$domain"; then
-
                 log_error "域名格式不正确。"
             else break; fi
         done
         if ! apply_ssl_certificate "$domain"; then
-
             log_error "证书处理失败。"
             press_any_key
             return
