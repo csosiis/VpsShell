@@ -19,7 +19,7 @@ log_info() { echo -e "\n$GREEN[信息] - $1$NC"; }
 log_warn() { echo -e "\n$YELLOW[注意] - $1$NC"; }
 log_error() { echo -e "\n$RED[错误] - $1$NC"; }
 press_any_key() {
-
+    echo ""
     read -n 1 -s -r -p "按任意键返回..."
 }
 check_root() { if [ "$(id -u)" -ne 0 ]; then
@@ -571,12 +571,12 @@ push_to_sub_store() {
 
     # --- 再次修改：重新引入节点选择逻辑 ---
     local selected_links=()
-
+    echo ""
     read -p "是否要手动选择节点? (默认推送全部, 输入 'y' 手动选择): " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
 
         log_info "请选择要推送的节点 (可多选，用空格分隔):"
-
+        echo ""
         for i in "${!all_node_lines[@]}"; do
             local line="${all_node_lines[$i]}"
             local node_name
@@ -616,7 +616,7 @@ push_to_sub_store() {
     if [ -f "$sub_store_config_file" ]; then
         sub_store_subs=$(grep "sub_store_subs=" "$sub_store_config_file" | cut -d'=' -f2)
     fi
-
+    echo ""
     read -p "请输入 Sub-Store 的订阅标识 (name) [默认: $sub_store_subs]: " input_subs
     sub_store_subs=${input_subs:-$sub_store_subs}
     if [ -z "$sub_store_subs" ]; then
@@ -625,6 +625,7 @@ push_to_sub_store() {
         return
     fi
 
+    echo ""
     local action
     read -p "请输入 action 参数 [默认: update]: " action
     action=${action:-"update"}
@@ -643,10 +644,6 @@ push_to_sub_store() {
             "name": $name,
             "link": $link
         }')
-
-
-    log_info "准备推送数据, action 为: $action"
-    log_info "正在推送到 Sub-Store..."
     local response
     response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" \
         -H "Content-Type: application/json" \
@@ -727,7 +724,7 @@ generate_tuic_client_config() {
 }
 view_node_info() {
     while true; do
-        clear; ;
+        clear;
         if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
             log_warn "暂无配置的节点！"
             echo -e "\n1. 新增节点\n\n0. 返回上一级菜单\n"
@@ -781,7 +778,7 @@ delete_nodes() {
             node_tags_map[$i]=$tag
         done
 
-        log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):"
+        log_info "请选择要删除的节点 (可多选，用空格分隔, 输入 'all' 删除所有):\n"
 
         for i in "${!node_lines[@]}"; do
             line="${node_lines[$i]}"
@@ -789,7 +786,7 @@ delete_nodes() {
             if [[ "$line" =~ ^vmess:// ]]; then
                 node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$node_name"')
             fi
-            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC"
+            echo -e "$GREEN$((i + 1)). $WHITE$node_name$NC\n"
 
         done
         read -p "请输入编号 (输入 0 返回上一级菜单): " -a nodes_to_delete
