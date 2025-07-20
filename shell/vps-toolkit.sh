@@ -2761,7 +2761,7 @@ docker_apps_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟───────────────────── $WHITE WordPress $CYAN ───────────────────────╢$NC"
+        echo -e "$CYAN╟────────────────── $WHITE WordPress $CYAN ───────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 搭建 WordPress (Docker)                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
