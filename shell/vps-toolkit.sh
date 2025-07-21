@@ -484,7 +484,85 @@ set_timezone() {
     unset PS3
     press_any_key
 }
+change_ssh_port() {
+    clear
+    log_info "开始修改 SSH 端口..."
 
+    local current_port
+    current_port=$(grep -iE '^#?Port' /etc/ssh/sshd_config | grep -oE '[0-9]+' | head -1)
+    current_port=${current_port:-22}
+
+    log_info "当前 SSH 端口是: $YELLOW$current_port$NC"
+
+    local new_port
+    while true; do
+        read -p "请输入新的 SSH 端口 (推荐 1025-65535): " new_port
+        if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
+            log_error "无效的端口号。请输入 1-65535 之间的数字。"
+        elif [ "$new_port" -eq "$current_port" ]; then
+            log_error "新端口不能与当前端口 ($current_port) 相同。"
+        elif ss -tln | grep -q ":$new_port\b"; then
+            log_error "端口 $new_port 已被其他服务占用，请更换一个。"
+        else
+            break
+        fi
+    done
+
+    log_info "新端口 $new_port 验证通过。"
+
+    # 步骤1：处理防火墙 (至关重要)
+    if command -v ufw &>/dev/null && ufw status | grep -q 'Status: active'; then
+        log_info "检测到 UFW 防火墙，正在为端口 $new_port 创建规则..."
+        ufw allow "$new_port/tcp"
+    elif command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
+        log_info "检测到 firewalld 防火墙，正在为端口 $new_port 创建规则..."
+        firewall-cmd --permanent --add-port="$new_port/tcp"
+        firewall-cmd --reload
+    else
+        log_warn "未检测到活动的 UFW 或 firewalld 防火墙。"
+        log_warn "请务必手动在你的防火墙 (包括云服务商的安全组) 中开放 TCP 端口 $new_port，否则重启SSH后你将无法连接！"
+    fi
+
+    # 步骤2: 处理 SELinux (针对 CentOS/RHEL 等系统)
+    if command -v sestatus &>/dev/null && sestatus | grep -q "SELinux status:\s*enabled"; then
+        log_info "检测到 SELinux 已启用，正在更新端口策略..."
+        # 确保 semanage 命令存在
+        ensure_dependencies "policycoreutils-python-utils"
+        if command -v semanage &>/dev/null; then
+            semanage port -a -t ssh_port_t -p tcp "$new_port"
+            log_info "SELinux 策略已更新。"
+        else
+            log_error "无法执行 semanage 命令。请手动处理 SELinux 策略，否则 SSH 服务可能启动失败！"
+        fi
+    fi
+
+    # 步骤3：修改 SSH 配置文件
+    log_info "正在修改 /etc/ssh/sshd_config 文件..."
+    # 使用 -E 开启扩展正则，使其更健壮
+    sed -i -E "s/^#?Port\s+[0-9]+/Port $new_port/" /etc/ssh/sshd_config
+
+    # 步骤4：重启 SSH 服务
+    log_info "正在重启 SSH 服务以应用新端口..."
+    if systemctl restart sshd || systemctl restart ssh; then
+        log_info "✅ SSH 服务已重启。"
+        echo
+        log_warn "========================= 重要提醒 ========================="
+        log_warn "  SSH 端口已成功修改为: $YELLOW$new_port$NC"
+        log_warn "  当前连接不会中断。请立即打开一个新的终端窗口进行测试！"
+        log_info   "  测试命令: $GREEN"ssh root@<你的服务器IP> -p $new_port"$NC"
+        log_warn "  在确认新端口可以正常登录之前，请【不要关闭】当前窗口！"
+        log_warn "============================================================"
+
+    else
+        log_error "SSH 服务重启失败！配置可能存在问题。"
+        log_error "正在尝试回滚 SSH 端口配置..."
+        sed -i -E "s/^Port\s+$new_port/Port $current_port/" /etc/ssh/sshd_config
+        systemctl restart sshd || systemctl restart ssh
+        log_info "配置已回滚到端口 $current_port。请检查 sshd 服务日志。"
+    fi
+
+    press_any_key
+}
 manage_bbr() {
     clear
     log_info "开始检查并管理 BBR..."
@@ -2657,10 +2735,6 @@ setup_auto_reverse_proxy() {
     return $status
 }
 
-
-# =================================================
-#                主菜单 & 子菜单
-# =================================================
 sys_manage_menu() {
     while true; do
         clear
@@ -2678,15 +2752,17 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}设置 root 登录 (密钥/密码)${NC}                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. ${YELLOW}修改 SSH 端口$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. BBR 拥塞控制管理                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. 安装 WARP 网络接口                          $CYAN║$NC"
+        echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2701,10 +2777,11 @@ sys_manage_menu() {
         3) change_hostname ;;
         4) optimize_dns ;;
         5) set_network_priority ;;
-        6) manage_root_login ;;  # 调用新的主函数
+        6) manage_root_login ;;
         7) set_timezone ;;
-        8) manage_bbr ;;
-        9) install_warp ;;
+        8) change_ssh_port ;; # 新增的调用
+        9) manage_bbr ;;
+        10) install_warp ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
