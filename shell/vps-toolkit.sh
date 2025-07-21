@@ -827,7 +827,7 @@ manage_bbr() {
     current_queue_discipline=$(sysctl -n net.core.default_qdisc)
     log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
 
-    echo -e "-n请选择要执行的操作:"
+    echo -e "\n请选择要执行的操作:"
     echo -e "\n1. 启用 BBR (原始版本)"
     echo -e "\n${GREEN}2. 启用 BBR + FQ${NC}"
     echo -e "\n0. 返回\n"
