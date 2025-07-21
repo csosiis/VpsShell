@@ -384,7 +384,7 @@ manage_root_login() {
         echo -e "$CYAN║$WHITE                设置 root 登录方式                $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}设置 SSH 密钥登录$NC (更安全，推荐)           $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}设置 SSH 密钥登录$NC (更安全，推荐)            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. ${YELLOW}设置 root 密码登录$NC (方便，兼容性好)         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -503,14 +503,10 @@ manage_bbr() {
     current_queue_discipline=$(sysctl -n net.core.default_qdisc)
     log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
 
-    echo "请选择要执行的操作:"
-
-    echo "1. 启用 BBR (原始版本)"
-
-    echo "2. 启用 BBR + FQ"
-
-    echo "0. 返回"
-
+    echo -e "-n请选择要执行的操作:"
+    echo -e "\n1. 启用 BBR (原始版本)"
+    echo -e "\n${GREEN}2. 启用 BBR + FQ${NC}"
+    echo -e "\n0. 返回\n"
     read -p "请输入选项: " choice
     local sysctl_conf="/etc/sysctl.conf"
     sed -i '/net.core.default_qdisc/d' "$sysctl_conf"
@@ -518,12 +514,12 @@ manage_bbr() {
     case $choice in
     1)
         log_info "正在启用 BBR..."
-        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        echo -e "\n net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
         ;;
     2)
         log_info "正在启用 BBR + FQ..."
-        echo "net.core.default_qdisc = fq" >>"$sysctl_conf"
-        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        echo -e "\n net.core.default_qdisc = fq" >>"$sysctl_conf"
+        echo -e "\n net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
         ;;
     0)
         log_info "操作已取消。"
