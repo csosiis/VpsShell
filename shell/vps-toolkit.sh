@@ -341,7 +341,7 @@ setup_ssh_key() {
     touch ~/.ssh/authorized_keys
     chmod 700 ~/.ssh
     chmod 600 ~/.ssh/authorized_keys
-    log_warn "请粘贴您的公公钥 (例如 id_rsa.pub 的内容)，粘贴完成后，按 Enter 换行，再按一次 Enter 即可结束输入:"
+    log_warn "请粘贴您的公钥 (例如 id_rsa.pub 的内容)，粘贴完成后，按 Enter 换行，再按一次 Enter 即可结束输入:"
     local public_key=""
     local line
     while IFS= read -r line; do
@@ -361,13 +361,58 @@ setup_ssh_key() {
     log_info "公钥已成功添加到 authorized_keys 文件中。\n"
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" =~ ^[Yy]$ ]]; then
-        sed -i 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        log_info "正在修改 SSH 配置以禁用密码登录..."
+        # 【修复】同时修改两个参数，确保 root 只能通过密钥登录
+        sed -i -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
+               -e 's/^#?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+
         log_info "正在重启 SSH 服务..."
-        systemctl restart sshd
-        log_info "✅ SSH 密码登录已禁用。"
+        # 【优化】兼容不同的 SSH 服务名
+        if systemctl restart sshd || systemctl restart ssh; then
+             log_info "✅ SSH 服务已重启，密码登录已禁用。"
+        else
+             log_error "SSH 服务重启失败！请手动检查 'systemctl status ssh' 或 'sshd'。"
+        fi
     fi
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
+}
+manage_root_login() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   设置 root 登录方式               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}设置 SSH 密钥登录$NC (更安全，推荐)         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${YELLOW}设置 root 密码登录$NC (方便，兼容性好)       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            setup_ssh_key
+            break
+            ;;
+        2)
+            set_root_password
+            break
+            ;;
+        0)
+            break
+            ;;
+        *)
+            log_error "无效选项！"
+            sleep 1
+            ;;
+        esac
+    done
 }
 set_root_password() {
     log_info "开始设置 root 密码..."
@@ -2637,15 +2682,15 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置 SSH 密钥登录                           $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. ${GREEN}设置 root 登录 (密钥/密码)${NC}                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${GREEN}设置 root 密码登录$NC                          $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. 设置系统时区                                $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. ${GREEN}BBR 拥塞控制管理$NC                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. BBR 拥塞控制管理                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   10. 安装 WARP 网络接口                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. 安装 WARP 网络接口                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2655,9 +2700,17 @@ sys_manage_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) show_system_info ;; 2) clean_system ;; 3) change_hostname ;; 4) optimize_dns ;;
-        5) set_network_priority ;; 6) setup_ssh_key ;; 7) set_root_password ;; 8) set_timezone ;;
-        9) manage_bbr ;; 10) install_warp ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+        1) show_system_info ;;
+        2) clean_system ;;
+        3) change_hostname ;;
+        4) optimize_dns ;;
+        5) set_network_priority ;;
+        6) manage_root_login ;;  # 调用新的主函数
+        7) set_timezone ;;
+        8) manage_bbr ;;
+        9) install_warp ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
