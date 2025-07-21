@@ -278,117 +278,201 @@ change_hostname() {
     log_info "当前主机名是：$(hostname)"
     press_any_key
 }
+# =================================================
+#                 DNS 工具箱 (新增/重构)
+# =================================================
+
+# 新增: DNS 功能的子菜单
+dns_toolbox_menu() {
+    local backup_file="/etc/vps_toolkit_dns_backup"
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 优化 DNS (从列表中选择并设置)             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 备份当前 DNS 配置                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+
+        # 只有备份文件存在时，才显示恢复选项
+        if [ -f "$backup_file" ]; then
+            echo -e "$CYAN║$NC   3. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC   3. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
+        fi
+
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) optimize_dns ;;
+        2) backup_dns_config ;;
+        3) restore_dns_config ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# 新增: 备份DNS配置的函数
+backup_dns_config() {
+    local backup_file="/etc/vps_toolkit_dns_backup"
+    log_info "开始备份当前 DNS 配置..."
+
+    if [ -f "$backup_file" ]; then
+        log_warn "检测到已存在的备份文件。是否覆盖？"
+        read -p "请输入 (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            log_info "操作已取消。"
+            press_any_key
+            return
+        fi
+    fi
+
+    # 判断当前是何种DNS管理模式
+    if systemctl is-active --quiet systemd-resolved; then
+        # 备份 systemd-resolved 的配置
+        cp /etc/systemd/resolved.conf "$backup_file.systemd"
+        echo "systemd-resolved" > "$backup_file.mode"
+        log_info "已将 systemd-resolved 配置文件备份到 $backup_file.systemd"
+    else
+        # 备份传统的 resolv.conf 文件
+        cp /etc/resolv.conf "$backup_file.resolv"
+        echo "resolvconf" > "$backup_file.mode"
+        log_info "已将 /etc/resolv.conf 文件备份到 $backup_file.resolv"
+    fi
+
+    # 为了方便，我们统一创建一个标记文件
+    touch "$backup_file"
+    log_info "✅ DNS 备份完成！"
+    press_any_key
+}
+
+# 新增: 恢复DNS配置的函数
+restore_dns_config() {
+    local backup_file="/etc/vps_toolkit_dns_backup"
+    if [ ! -f "$backup_file" ]; then
+        log_error "未找到任何 DNS 备份文件，无法恢复。"
+        press_any_key
+        return
+    fi
+
+    log_info "准备从备份中恢复 DNS 配置..."
+    read -p "这将覆盖当前的 DNS 设置，确定要继续吗？ (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+
+    local backup_mode
+    backup_mode=$(cat "$backup_file.mode")
+
+    if [ "$backup_mode" == "systemd-resolved" ]; then
+        log_info "正在恢复 systemd-resolved 配置..."
+        mv "$backup_file.systemd" /etc/systemd/resolved.conf
+        systemctl restart systemd-resolved
+        log_info "✅ systemd-resolved 配置已恢复并重启服务。"
+    elif [ "$backup_mode" == "resolvconf" ]; then
+        log_info "正在恢复 /etc/resolv.conf 文件..."
+        mv "$backup_file.resolv" /etc/resolv.conf
+        log_info "✅ /etc/resolv.conf 文件已恢复。"
+    else
+        log_error "未知的备份模式，恢复失败！"
+        press_any_key
+        return
+    fi
+
+    # 删除标记文件，因为备份已经被消耗（移动）了
+    rm -f "$backup_file" "$backup_file.mode"
+    log_info "当前的DNS配置如下："
+    echo -e "$WHITE"
+    cat /etc/resolv.conf
+    echo -e "$NC"
+    press_any_key
+}
 optimize_dns() {
     clear
-
-    # --- 新增部分开始 ---
     log_info "正在检测您当前的 DNS 配置..."
-    local current_dns_list
-    current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
-
-    if [ -n "$current_dns_list" ]; then
-        log_info "当前系统使用的 DNS 服务器是: $YELLOW$current_dns_list$NC"
+    if command -v resolvectl &>/dev/null; then
+        local current_dns_list
+        current_dns_list=$(resolvectl status | grep -A 1 'Current DNS Server' | tail -n 1 | awk '{for(i=1;i<=NF;i++) printf "%s ", $i}')
     else
-        log_warn "未在 /etc/resolv.conf 中检测到当前配置的 DNS 服务器。"
+        current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
     fi
-    echo # 增加一个换行以改善布局
-    # --- 新增部分结束 ---
+    if [ -n "$current_dns_list" ]; then log_info "当前系统使用的 DNS 服务器是: $YELLOW$current_dns_list$NC"; else log_warn "未检测到当前配置的 DNS 服务器。"; fi
+    echo
 
-    # 定义DNS提供商
     declare -A dns_providers
     dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
     dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
     dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
     dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
-
-    # 制作菜单选项
     local options=()
-    for provider in "${!dns_providers[@]}"; do
-        options+=("$provider")
-    done
+    for provider in "${!dns_providers[@]}"; do options+=("$provider"); done
     options+=("返回")
 
-    echo -e "请选择一个新的 DNS 提供商来进行优化:\n"
-    for i in "${!options[@]}"; do
-        echo -e "   $((i + 1)). ${options[$i]}"
-    done
+    echo -e "请选择一个或多个 DNS 提供商 (可多选，用空格隔开):\n"
+    for i in "${!options[@]}"; do echo -e "   $((i + 1)). ${options[$i]}"; done
     echo
 
-    local choice
-    read -p "请输入选项: " choice
+    local choices
+    read -p "请输入选项: " -a choices # 使用 -a 读取到数组，允许多个输入
+    if [ ${#choices[@]} -eq 0 ]; then log_error "未输入任何选项！"; press_any_key; return; fi
 
-    if [[ "$choice" -le 0 || "$choice" -gt ${#options[@]} ]]; then
-        log_error "无效选项！"
-        press_any_key
-        return
-    fi
-
-    local selected_option=${options[$((choice-1))]}
-
-    if [ "$selected_option" == "返回" ]; then
-        return
-    fi
-
-    log_info "你选择了: $selected_option DNS"
-
-    local servers_str=${dns_providers[$selected_option]}
-    read -r -a servers_arr <<< "$servers_str"
-
-    # 检查IPv6连通性
-    local has_ipv6=false
-    if curl -s -m 5 -6 https://ipv6.icanhazip.com &>/dev/null; then
-        has_ipv6=true
-        log_info "检测到可用的 IPv6 网络。"
-    else
-        log_info "未检测到可用的 IPv6 网络，将只配置 IPv4 DNS。"
-    fi
-
-    local final_dns_servers=()
-    for server in "${servers_arr[@]}"; do
-        if [[ $server == *":"* ]]; then # 是IPv6地址
-            if $has_ipv6; then
-                final_dns_servers+=("$server")
-            fi
-        else # 是IPv4地址
-            final_dns_servers+=("$server")
-        fi
+    local combined_servers_str=""
+    local selected_providers_str=""
+    for choice in "${choices[@]}"; do
+        if [[ "$choice" -le 0 || "$choice" -gt ${#options[@]} ]]; then log_error "包含无效选项: $choice"; press_any_key; return; fi
+        local selected_option=${options[$((choice-1))]}
+        if [ "$selected_option" == "返回" ]; then return; fi
+        combined_servers_str+="${dns_providers[$selected_option]} "
+        selected_providers_str+="$selected_option, "
     done
 
+    selected_providers_str=${selected_providers_str%, } # 移除末尾的逗号和空格
+    log_info "你选择了: $selected_providers_str DNS"
+
+    # 去重并整理服务器列表
+    read -r -a servers_arr <<< "$(echo "$combined_servers_str" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
+
+    local has_ipv6=false
+    if curl -s -m 5 -6 https://ipv6.icanhazip.com &>/dev/null; then has_ipv6=true; log_info "检测到可用的 IPv6 网络。"; else log_info "未检测到可用的 IPv6 网络，将只配置 IPv4 DNS。"; fi
+    local final_dns_servers=()
+    for server in "${servers_arr[@]}"; do
+        if [[ $server == *":"* && "$has_ipv6" == "true" ]] || [[ $server != *":"* ]]; then final_dns_servers+=("$server"); fi
+    done
     local dns_string
     dns_string=$(IFS=" "; echo "${final_dns_servers[*]}")
 
-    # 判断是否由 systemd-resolved 管理
     if systemctl is-active --quiet systemd-resolved; then
         log_info "检测到 systemd-resolved 服务，将通过标准方式配置..."
-
-        # 修改 resolved.conf 文件
-        sed -i "s/^#\?DNS=.*/DNS=$dns_string/" /etc/systemd/resolved.conf
-        # 如果DNS行不存在，则添加
-        if ! grep -q "DNS=" /etc/systemd/resolved.conf; then
-            echo "DNS=$dns_string" >> /etc/systemd/resolved.conf
-        fi
-
-        # 强制 /etc/resolv.conf 链接到 systemd 的 stub 文件
+        sed -i -e "s/^#\?DNS=.*/DNS=$dns_string/" -e "s/^#\?Domains=.*/Domains=~./" /etc/systemd/resolved.conf
+        if ! grep -q "DNS=" /etc/systemd/resolved.conf; then echo "DNS=$dns_string" >> /etc/systemd/resolved.conf; fi
+        if ! grep -q "Domains=" /etc/systemd/resolved.conf; then echo "Domains=~." >> /etc/systemd/resolved.conf; fi
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-
         log_info "正在重启 systemd-resolved 服务..."
         systemctl restart systemd-resolved
         log_info "✅ systemd-resolved DNS 配置完成！"
-
     else
         log_info "未检测到 systemd-resolved，将直接修改 /etc/resolv.conf..."
         local resolv_content=""
-        for server in "${final_dns_servers[@]}"; do
-            resolv_content+="nameserver $server\n"
-        done
+        for server in "${final_dns_servers[@]}"; do resolv_content+="nameserver $server\n"; done
         echo -e "$resolv_content" > /etc/resolv.conf
         log_info "✅ /etc/resolv.conf 文件已更新！"
     fi
 
-    # 显示最终结果
-    log_info "配置后的DNS如下："
+    echo
+    log_info "配置后的真实上游DNS如下 (通过 resolvectl status 查看):"
     echo -e "$WHITE"
-    cat /etc/resolv.conf
+    resolvectl status | grep 'DNS Server'
     echo -e "$NC"
     press_any_key
 }
@@ -2831,7 +2915,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 优化 DNS                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2839,7 +2923,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${YELLOW}修改 SSH 端口$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. 修改 SSH 端口                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2858,11 +2942,11 @@ sys_manage_menu() {
         1) show_system_info ;;
         2) clean_system ;;
         3) change_hostname ;;
-        4) optimize_dns ;;
+        4) dns_toolbox_menu ;; # 调用新的子菜单
         5) set_network_priority ;;
         6) manage_root_login ;;
         7) set_timezone ;;
-        8) change_ssh_port ;; # 新增的调用
+        8) change_ssh_port ;;
         9) manage_bbr ;;
         10) install_warp ;;
         0) break ;;
