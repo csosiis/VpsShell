@@ -281,7 +281,113 @@ change_hostname() {
 # =================================================
 #                 DNS 工具箱 (新增/重构)
 # =================================================
+# 新增: 可复用的DNS配置应用函数
+apply_dns_config() {
+    local dns_string="$1"
 
+    if [ -z "$dns_string" ]; then
+        log_error "没有提供任何DNS服务器地址，操作中止。"
+        return
+    fi
+
+    # 判断是否由 systemd-resolved 管理
+    if systemctl is-active --quiet systemd-resolved; then
+        log_info "检测到 systemd-resolved 服务，将通过标准方式配置..."
+
+        sed -i -e "s/^#\?DNS=.*/DNS=$dns_string/" \
+               -e "s/^#\?Domains=.*/Domains=~./" /etc/systemd/resolved.conf
+        if ! grep -q "DNS=" /etc/systemd/resolved.conf; then echo "DNS=$dns_string" >> /etc/systemd/resolved.conf; fi
+        if ! grep -q "Domains=" /etc/systemd/resolved.conf; then echo "Domains=~." >> /etc/systemd/resolved.conf; fi
+
+        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+        log_info "正在重启 systemd-resolved 服务..."
+        systemctl restart systemd-resolved
+        log_info "✅ systemd-resolved DNS 配置完成！"
+    else
+        log_info "未检测到 systemd-resolved，将直接修改 /etc/resolv.conf..."
+        local resolv_content=""
+        for server in $dns_string; do
+            resolv_content+="nameserver $server\n"
+        done
+        echo -e "$resolv_content" > /etc/resolv.conf
+        log_info "✅ /etc/resolv.conf 文件已更新！"
+    fi
+
+    echo
+    log_info "配置后的真实上游DNS如下 (通过 resolvectl status 查看):"
+    echo -e "$WHITE"
+    resolvectl status | grep 'DNS Server'
+    echo -e "$NC"
+    press_any_key
+}
+
+# 新增: 自动测试并推荐最佳DNS的函数
+recommend_best_dns() {
+    clear
+    log_info "开始自动测试延迟以寻找最佳 DNS..."
+
+    declare -A dns_map
+    dns_map["Cloudflare"]="1.1.1.1"
+    dns_map["Google"]="8.8.8.8"
+    dns_map["Quad9"]="9.9.9.9"
+    dns_map["OpenDNS"]="208.67.222.222"
+
+    declare -A results
+    echo
+    for provider in "${!dns_map[@]}"; do
+        local ip=${dns_map[$provider]}
+        echo -ne "$CYAN  正在测试: $provider ($ip)...$NC"
+        local avg_latency
+        avg_latency=$(ping -c 4 -W 1 "$ip" | tail -1 | awk -F '/' '{print $5}')
+
+        if [ -n "$avg_latency" ]; then
+            results[$ip]=$avg_latency
+            echo -e "$GREEN  延迟: $avg_latency ms$NC"
+        else
+            results[$ip]="9999" # 代表超时
+            echo -e "$RED  请求超时!$NC"
+        fi
+    done
+
+    # 排序并输出结果
+    echo
+    log_info "测试结果（按延迟从低到高排序）:"
+    local sorted_results
+    sorted_results=$(for ip in "${!results[@]}"; do
+        echo "${results[$ip]} $ip"
+    done | sort -n)
+
+    echo -e "$WHITE"
+    echo "$sorted_results" | awk '{printf "  %-15s -> %s ms\n", $2, $1}' | sed 's/9999/超时/'
+    echo -e "$NC"
+
+    # 提取最佳和备用DNS
+    local best_dns
+    best_dns=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
+    local backup_dns
+    backup_dns=$(echo "$sorted_results" | head -n 2 | tail -n 1 | awk '{print $2}')
+
+    if [ -z "$best_dns" ] || [ "$best_dns" == "$backup_dns" ]; then
+        log_error "测试失败，无法给出有效建议。"
+        press_any_key
+        return
+    fi
+
+    echo
+    log_info "优化建议:"
+    echo -e "$GREEN  最佳DNS (主): $best_dns$NC"
+    echo -e "$YELLOW  备用DNS (备): $backup_dns$NC"
+    echo
+
+    read -p "是否要立即应用此优化建议? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "正在应用推荐配置: 主=$best_dns, 备=$backup_dns"
+        apply_dns_config "$best_dns $backup_dns"
+    else
+        log_info "操作已取消。"
+        press_any_key
+    fi
+}
 # 新增: DNS 功能的子菜单
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
@@ -291,16 +397,17 @@ dns_toolbox_menu() {
         echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 优化 DNS (从列表中选择并设置)             $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 备份当前 DNS 配置                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
-        # 只有备份文件存在时，才显示恢复选项
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   3. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   3. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -312,14 +419,16 @@ dns_toolbox_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) optimize_dns ;;
-        2) backup_dns_config ;;
-        3) restore_dns_config ;;
+        1) recommend_best_dns ;;
+        2) optimize_dns ;;
+        3) backup_dns_config ;;
+        4) restore_dns_config ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
+
 
 # 新增: 备份DNS配置的函数
 backup_dns_config() {
@@ -398,6 +507,7 @@ restore_dns_config() {
     echo -e "$NC"
     press_any_key
 }
+# 替换: optimize_dns 函数 (现在它只负责手动选择的逻辑)
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
@@ -424,57 +534,26 @@ optimize_dns() {
     echo
 
     local choices
-    read -p "请输入选项: " -a choices # 使用 -a 读取到数组，允许多个输入
+    read -p "请输入选项: " -a choices
     if [ ${#choices[@]} -eq 0 ]; then log_error "未输入任何选项！"; press_any_key; return; fi
 
     local combined_servers_str=""
     local selected_providers_str=""
     for choice in "${choices[@]}"; do
-        if [[ "$choice" -le 0 || "$choice" -gt ${#options[@]} ]]; then log_error "包含无效选项: $choice"; press_any_key; return; fi
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 || "$choice" -gt ${#options[@]} ]]; then log_error "包含无效选项: $choice"; press_any_key; return; fi
         local selected_option=${options[$((choice-1))]}
         if [ "$selected_option" == "返回" ]; then return; fi
         combined_servers_str+="${dns_providers[$selected_option]} "
         selected_providers_str+="$selected_option, "
     done
 
-    selected_providers_str=${selected_providers_str%, } # 移除末尾的逗号和空格
+    selected_providers_str=${selected_providers_str%, }
     log_info "你选择了: $selected_providers_str DNS"
 
-    # 去重并整理服务器列表
-    read -r -a servers_arr <<< "$(echo "$combined_servers_str" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
+    local servers_to_apply
+    servers_to_apply="$(echo "$combined_servers_str" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
 
-    local has_ipv6=false
-    if curl -s -m 5 -6 https://ipv6.icanhazip.com &>/dev/null; then has_ipv6=true; log_info "检测到可用的 IPv6 网络。"; else log_info "未检测到可用的 IPv6 网络，将只配置 IPv4 DNS。"; fi
-    local final_dns_servers=()
-    for server in "${servers_arr[@]}"; do
-        if [[ $server == *":"* && "$has_ipv6" == "true" ]] || [[ $server != *":"* ]]; then final_dns_servers+=("$server"); fi
-    done
-    local dns_string
-    dns_string=$(IFS=" "; echo "${final_dns_servers[*]}")
-
-    if systemctl is-active --quiet systemd-resolved; then
-        log_info "检测到 systemd-resolved 服务，将通过标准方式配置..."
-        sed -i -e "s/^#\?DNS=.*/DNS=$dns_string/" -e "s/^#\?Domains=.*/Domains=~./" /etc/systemd/resolved.conf
-        if ! grep -q "DNS=" /etc/systemd/resolved.conf; then echo "DNS=$dns_string" >> /etc/systemd/resolved.conf; fi
-        if ! grep -q "Domains=" /etc/systemd/resolved.conf; then echo "Domains=~." >> /etc/systemd/resolved.conf; fi
-        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-        log_info "正在重启 systemd-resolved 服务..."
-        systemctl restart systemd-resolved
-        log_info "✅ systemd-resolved DNS 配置完成！"
-    else
-        log_info "未检测到 systemd-resolved，将直接修改 /etc/resolv.conf..."
-        local resolv_content=""
-        for server in "${final_dns_servers[@]}"; do resolv_content+="nameserver $server\n"; done
-        echo -e "$resolv_content" > /etc/resolv.conf
-        log_info "✅ /etc/resolv.conf 文件已更新！"
-    fi
-
-    echo
-    log_info "配置后的真实上游DNS如下 (通过 resolvectl status 查看):"
-    echo -e "$WHITE"
-    resolvectl status | grep 'DNS Server'
-    echo -e "$NC"
-    press_any_key
+    apply_dns_config "$servers_to_apply"
 }
 set_network_priority() {
     clear
@@ -2915,7 +2994,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
