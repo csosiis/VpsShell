@@ -3,7 +3,7 @@
 #               全功能 VPS & 应用管理脚本
 #
 #   Author: Jcole
-#   Version: 3.0 (Optimized & Refactored)
+#   Version: 4.0 (Added Security, Benchmark & Backup Tools)
 #   Created: 2024
 #
 # =================================================================
@@ -279,9 +279,9 @@ change_hostname() {
     press_any_key
 }
 # =================================================
-#                 DNS 工具箱 (新增/重构)
+#                 DNS 工具箱
 # =================================================
-# 新增: 可复用的DNS配置应用函数
+# 可复用的DNS配置应用函数
 apply_dns_config() {
     local dns_string="$1"
 
@@ -321,7 +321,7 @@ apply_dns_config() {
     press_any_key
 }
 
-# 新增: 自动测试并推荐最佳DNS的函数
+# 自动测试并推荐最佳DNS的函数
 recommend_best_dns() {
     clear
     log_info "开始自动测试延迟以寻找最佳 DNS..."
@@ -388,13 +388,13 @@ recommend_best_dns() {
         press_any_key
     fi
 }
-# 新增: DNS 功能的子菜单
+# DNS 功能的子菜单
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
@@ -430,7 +430,7 @@ dns_toolbox_menu() {
 }
 
 
-# 新增: 备份DNS配置的函数
+# 备份DNS配置的函数
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     log_info "开始备份当前 DNS 配置..."
@@ -464,7 +464,7 @@ backup_dns_config() {
     press_any_key
 }
 
-# 新增: 恢复DNS配置的函数
+# 恢复DNS配置的函数
 restore_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     if [ ! -f "$backup_file" ]; then
@@ -507,7 +507,7 @@ restore_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-# 替换: optimize_dns 函数 (现在它只负责手动选择的逻辑)
+# optimize_dns 函数 (现在它只负责手动选择的逻辑)
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
@@ -2256,7 +2256,7 @@ _install_docker_and_compose() {
     os_id=$(. /etc/os-release && echo "$ID")
     echo \
         "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$os_id \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     log_info "正在更新软件包列表以识别新的 Docker 仓库..."
     set -e
     apt-get update -y
@@ -2980,6 +2980,307 @@ setup_auto_reverse_proxy() {
     fi
     return $status
 }
+# =================================================
+#           实用工具 (增强)
+# =================================================
+
+# --- Fail2Ban ---
+fail2ban_menu() {
+    ensure_dependencies "fail2ban"
+    if ! command -v fail2ban-client &>/dev/null; then
+        log_error "Fail2Ban 未能成功安装，请检查依赖。"
+        press_any_key
+        return
+    fi
+
+    while true; do
+        clear
+        local status
+        status=$(fail2ban-client status)
+        local jail_count
+        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
+        local sshd_status
+        sshd_status=$(fail2ban-client status sshd)
+        local banned_count
+        banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
+        local total_banned
+        total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC, 历史共封禁 ${YELLOW}$total_banned$NC   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                      $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            clear
+            log_info "Fail2Ban 总体状态:"
+            fail2ban-client status
+            echo -e "\n$CYAN----------------------------------------------------$NC"
+            log_info "SSHD 防护详情:"
+            fail2ban-client status sshd
+            press_any_key
+            ;;
+        2)
+            clear
+            log_info "显示最近 50 条 Fail2Ban 日志:"
+            tail -50 /var/log/fail2ban.log
+            press_any_key
+            ;;
+        3)
+            read -p "请输入要解封的 IP 地址: " ip_to_unban
+            if [ -n "$ip_to_unban" ]; then
+                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
+                fail2ban-client set sshd unbanip "$ip_to_unban"
+            else
+                log_error "IP 地址不能为空！"
+            fi
+            press_any_key
+            ;;
+        4)
+            log_info "正在重启 Fail2Ban..."
+            systemctl restart fail2ban
+            sleep 1
+            log_info "服务已重启。"
+            ;;
+        5)
+            read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                log_info "正在停止并卸载 Fail2Ban..."
+                systemctl stop fail2ban
+                apt-get remove --purge -y fail2ban
+                log_info "✅ Fail2Ban 已卸载。"
+                press_any_key
+                return
+            fi
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- 用户管理 ---
+manage_users_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}创建一个新的 Sudo 用户$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${RED}删除一个用户及其主目录$NC                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                      $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            read -p "请输入新用户名: " username
+            if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
+
+            adduser "$username"
+            usermod -aG sudo "$username"
+            log_info "✅ 用户 '$username' 已创建并添加到 sudo 组。"
+
+            read -p "是否要将 root 的 SSH 公钥复制给新用户 '$username'？ (y/N): " copy_key
+            if [[ "$copy_key" =~ ^[Yy]$ ]]; then
+                if [ -f "/root/.ssh/authorized_keys" ]; then
+                    mkdir -p "/home/$username/.ssh"
+                    cp "/root/.ssh/authorized_keys" "/home/$username/.ssh/"
+                    chown -R "$username:$username" "/home/$username/.ssh"
+                    chmod 700 "/home/$username/.ssh"
+                    chmod 600 "/home/$username/.ssh/authorized_keys"
+                    log_info "✅ SSH 公钥已成功复制。"
+                    log_info "您现在可以使用密钥通过 'ssh $username@<服务器IP>' 登录。"
+                else
+                    log_warn "未找到 /root/.ssh/authorized_keys 文件，跳过复制。"
+                fi
+            fi
+            press_any_key
+            ;;
+        2)
+            read -p "请输入要删除的用户名: " user_to_delete
+            if [ -z "$user_to_delete" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if [ "$user_to_delete" == "root" ]; then log_error "不能删除 root 用户！"; press_any_key; continue; fi
+            if ! id "$user_to_delete" &>/dev/null; then log_error "用户 '$user_to_delete' 不存在！"; press_any_key; continue; fi
+
+            read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录下的所有文件！确定吗？(y/N): " confirm_del
+            if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
+                deluser --remove-home "$user_to_delete"
+                log_info "✅ 用户 '$user_to_delete' 已被删除。"
+            else
+                log_info "操作已取消。"
+            fi
+            press_any_key
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+# --- 自动更新 ---
+setup_auto_updates() {
+    ensure_dependencies "unattended-upgrades" "apt-listchanges"
+    if [ ! -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
+        log_error "unattended-upgrades 配置文件不存在，配置失败。"
+        press_any_key
+        return
+    fi
+    log_info "正在为您配置自动安全更新..."
+    dpkg-reconfigure --priority=low -f noninteractive unattended-upgrades
+    log_info "✅ unattended-upgrades 已配置并启用。"
+    log_warn "系统现在会自动安装重要的安全更新。"
+    press_any_key
+}
+
+# --- 性能测试 ---
+performance_test_menu() {
+     while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 VPS 性能测试                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                      $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            log_info "正在执行 bench.sh 脚本..."
+            ensure_dependencies "curl"
+            curl -Lso- bench.sh | bash
+            press_any_key
+            ;;
+        2)
+            log_info "正在执行 speedtest-cli..."
+            ensure_dependencies "speedtest-cli"
+            speedtest-cli
+            press_any_key
+            ;;
+        3)
+            log_info "正在启动 btop..."
+            ensure_dependencies "btop"
+            btop
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- 文件备份 ---
+backup_directory() {
+    clear
+    log_info "开始手动备份指定目录..."
+
+    local source_dir
+    read -p "请输入需要备份的目录的绝对路径 (例如 /var/www): " source_dir
+    if [ ! -d "$source_dir" ]; then
+        log_error "目录 '$source_dir' 不存在或不是一个目录！"
+        press_any_key
+        return
+    fi
+
+    local backup_dest
+    read -p "请输入备份文件存放的目标目录 [默认: /root]: " backup_dest
+    backup_dest=${backup_dest:-"/root"}
+    if [ ! -d "$backup_dest" ]; then
+        log_warn "目标目录 '$backup_dest' 不存在，将尝试创建它..."
+        mkdir -p "$backup_dest"
+        if [ $? -ne 0 ]; then
+            log_error "创建目标目录失败！"
+            press_any_key
+            return
+        fi
+    fi
+
+    local dir_name
+    dir_name=$(basename "$source_dir")
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
+    local full_backup_path="$backup_dest/$backup_filename"
+
+    log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
+    if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
+        log_info "✅ 备份成功！文件大小: $(du -sh "$full_backup_path" | awk '{print $1}')"
+    else
+        log_error "备份过程中发生错误！"
+        rm -f "$full_backup_path"
+    fi
+
+    press_any_key
+}
+
+# 实用工具主菜单
+utility_tools_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────── $WHITE性能与备份$CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) fail2ban_menu ;;
+        2) manage_users_menu ;;
+        3) setup_auto_updates ;;
+        4) performance_test_menu ;;
+        5) backup_directory ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
 
 sys_manage_menu() {
     while true; do
@@ -2994,7 +3295,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3021,7 +3322,7 @@ sys_manage_menu() {
         1) show_system_info ;;
         2) clean_system ;;
         3) change_hostname ;;
-        4) dns_toolbox_menu ;; # 调用新的子菜单
+        4) dns_toolbox_menu ;;
         5) set_network_priority ;;
         6) manage_root_login ;;
         7) set_timezone ;;
@@ -3331,7 +3632,9 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}证书管理 & 网站反代$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. ${GREEN}实用工具 (增强)${NC}                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3349,6 +3652,7 @@ main_menu() {
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
         6) certificate_management_menu ;;
+        7) utility_tools_menu ;;
         9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
@@ -3359,5 +3663,6 @@ main_menu() {
 
 # --- 脚本执行入口 ---
 check_root
+# 首次运行时不检查，因为可能会立即安装依赖导致冲突
 initial_setup_check
 main_menu
