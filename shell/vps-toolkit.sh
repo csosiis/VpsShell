@@ -369,7 +369,43 @@ setup_ssh_key() {
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
 }
+set_root_password() {
+    log_info "开始设置 root 密码..."
+    read -s -p "请输入新的 root 密码: " new_password
+    echo ""
+    read -s -p "请再次输入新的 root 密码以确认: " confirm_password
+    echo ""
 
+    if [ -z "$new_password" ]; then
+        log_error "密码不能为空，操作已取消。"
+        press_any_key
+        return
+    fi
+
+    if [ "$new_password" != "$confirm_password" ]; then
+        log_error "两次输入的密码不匹配，操作已取消。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在更新 root 密码..."
+    echo "root:$new_password" | chpasswd
+    if [ $? -ne 0 ]; then
+        log_error "密码更新失败！"
+        press_any_key
+        return
+    fi
+    log_info "✅ root 密码已成功更新。"
+
+    log_info "正在检查并启用 SSH 密码登录..."
+    sed -i 's/^#?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+    log_info "正在重启 SSH 服务以应用更改..."
+    systemctl restart sshd
+
+    log_info "✅ root 密码登录功能已成功设置！"
+    press_any_key
+}
 set_timezone() {
     clear
     local current_timezone
@@ -1534,7 +1570,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -2578,7 +2614,6 @@ setup_auto_reverse_proxy() {
 # =================================================
 #                主菜单 & 子菜单
 # =================================================
-
 sys_manage_menu() {
     while true; do
         clear
@@ -2598,13 +2633,13 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 设置 SSH 密钥登录                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. ${GREEN}设置 root 密码登录$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
+        echo -e "$CYAN║$NC   8. ${GREEN}设置系统时区$NC                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. BBR 拥塞控制管理                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. 安装 WARP 网络接口                          $CYAN║$NC"
+        echo -e "$CYAN║$NC   10. 安装 WARP 网络接口                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2615,8 +2650,8 @@ sys_manage_menu() {
         read -p "请输入选项: " choice
         case $choice in
         1) show_system_info ;; 2) clean_system ;; 3) change_hostname ;; 4) optimize_dns ;;
-        5) set_network_priority ;; 6) setup_ssh_key ;; 7) set_timezone ;; 8) manage_bbr ;;
-        9) install_warp ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+        5) set_network_priority ;; 6) setup_ssh_key ;; 7) set_root_password ;; 8) set_timezone ;;
+        9) manage_bbr ;; 10) install_warp ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
