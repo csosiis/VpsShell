@@ -278,37 +278,120 @@ change_hostname() {
     log_info "当前主机名是：$(hostname)"
     press_any_key
 }
-
 optimize_dns() {
-    ensure_dependencies "net-tools"
-    log_info "开始优化DNS地址..."
-    log_info "正在检查IPv6支持..."
-    if ping6 -c 1 google.com >/dev/null 2>&1; then
-        log_info "检测到IPv6支持，配置IPv6优先的DNS..."
-        cat <<EOF >/etc/resolv.conf
-nameserver 2a00:1098:2b::1
-nameserver 2a00:1098:2c::1
-nameserver 2a01:4f8:c2c:123f::1
-nameserver 2606:4700:4700::1111
-nameserver 2001:4860:4860::8888
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-EOF
+    clear
+
+    # --- 新增部分开始 ---
+    log_info "正在检测您当前的 DNS 配置..."
+    local current_dns_list
+    current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
+
+    if [ -n "$current_dns_list" ]; then
+        log_info "当前系统使用的 DNS 服务器是: $YELLOW$current_dns_list$NC"
     else
-        log_info "未检测到IPv6支持，仅配置IPv4 DNS..."
-        cat <<EOF >/etc/resolv.conf
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-nameserver 9.9.9.9
-EOF
+        log_warn "未在 /etc/resolv.conf 中检测到当前配置的 DNS 服务器。"
     fi
-    log_info "✅ DNS优化完成！当前的DNS配置如下："
+    echo # 增加一个换行以改善布局
+    # --- 新增部分结束 ---
+
+    # 定义DNS提供商
+    declare -A dns_providers
+    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
+    dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
+    dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
+    dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
+
+    # 制作菜单选项
+    local options=()
+    for provider in "${!dns_providers[@]}"; do
+        options+=("$provider")
+    done
+    options+=("返回")
+
+    echo -e "请选择一个新的 DNS 提供商来进行优化:\n"
+    for i in "${!options[@]}"; do
+        echo -e "   $((i + 1)). ${options[$i]}"
+    done
+    echo
+
+    local choice
+    read -p "请输入选项: " choice
+
+    if [[ "$choice" -le 0 || "$choice" -gt ${#options[@]} ]]; then
+        log_error "无效选项！"
+        press_any_key
+        return
+    fi
+
+    local selected_option=${options[$((choice-1))]}
+
+    if [ "$selected_option" == "返回" ]; then
+        return
+    fi
+
+    log_info "你选择了: $selected_option DNS"
+
+    local servers_str=${dns_providers[$selected_option]}
+    read -r -a servers_arr <<< "$servers_str"
+
+    # 检查IPv6连通性
+    local has_ipv6=false
+    if curl -s -m 5 -6 https://ipv6.icanhazip.com &>/dev/null; then
+        has_ipv6=true
+        log_info "检测到可用的 IPv6 网络。"
+    else
+        log_info "未检测到可用的 IPv6 网络，将只配置 IPv4 DNS。"
+    fi
+
+    local final_dns_servers=()
+    for server in "${servers_arr[@]}"; do
+        if [[ $server == *":"* ]]; then # 是IPv6地址
+            if $has_ipv6; then
+                final_dns_servers+=("$server")
+            fi
+        else # 是IPv4地址
+            final_dns_servers+=("$server")
+        fi
+    done
+
+    local dns_string
+    dns_string=$(IFS=" "; echo "${final_dns_servers[*]}")
+
+    # 判断是否由 systemd-resolved 管理
+    if systemctl is-active --quiet systemd-resolved; then
+        log_info "检测到 systemd-resolved 服务，将通过标准方式配置..."
+
+        # 修改 resolved.conf 文件
+        sed -i "s/^#\?DNS=.*/DNS=$dns_string/" /etc/systemd/resolved.conf
+        # 如果DNS行不存在，则添加
+        if ! grep -q "DNS=" /etc/systemd/resolved.conf; then
+            echo "DNS=$dns_string" >> /etc/systemd/resolved.conf
+        fi
+
+        # 强制 /etc/resolv.conf 链接到 systemd 的 stub 文件
+        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+        log_info "正在重启 systemd-resolved 服务..."
+        systemctl restart systemd-resolved
+        log_info "✅ systemd-resolved DNS 配置完成！"
+
+    else
+        log_info "未检测到 systemd-resolved，将直接修改 /etc/resolv.conf..."
+        local resolv_content=""
+        for server in "${final_dns_servers[@]}"; do
+            resolv_content+="nameserver $server\n"
+        done
+        echo -e "$resolv_content" > /etc/resolv.conf
+        log_info "✅ /etc/resolv.conf 文件已更新！"
+    fi
+
+    # 显示最终结果
+    log_info "配置后的DNS如下："
     echo -e "$WHITE"
     cat /etc/resolv.conf
     echo -e "$NC"
     press_any_key
 }
-
 set_network_priority() {
     clear
     echo -e "请选择网络优先级设置:\n"
@@ -492,7 +575,7 @@ change_ssh_port() {
     current_port=$(grep -iE '^#?Port' /etc/ssh/sshd_config | grep -oE '[0-9]+' | head -1)
     current_port=${current_port:-22}
 
-    log_info "当前 SSH 端口是: $YELLOW$current_port$NC"
+    log_info "当前 SSH 端口是: $YELLOW$current_port$NC\n"
 
     local new_port
     while true; do
