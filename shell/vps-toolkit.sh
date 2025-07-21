@@ -389,21 +389,27 @@ set_root_password() {
     fi
 
     log_info "正在更新 root 密码..."
-    echo "root:$new_password" | chpasswd
-    if [ $? -ne 0 ]; then
-        log_error "密码更新失败！"
+    if ! echo "root:$new_password" | chpasswd; then
+        log_error "密码更新失败！请检查 chpasswd 命令是否可用。"
         press_any_key
         return
     fi
     log_info "✅ root 密码已成功更新。"
 
-    log_info "正在检查并启用 SSH 密码登录..."
-    sed -i 's/^#?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    log_info "正在修改 SSH 配置文件以允许 root 用户通过密码登录..."
 
-    log_info "正在重启 SSH 服务以应用更改..."
-    systemctl restart sshd
+    # 关键修复：使用 sed 同时修改 PasswordAuthentication 和 PermitRootLogin
+    # 无论它们当前是 yes/no 还是被注释掉，都会被强制修改为我们期望的值。
+    sed -i -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' \
+           -e 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 
-    log_info "✅ root 密码登录功能已成功设置！"
+    log_info "配置修改完成，正在重启 SSH 服务以应用更改..."
+    if systemctl restart sshd; then
+        log_info "✅ SSH 服务已重启。root 密码登录功能已成功设置！"
+    else
+        log_error "SSH 服务重启失败！请手动执行 'sudo systemctl status sshd' 进行检查。"
+    fi
+
     press_any_key
 }
 set_timezone() {
@@ -2635,9 +2641,9 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. ${GREEN}设置 root 密码登录$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${GREEN}设置系统时区$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. ${GREEN}BBR 拥塞控制管理$NC                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   10. 安装 WARP 网络接口                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
