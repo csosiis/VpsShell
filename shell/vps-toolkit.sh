@@ -549,7 +549,7 @@ change_ssh_port() {
         log_warn "========================= 重要提醒 ========================="
         log_warn "  SSH 端口已成功修改为: $YELLOW$new_port$NC"
         log_warn "  当前连接不会中断。请立即打开一个新的终端窗口进行测试！"
-        log_info   "  测试命令: $GREEN"ssh root@<你的服务器IP> -p $new_port"$NC"
+        log_info "  测试命令: ${GREEN}ssh root@<你的服务器IP> -p $new_port${NC}"
         log_warn "  在确认新端口可以正常登录之前，请【不要关闭】当前窗口！"
         log_warn "============================================================"
 
@@ -2756,7 +2756,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${YELLOW}修改 SSH 端口$NC                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. ${YELLOW}修改 SSH 端口$NC                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
