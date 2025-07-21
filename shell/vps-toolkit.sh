@@ -394,7 +394,7 @@ dns_toolbox_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
@@ -405,9 +405,9 @@ dns_toolbox_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
