@@ -320,31 +320,57 @@ apply_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-
-# 自动测试并推荐最佳DNS的函数
+# 替换: 自动测试并推荐最佳DNS的函数
 recommend_best_dns() {
     clear
     log_info "开始自动测试延迟以寻找最佳 DNS..."
 
-    declare -A dns_map
-    dns_map["Cloudflare"]="1.1.1.1"
-    dns_map["Google"]="8.8.8.8"
-    dns_map["Quad9"]="9.9.9.9"
-    dns_map["OpenDNS"]="208.67.222.222"
+    # 修改: 使用我们已有的包含v4和v6地址的数组
+    declare -A dns_providers
+    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
+    dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
+    dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
+    dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
+
+    # 新增: 检测服务器的网络能力
+    local ping_cmd="ping"
+    local ip_type="v4"
+    if ! get_public_ip v4 >/dev/null 2>&1 || [ -z "$(get_public_ip v4)" ]; then
+        log_warn "未检测到IPv4网络，将切换到IPv6模式进行测试。"
+        ping_cmd="ping6" # 在多数系统中是ping6, 有些是 ping -6
+        ip_type="v6"
+    fi
 
     declare -A results
+    declare -A ip_to_provider_map # 用于最后显示名字
     echo
-    for provider in "${!dns_map[@]}"; do
-        local ip=${dns_map[$provider]}
-        echo -ne "$CYAN  正在测试: $provider ($ip)...$NC"
+    for provider in "${!dns_providers[@]}"; do
+        local all_ips=${dns_providers[$provider]}
+        local ip_to_test=""
+
+        # 修改: 根据网络能力选择要测试的IP地址
+        if [ "$ip_type" == "v6" ]; then
+            ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i ~ /:/) {print $i; exit}}')
+        else
+            ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i !~ /:/) {print $i; exit}}')
+        fi
+
+        if [ -z "$ip_to_test" ]; then
+            log_warn "未能为 $provider 找到合适的 $ip_type 地址，跳过测试。"
+            continue
+        fi
+
+        ip_to_provider_map[$ip_to_test]=$provider
+        echo -ne "$CYAN  正在测试: $provider ($ip_to_test)...$NC"
         local avg_latency
-        avg_latency=$(ping -c 4 -W 1 "$ip" | tail -1 | awk -F '/' '{print $5}')
+        # 修改: 使用正确的ping命令
+        avg_latency=$($ping_cmd -c 4 -W 1 "$ip_to_test" | tail -1 | awk -F '/' '{print $5}')
 
         if [ -n "$avg_latency" ]; then
-            results[$ip]=$avg_latency
+            results[$ip_to_test]=$avg_latency
             echo -e "$GREEN  延迟: $avg_latency ms$NC"
         else
-            results[$ip]="9999" # 代表超时
+            results[$ip_to_test]="9999" # 代表超时
             echo -e "$RED  请求超时!$NC"
         fi
     done
@@ -358,31 +384,48 @@ recommend_best_dns() {
     done | sort -n)
 
     echo -e "$WHITE"
-    echo "$sorted_results" | awk '{printf "  %-15s -> %s ms\n", $2, $1}' | sed 's/9999/超时/'
+    # 修改: 同时显示提供商名称
+    echo "$sorted_results" | while read -r latency ip; do
+        provider_name=${ip_to_provider_map[$ip]}
+        printf "  %-12s (%-15s) -> %s ms\n" "$provider_name" "$ip" "$latency"
+    done | sed 's/9999/超时/'
     echo -e "$NC"
 
     # 提取最佳和备用DNS
-    local best_dns
-    best_dns=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
-    local backup_dns
-    backup_dns=$(echo "$sorted_results" | head -n 2 | tail -n 1 | awk '{print $2}')
+    local best_ip
+    best_ip=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
+    local backup_ip
+    backup_ip=$(echo "$sorted_results" | head -n 2 | tail -n 1 | awk '{print $2}')
 
-    if [ -z "$best_dns" ] || [ "$best_dns" == "$backup_dns" ]; then
-        log_error "测试失败，无法给出有效建议。"
+    if [ -z "$best_ip" ] || [ "$(echo "${results[$best_ip]}" | cut -d'.' -f1)" == "9999" ]; then
+        log_error "所有DNS服务器测试超时，无法给出有效建议。"
         press_any_key
         return
     fi
 
+    # 获取完整的DNS服务器列表（包括v4和v6）
+    local best_dns_provider_name=${ip_to_provider_map[$best_ip]}
+    local best_dns_full_list=${dns_providers[$best_dns_provider_name]}
+    local final_dns_to_apply="$best_dns_full_list"
+
     echo
     log_info "优化建议:"
-    echo -e "$GREEN  最佳DNS (主): $best_dns$NC"
-    echo -e "$YELLOW  备用DNS (备): $backup_dns$NC"
-    echo
+    echo -e "$GREEN  最佳DNS提供商 (主): $best_dns_provider_name ($best_ip)$NC"
 
+    if [ -n "$backup_ip" ] && [ "$best_ip" != "$backup_ip" ] && [ "$(echo "${results[$backup_ip]}" | cut -d'.' -f1)" != "9999" ]; then
+        local backup_dns_provider_name=${ip_to_provider_map[$backup_ip]}
+        local backup_dns_full_list=${dns_providers[$backup_dns_provider_name]}
+        final_dns_to_apply="$final_dns_to_apply $backup_dns_full_list"
+        echo -e "$YELLOW  备用DNS提供商 (备): $backup_dns_provider_name ($backup_ip)$NC"
+    fi
+
+    echo
     read -p "是否要立即应用此优化建议? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "正在应用推荐配置: 主=$best_dns, 备=$backup_dns"
-        apply_dns_config "$best_dns $backup_dns"
+        log_info "正在应用推荐配置..."
+        local unique_servers
+        unique_servers=$(echo "$final_dns_to_apply" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+        apply_dns_config "$unique_servers"
     else
         log_info "操作已取消。"
         press_any_key
@@ -394,14 +437,14 @@ dns_toolbox_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                     DNS 工具箱                    $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         if [ -f "$backup_file" ]; then
