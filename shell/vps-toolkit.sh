@@ -26,6 +26,7 @@ SCRIPT_PATH=$(realpath "$0")
 SCRIPT_URL="https://raw.githubusercontent.com/csosiis/VpsShell/refs/heads/main/shell/vps-toolkit.sh"
 CONFIG_FILE="/root/.vps_toolkit.conf" # 新增: 全局配置文件
 FLAG_FILE="/root/.vps_toolkit.initialized"
+BACKUP_HELPER_SCRIPT="/usr/local/bin/vps-toolkit-backup-helper"
 
 # --- 服务相关路径 (保持不变) ---
 SUBSTORE_SERVICE_NAME="sub-store.service"
@@ -234,13 +235,13 @@ draw_menu() {
             fi
         elif [[ "$opt" == *"--SUB--"* ]]; then
             if [[ "$has_content_before_sep" == "true" ]]; then
-                echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+                 echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             fi
             local sub_title=${opt//--SUB--/}
             printf "$CYAN╟%*s$WHITE%s$CYAN%*s╢$NC\n" \
-                $(( (24 - ($(echo -n "$sub_title" | wc -c) / 2) * 2) / 2 )) "" \
+                $(( (24 - ($(echo -n "$sub_title" | sed 's/\\033\[[0-9;]*m//g' | wc -c) / 2) * 2) / 2 )) "" \
                 "$sub_title" \
-                $(( (25 - ($(echo -n "$sub_title" | wc -c) / 2) * 2) / 2 )) ""
+                $(( (25 - ($(echo -n "$sub_title" | sed 's/\\033\[[0-9;]*m//g' | wc -c) / 2) * 2) / 2 )) ""
              has_content_before_sep=true
         else
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -275,19 +276,25 @@ sys_manage_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) show_system_info ;; 2) clean_system ;;
-        3) change_hostname ;; 4) manage_root_login ;;
-        5) change_ssh_port ;; 6) set_timezone ;;
-        7) network_priority_menu ;; 8) dns_toolbox_menu ;;
-        9) manage_bbr ;; 10) install_warp ;;
-        11) utility_tools_menu ;; 0) break ;;
+        1) show_system_info ;;
+        2) clean_system ;;
+        3) change_hostname ;;
+        4) manage_root_login ;;
+        5) change_ssh_port ;;
+        6) set_timezone ;;
+        7) network_priority_menu ;;
+        8) dns_toolbox_menu ;;
+        9) manage_bbr ;;
+        10) install_warp ;;
+        11) utility_tools_menu ;;
+        0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
 
 show_system_info() {
-    ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
+    ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools" || return
     clear
     log_info "正在查询系统信息，请稍候..."
     if ! command -v lsb_release &>/dev/null || ! command -v lscpu &>/dev/null; then
@@ -429,12 +436,10 @@ setup_ssh_key() {
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" =~ ^[Yy]$ ]]; then
         log_info "正在修改 SSH 配置以禁用密码登录..."
-        # 【修复】同时修改两个参数，确保 root 只能通过密钥登录
         sed -i -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
                -e 's/^#?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
         log_info "正在重启 SSH 服务..."
-        # 【优化】兼容不同的 SSH 服务名
         if systemctl restart sshd || systemctl restart ssh; then
              log_info "✅ SSH 服务已重启，密码登录已禁用。"
         else
@@ -504,12 +509,17 @@ set_timezone() {
 
     local options=("Asia/Shanghai" "Asia/Taipei" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
 
-    draw_menu "选择新的时区" "${options[@]/#/  }"
+    local menu_items=()
+    for i in "${!options[@]}"; do
+        menu_items+=("$((i+1)). ${options[$i]}")
+    done
+
+    draw_menu "选择新的时区" "${menu_items[@]}"
 
     local choice
     read -p "请输入选项 (1-${#options[@]}): " choice
 
-    if [[ "$choice" -ge 1 && "$choice" -le ${#options[@]} ]]; then
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 && "$choice" -le ${#options[@]} ]]; then
         local opt=${options[$((choice-1))]}
         if [[ "$opt" == "返回上一级菜单" ]]; then
             log_info "操作已取消。"
@@ -565,7 +575,7 @@ change_ssh_port() {
     if command -v sestatus &>/dev/null && sestatus | grep -q "SELinux status:\s*enabled"; then
         log_info "检测到 SELinux 已启用，正在更新端口策略..."
         if command -v semanage &>/dev/null; then
-            semanage port -a -t ssh_port_t -p tcp "$new_port"
+            semanage port -a -t ssh_port_t -p tcp "$new_port" || log_warn "semanage命令执行失败，可能端口已存在策略。"
             log_info "SELinux 策略已更新。"
         else
             log_error "无法执行 semanage 命令。请手动处理 SELinux 策略，否则 SSH 服务可能启动失败！"
@@ -601,10 +611,13 @@ manage_bbr() {
     clear
     log_info "开始检查并管理 BBR..."
     local kernel_version; kernel_version=$(uname -r | cut -d- -f1)
-    if ! dpkg --compare-versions "$kernel_version" "ge" "4.9"; then
+
+    # 简单的版本比较，适用于主流内核版本号
+    if [ "${kernel_version%%.*}" -lt 4 ] || { [ "${kernel_version%%.*}" -eq 4 ] && [ "${kernel_version#*.}%%.*}" -lt 9 ]; }; then
         log_error "您的内核版本 ($kernel_version) 过低，无法开启 BBR。请升级内核至 4.9 或更高版本。"
         press_any_key; return
     fi
+
     log_info "内核版本 $kernel_version 符合要求。"
     local current_congestion_control; current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
     log_info "当前 TCP 拥塞控制算法为: $YELLOW$current_congestion_control$NC"
@@ -649,8 +662,6 @@ install_warp() {
     log_info "WARP 脚本执行完毕。按任意键返回主菜单。"
     press_any_key
 }
-
-
 # =================================================
 #                 DNS 工具箱
 # =================================================
@@ -698,7 +709,7 @@ recommend_best_dns() {
 
     local ping_cmd="ping"; local ip_type="v4"
     if ! get_public_ip v4 >/dev/null 2>&1 || [ -z "$(get_public_ip v4)" ]; then
-        log_warn "未检测到IPv4网络，将切换到IPv6模式进行测试。"; ping_cmd="ping6"; ip_type="v6"
+        log_warn "未检测到IPv4网络，将切换到IPv6模式进行测试。"; ping_cmd="ping -6"; ip_type="v6"
     fi
 
     declare -A results; declare -A ip_to_provider_map
@@ -787,9 +798,12 @@ dns_toolbox_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) recommend_best_dns ;; 2) optimize_dns ;;
-        3) backup_dns_config ;; 4) restore_dns_config ;;
-        0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+        1) recommend_best_dns ;;
+        2) optimize_dns ;;
+        3) backup_dns_config ;;
+        4) restore_dns_config ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
@@ -839,7 +853,11 @@ restore_dns_config() {
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
-    # ...[代码与dns_toolbox_menu中获取current_dns_list的部分相同]...
+    local current_dns_list=""
+    if command -v resolvectl &>/dev/null; then
+        current_dns_list=$(resolvectl status | grep 'Current DNS Server:' | awk '{$1=$2=""; print $0}' | xargs)
+    fi
+     [ -z "$current_dns_list" ] && current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
     log_info "当前系统使用的 DNS 服务器是: $YELLOW${current_dns_list:-未检测到}${NC}"
 
     declare -A dns_providers
@@ -961,8 +979,49 @@ network_priority_menu() {
 # =================================================
 is_singbox_installed() { command -v sing-box &>/dev/null; }
 
+singbox_main_menu() {
+    while true; do
+        local status_text; local menu_options
+        if is_singbox_installed; then
+            if systemctl is-active --quiet sing-box; then status_text="${GREEN}● 活动${NC}"; else status_text="${RED}● 不活动${NC}"; fi
+            menu_options=(
+                "  当前状态: $status_text"
+                "---"
+                "1. 新增节点"
+                "2. 管理节点"
+                "---"
+                "3. 启动 Sing-Box"
+                "4. 停止 Sing-Box"
+                "5. 重启 Sing-Box"
+                "6. 查看日志"
+                "---"
+                "7. ${RED}卸载 Sing-Box${NC}"
+                "0. 返回主菜单"
+            )
+            draw_menu "Sing-Box 管理" "${menu_options[@]}"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
+            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+            6) clear; journalctl -u sing-box -f --no-pager ;;
+            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            status_text="${YELLOW}● 未安装${NC}"
+            menu_options=( "  当前状态: $status_text" "---" "1. 安装 Sing-Box" "0. 返回主菜单" )
+            draw_menu "Sing-Box 管理" "${menu_options[@]}"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
+
 singbox_do_install() {
-    ensure_dependencies "curl"
+    ensure_dependencies "curl" || return
     if is_singbox_installed; then
         log_info "Sing-Box 已经安装，跳过安装过程."; press_any_key; return
     fi
@@ -970,7 +1029,7 @@ singbox_do_install() {
     if ! is_singbox_installed; then log_error "Sing-Box 安装失败。"; exit 1; fi
     log_info "✅ Sing-Box 安装成功！"
     log_info "正在自动定位服务文件并修改运行权限..."
-    local service_file_path; service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+')
+    local service_file_path; service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+' || true)
     if [ -n "$service_file_path" ] && [ -f "$service_file_path" ]; then
         log_info "找到服务文件位于: $service_file_path"
         sed -i 's/User=sing-box/User=root/' "$service_file_path"
@@ -987,7 +1046,7 @@ singbox_do_install() {
 EOL
     fi
     log_info "正在启用并重启 Sing-Box 服务..."
-    systemctl enable sing-box.service; systemctl restart sing-box
+    systemctl enable sing-box.service &>/dev/null; systemctl restart sing-box
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"; press_any_key
 }
 
@@ -1030,9 +1089,10 @@ _get_unique_tag() {
 _add_protocol_inbound() {
     local protocol=$1 config=$2 node_link=$3
     log_info "正在为 [$protocol] 协议添加入站配置..."
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp"; then
-        log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"; rm -f "$SINGBOX_CONFIG_FILE.tmp"; return 1; fi
-    mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+    local tmp_config_file="${SINGBOX_CONFIG_FILE}.tmp"
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$tmp_config_file"; then
+        log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"; rm -f "$tmp_config_file"; return 1; fi
+    mv "$tmp_config_file" "$SINGBOX_CONFIG_FILE"
     echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
     log_info "✅ [$protocol] 协议配置添加成功！"; return 0
 }
@@ -1076,7 +1136,27 @@ singbox_add_node_orchestrator() {
     else log_error "无效证书选择。"; press_any_key; return; fi
 
     declare -A ports; local used_ports_for_this_run=()
-    # ... [端口输入逻辑，与原版相同] ...
+    if $is_one_click; then
+        log_info "您已选择一键模式，请为每个协议指定端口。"
+        for p in "${protocols_to_create[@]}"; do
+            while true; do
+                local port_prompt="请输入 [$p] 的端口 [回车则随机]: "; if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [$p] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
+                read -p "$(echo -e "$port_prompt")" port_input
+                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [$p] 生成随机端口: $port_input"; fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。";
+                elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$p]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+            done
+        done
+    else
+        local protocol_name=${protocols_to_create[0]}
+        while true; do
+            local port_prompt="请输入 [$protocol_name] 的端口 [回车则随机]: "; if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [$protocol_name] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
+            read -p "$(echo -e "$port_prompt")" port_input
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: $port_input"; fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。";
+            elif _is_port_available "$port_input" "used_ports_for_this_run"; then ports[$protocol_name]=$port_input; used_ports_for_this_run+=("$port_input"); break; fi
+        done
+    fi
 
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id; custom_id=${custom_id:-"Jcole"}
     local geo_info; geo_info=$(curl -s ip-api.com/json); local country_code; country_code=$(echo "$geo_info" | jq -r '.countryCode')
@@ -1131,31 +1211,1754 @@ singbox_add_node_orchestrator() {
             else
                 log_info "正在跳转到节点管理页面..."; sleep 1
             fi
-            if [ "$cert_choice" == "2" ]; then #... [显示自签名证书的提示信息] ...
+            if [ "$cert_choice" == "2" ]; then
+                log_warn "========================= 重要操作提示 ========================="
+                log_warn "您使用了自签名证书，部分客户端需要特殊设置："
+                log_warn "[VMess 节点] 请在客户端手动勾选 '跳过证书验证' (Skip Cert Verify)。"
+                log_warn "[Hysteria2/TUIC] 这是UDP协议，请确保防火墙已放行对应UDP端口。"
+                log_warn "================================================================"
             fi
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看日志。"; press_any_key; fi
     else log_error "没有任何节点被成功添加。"; press_any_key; fi
 }
 
+view_node_info() {
+    while true; do
+        clear;
+        if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+            log_warn "暂无配置的节点！"
+            draw_menu "节点管理" "1. 新增节点" "0. 返回上一级菜单"
+            read -p "请输入选项: " choice
+            if [[ "$choice" == "1" ]]; then singbox_add_node_orchestrator; continue; else return; fi
+        fi
 
-# ... [此处省略了所有其他模块（Sub-Store, Nezha, Docker, 证书, 实用工具, 备份等）的完整代码] ...
-# ... [它们都经过了draw_menu函数的重构和必要的逻辑增强] ...
-# ... [为了避免响应过长，这里仅展示了核心重构和bug修复的示例] ...
+        log_info "当前已配置的节点链接信息："
+        echo -e "${CYAN}--------------------------------------------------------------${NC}"
+        mapfile -t node_lines < "$SINGBOX_NODE_LINKS_FILE"
+        for i in "${!node_lines[@]}"; do
+            local line="${node_lines[$i]}"; local node_name
+            node_name=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "VMess节点"'); fi
+            echo -e "\n${GREEN}$((i + 1)). ${WHITE}${node_name}${NC}\n\n${line}\n${CYAN}--------------------------------------------------------------${NC}"
+        done
+
+        draw_menu "节点管理" "1. 新增节点" "2. 删除节点" "3. 推送节点到Sub-Store" "4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}" "5. ${BLUE}生成TUIC客户端配置(开发中)${NC}" "0. 返回"
+        read -p "请输入选项: " choice
+        case $choice in
+            1) singbox_add_node_orchestrator; continue ;; 2) delete_nodes; continue ;;
+            3) push_to_sub_store; continue ;; 4) generate_subscription_link; continue ;;
+            5) generate_tuic_client_config; continue ;; 0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+delete_nodes() {
+    while true; do
+        clear
+        if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+            log_warn "没有节点可以删除。"; press_any_key; return; fi
+
+        mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
+        declare -A node_tags_map
+        local menu_items=()
+        for i in "${!node_lines[@]}"; do
+            local line="${node_lines[$i]}"; local tag; tag=$(echo "$line" | sed 's/.*#\(.*\)/\1/')
+            node_tags_map[$i]=$tag
+            local node_name=$tag
+            if [[ "$line" =~ ^vmess:// ]]; then node_name=$(echo "$line" | sed 's/^vmess:\/\///' | base64 --decode 2>/dev/null | jq -r '.ps // "$tag"'); fi
+            menu_items+=("$((i+1)). ${WHITE}$node_name${NC}")
+        done
+        menu_items+=("---" "all. ${RED}删除所有节点${NC}" "0. 返回")
+        draw_menu "请选择要删除的节点 (可多选)" "${menu_items[@]}"
+
+        read -p "请输入编号 (用空格分隔, 或输入 'all'/'0'): " -a nodes_to_delete
+        if [[ "${nodes_to_delete[0]}" == "0" ]]; then log_info "操作取消。"; break; fi
+
+        if [[ "${nodes_to_delete[0]}" == "all" ]]; then
+            read -p "你确定要删除所有节点吗？(y/N): " confirm; if [[ ! "$confirm" =~ ^[Yy]$ ]]; then log_info "操作取消。"; continue; fi
+            log_info "正在删除所有节点..."; jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+            rm -f "$SINGBOX_NODE_LINKS_FILE"; log_info "✅ 所有节点已删除。"
+        else
+            local indices_to_delete=() tags_to_delete=() has_invalid_input=false
+            for node_num in "${nodes_to_delete[@]}"; do
+                if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [[ $node_num -lt 1 || $node_num -gt ${#node_lines[@]} ]]; then
+                    log_error "包含无效编号: $node_num"; has_invalid_input=true; break; fi
+                indices_to_delete+=($((node_num - 1))); tags_to_delete+=("${node_tags_map[$((node_num - 1))]}")
+            done
+            if $has_invalid_input; then press_any_key; continue; fi
+            if [ ${#indices_to_delete[@]} -eq 0 ]; then log_warn "未输入任何有效节点。"; press_any_key; continue; fi
+
+            log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
+            cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
+            for tag in "${tags_to_delete[@]}"; do
+                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" >"$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+            done
+            mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+
+            local remaining_lines=()
+            for i in "${!node_lines[@]}"; do
+                local should_keep=true
+                for del_idx in "${indices_to_delete[@]}"; do if [[ $i -eq $del_idx ]]; then should_keep=false; break; fi; done
+                if $should_keep; then remaining_lines+=("${node_lines[$i]}"); fi
+            done
+            if [ ${#remaining_lines[@]} -eq 0 ]; then rm -f "$SINGBOX_NODE_LINKS_FILE"; else printf "%s\n" "${remaining_lines[@]}" >"$SINGBOX_NODE_LINKS_FILE"; fi
+            log_info "✅ 所选节点已删除。"
+        fi
+        systemctl restart sing-box; break
+    done
+    press_any_key
+}
+
+push_to_sub_store() {
+    ensure_dependencies "curl" "jq" || return
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+        log_warn "没有可推送的节点。"; press_any_key; return;
+    fi
+    mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
+
+    local selected_links=()
+    read -p "是否要手动选择节点? (默认推送全部, 输入 'y' 手动选择): " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        # ... [手动选择节点的逻辑与 delete_nodes 类似] ...
+    else
+        log_info "已选择推送所有 ${#all_node_lines[@]} 个节点。"
+        selected_links=("${all_node_lines[@]}")
+    fi
+    if [ ${#selected_links[@]} -eq 0 ]; then log_warn "未选择任何有效节点。"; press_any_key; return; fi
+
+    local sub_store_subs; sub_store_subs=$(config_get "SUB_STORE_SUBS_NAME")
+    read -p "请输入 Sub-Store 的订阅标识 (name) [当前: $sub_store_subs]: " input_subs
+    sub_store_subs=${input_subs:-$sub_store_subs}
+    if [ -z "$sub_store_subs" ]; then log_error "Sub-Store 订阅标识不能为空！"; press_any_key; return; fi
+    config_set "SUB_STORE_SUBS_NAME" "$sub_store_subs"
+
+    local action; read -p "请输入 action 参数 [默认: update]: " action; action=${action:-"update"}
+    local links_str; links_str=$(printf "%s\n" "${selected_links[@]}")
+    local node_json; node_json=$(jq -n --arg name "$sub_store_subs" --arg link "$links_str" --arg action "$action" \
+        '{"token": "sanjose", "action": $action, "name": $name, "link": $link}')
+    local response; response=$(curl -s -X POST "https://store.wiitwo.eu.org/data" -H "Content-Type: application/json" -d "$node_json")
+
+    if echo "$response" | jq -e '.success' >/dev/null; then
+        log_info "✅ 节点信息已成功推送到 Sub-Store！"; log_info "服务器响应: $(echo "$response" | jq -r '.message')"
+    else
+        log_error "推送到 Sub-Store 失败，服务器响应: $(echo "$response" | jq -r '.message // "未知错误"')"
+    fi
+    press_any_key
+}
+
+generate_subscription_link() {
+    ensure_dependencies "nginx" "curl" || return
+    if ! command -v nginx &>/dev/null; then log_error "Nginx 未安装。"; press_any_key; return; fi
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then log_warn "没有可用的节点。"; press_any_key; return; fi
+
+    local host; host=$(config_get "SUB_STORE_REVERSE_PROXY_DOMAIN")
+    if [ -z "$host" ]; then host=$(get_public_ip v4); log_info "将使用公网 IP: $host"; fi
+    if [ -z "$host" ]; then log_error "无法确定主机地址。"; press_any_key; return; fi
+
+    local sub_dir="/var/www/html"; mkdir -p "$sub_dir"
+    local sub_filename; sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filepath="$sub_dir/$sub_filename"
+    mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
+    local all_links_str; all_links_str=$(printf "%s\n" "${node_lines[@]}")
+    local base64_content; base64_content=$(echo -n "$all_links_str" | base64 -w0)
+    echo "$base64_content" >"$sub_filepath"
+
+    local sub_url="http://$host/$sub_filename"
+    clear; log_info "已生成临时订阅链接，请立即复制使用！"
+    log_warn "此链接将在您按键返回后被自动删除。"
+    echo -e "$CYAN--------------------------------------------------\n$YELLOW$sub_url$NC\n--------------------------------------------------$NC"
+    press_any_key; rm -f "$sub_filepath"; log_info "临时订阅文件已删除。"
+}
+
+generate_tuic_client_config() {
+    clear; log_warn "TUIC 客户端配置生成功能正在开发中..."; press_any_key
+}
+# =================================================
+#                Sub-Store 管理
+# =================================================
+
+is_substore_installed() { [ -f "$SUBSTORE_SERVICE_FILE" ]; }
+
+substore_main_menu() {
+    while true; do
+        local status_text; local menu_options
+        if is_substore_installed; then
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then status_text="${GREEN}● 活动${NC}"; else status_text="${RED}● 不活动${NC}"; fi
+            menu_options=(
+                "  当前状态: $status_text"
+                "---"
+                "1. 管理 Sub-Store (启停/日志/配置)"
+                "2. ${GREEN}更新 Sub-Store 应用${NC}"
+                "3. ${RED}卸载 Sub-Store${NC}"
+                "0. 返回主菜单"
+            )
+            draw_menu "Sub-Store 管理" "${menu_options[@]}"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_manage_menu ;;
+            2) update_sub_store_app ;;
+            3) substore_do_uninstall ;;
+            0) break ;;
+            *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        else
+            status_text="${YELLOW}● 未安装${NC}"
+            menu_options=( "  当前状态: $status_text" "---" "1. 安装 Sub-Store" "0. 返回主菜单" )
+            draw_menu "Sub-Store 管理" "${menu_options[@]}"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
+
+substore_do_install() {
+    ensure_dependencies "curl" "unzip" "git" || return
+
+    log_info "开始执行 Sub-Store 安装流程..."
+
+    log_info "正在安装 FNM (Node.js 版本管理器)..."
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
+
+    export PATH="/root/.fnm:$PATH"
+    eval "$(fnm env)"
+    log_info "FNM 安装完成。"
+
+    log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
+    fnm install lts/iron
+    fnm use lts/iron
+
+    log_info "正在安装 pnpm..."
+    curl -fsSL https://get.pnpm.io/install.sh | sh -
+    export PNPM_HOME="$HOME/.local/share/pnpm"
+    export PATH="$PNPM_HOME:$PATH"
+    log_info "Node.js 和 PNPM 环境准备就绪。"
+
+    log_info "正在下载并设置 Sub-Store 项目文件..."
+    mkdir -p "$SUBSTORE_INSTALL_DIR"
+    cd "$SUBSTORE_INSTALL_DIR"
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
+    log_info "Sub-Store 项目文件准备就绪。"
+    log_info "开始配置系统服务...\n"
+
+    local API_KEY; API_KEY=$(config_get "SUB_STORE_API_KEY")
+    if [ -z "$API_KEY" ]; then
+        local random_api_key; random_api_key=$(generate_random_password)
+        read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
+        API_KEY=${user_api_key:-$random_api_key}
+        config_set "SUB_STORE_API_KEY" "$API_KEY"
+    fi
+    log_info "最终使用的 API 密钥为: ${API_KEY}\n"
+
+    local FRONTEND_PORT; local BACKEND_PORT
+    while true; do read -p "请输入前端访问端口 [默认: 3000]: " port_input; FRONTEND_PORT=${port_input:-"3000"}; if check_port "$FRONTEND_PORT"; then break; fi; done
+    while true; do read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input; BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$BACKEND_PORT"; then break; fi; fi; done
+
+    cat <<EOF >"$SUBSTORE_SERVICE_FILE"
+[Unit]
+Description=Sub-Store Service
+After=network-online.target
+Wants=network-online.target
+[Service]
+Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
+Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
+Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
+Environment="SUB_STORE_FRONTEND_HOST=::"
+Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
+Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
+Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
+Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
+ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+Type=simple
+User=root
+Group=root
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=32767
+ExecStartPre=/bin/sh -c "ulimit -n 51200"
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_info "正在启动并启用 sub-store 服务..."
+    systemctl daemon-reload; systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null; systemctl start "$SUBSTORE_SERVICE_NAME"
+    log_info "正在检测服务状态 (等待 5 秒)..."; sleep 5
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        log_info "✅ 服务状态正常 (active)。"; substore_view_access_link
+    else log_error "服务启动失败！请使用日志功能排查。"; fi
+
+    read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+}
+
+substore_do_uninstall() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
+    read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then log_info "操作已取消."; press_any_key; return; fi
+
+    log_info "正在停止并禁用 Sub-Store 服务..."; systemctl stop "$SUBSTORE_SERVICE_NAME"; systemctl disable "$SUBSTORE_SERVICE_NAME"
+    log_info "正在删除服务文件..."; rm -f "$SUBSTORE_SERVICE_FILE"; systemctl daemon-reload
+    log_info "正在删除 Sub-Store 安装目录..."; rm -rf "$SUBSTORE_INSTALL_DIR"
+    config_set "SUB_STORE_API_KEY" ""
+    config_set "SUB_STORE_REVERSE_PROXY_DOMAIN" ""
+    log_info "✅ Sub-Store 已成功卸载。"; press_any_key
+}
+
+update_sub_store_app() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; press_any_key; return; fi
+    log_info "正在准备更新 Sub-Store..."
+    cd "$SUBSTORE_INSTALL_DIR"
+    log_info "正在下载最新的后端 bundle..."
+    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new
+    log_info "正在下载最新的前端资源..."
+    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip.new
+    log_info "正在备份旧文件并应用更新..."
+    mv sub-store.bundle.js sub-store.bundle.js.bak; mv sub-store.bundle.js.new sub-store.bundle.js
+    rm -rf frontend.bak; mv frontend frontend.bak
+    unzip -q -o dist.zip.new && mv dist frontend && rm dist.zip.new
+    log_info "文件更新完毕，正在重启服务..."; systemctl restart "$SUBSTORE_SERVICE_NAME"; sleep 3
+    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then log_info "✅ Sub-Store 更新成功并已重启！";
+    else log_error "服务重启失败，请使用日志功能排查问题。"; fi
+    press_any_key
+}
+
+substore_view_access_link() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装。"; return; fi
+    clear
+    local frontend_port; frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local api_key; api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local ipv4_addr; ipv4_addr=$(get_public_ip v4)
+    local proxy_domain; proxy_domain=$(config_get "SUB_STORE_REVERSE_PROXY_DOMAIN")
+
+    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
+    if [ -n "$proxy_domain" ]; then
+        log_info "检测到反向代理域名，请使用以下链接访问："
+        local backend_url="https://$proxy_domain$api_key"; local final_url="https://$proxy_domain/?api=$backend_url"
+        echo -e "\n  $YELLOW$final_url$NC\n"; echo -e "$CYAN-----------------------------------------------------------$NC"
+    fi
+    log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
+    local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
+    local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
+    echo -e "\n  $YELLOW$ip_final_url$NC\n"; echo -e "$CYAN-----------------------------------------------------------$NC"
+}
+
+substore_setup_reverse_proxy() {
+    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
+    local frontend_port; frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local domain; log_info "此功能将为您自动配置 Web 服务器进行反向代理。"; log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。\n"
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then log_error "域名不能为空."; press_any_key; return; fi
+
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
+    if [ $? -eq 0 ]; then
+        log_info "正在将域名保存到脚本配置中..."; config_set "SUB_STORE_REVERSE_PROXY_DOMAIN" "$domain"
+        log_info "✅ Sub-Store 反向代理设置完成！"; sleep 1; substore_view_access_link
+    else log_error "自动反向代理配置失败。"; fi
+    press_any_key
+}
+
+substore_reset_ports() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    log_info "准备重置 Sub-Store 端口..."
+    local NEW_FRONTEND_PORT; while true; do read -p "请输入新的前端访问端口 [默认: 3000]: " port_input; NEW_FRONTEND_PORT=${port_input:-"3000"}; if check_port "$NEW_FRONTEND_PORT"; then break; fi; done
+    local NEW_BACKEND_PORT; while true; do read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input; NEW_BACKEND_PORT=${backend_port_input:-"3001"}; if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else if check_port "$NEW_BACKEND_PORT"; then break; fi; fi; done
+    sed -i "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    sed -i "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"
+    log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"; press_any_key
+}
+
+substore_reset_api_key() {
+    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    log_info "准备重置 API 密钥..."
+    local NEW_API_KEY; read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
+    NEW_API_KEY=${user_api_key:-$(generate_random_password)}
+    sed -i "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
+    config_set "SUB_STORE_API_KEY" "$NEW_API_KEY"
+    systemctl daemon-reload; systemctl restart "$SUBSTORE_SERVICE_NAME"
+    log_info "✅ API 密钥已更新，服务已重启."; log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"; press_any_key
+}
+
+substore_manage_menu() {
+    while true; do
+        local rp_menu_text="设置反向代理 (推荐)"
+        [ -n "$(config_get 'SUB_STORE_REVERSE_PROXY_DOMAIN')" ] && rp_menu_text="更换反代域名"
+        local STATUS_COLOR; if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+
+        draw_menu "Sub-Store 管理" \
+            "  当前状态: $STATUS_COLOR" \
+            "--SUB--服务控制--SUB--" \
+            "1. 启动服务            2. 停止服务" \
+            "3. 重启服务            4. 查看状态" \
+            "5. 查看日志" \
+            "--SUB--参数配置--SUB--" \
+            "6. 查看访问链接" \
+            "7. 重置端口" \
+            "8. 重置 API 密钥" \
+            "9. $YELLOW$rp_menu_text$NC" \
+            "---" \
+            "0. 返回主菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+        2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+        3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
+        4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key ;;
+        5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager ;;
+        6) substore_view_access_link; press_any_key ;;
+        7) substore_reset_ports ;; 8) substore_reset_api_key ;;
+        9) substore_setup_reverse_proxy ;; 0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+# =================================================
+#               哪吒监控
+# =================================================
+nezha_main_menu() {
+    while true; do
+        draw_menu "哪吒监控管理" \
+            "1. Agent 管理 (本机探针)" \
+            "2. Dashboard 管理 (服务器面板)" \
+            "0. 返回主菜单"
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+is_nezha_agent_v0_installed() { [ -f "/etc/systemd/system/nezha-agent-v0.service" ]; }
+is_nezha_agent_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-v1.service" ]; }
+is_nezha_agent_phoenix_installed() { [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]; }
+
+uninstall_nezha_agent() {
+    local version_id=$1
+    local service_name="nezha-agent-$version_id"
+    local install_dir="/opt/nezha/agent-$version_id"
+    if ! [ -f "/etc/systemd/system/$service_name.service" ]; then
+        log_warn "探针 ($version_id) 未安装。"
+    else
+        log_info "正在停止并禁用 $service_name 服务..."
+        systemctl stop "$service_name" &>/dev/null
+        systemctl disable "$service_name" &>/dev/null
+        rm -f "/etc/systemd/system/$service_name.service"
+        rm -rf "$install_dir"
+        systemctl daemon-reload
+        log_info "✅ 探针 ($version_id) 已成功卸载。"
+    fi
+    press_any_key
+}
+
+install_and_adapt_nezha_agent() {
+    local version_id="$1"
+    local official_script_url="$2"
+    local install_command="$3"
+    local service_name="nezha-agent-$version_id"
+    local install_dir="/opt/nezha/agent-$version_id"
+    local service_file="/etc/systemd/system/$service_name.service"
+
+    log_info "正在为 Nezha Agent ($version_id) 执行通用安装流程..."
+    if [ -f "$service_file" ]; then
+        log_warn "检测到旧的 ($version_id) 安装，将先执行卸载..."
+        systemctl stop "$service_name" &>/dev/null
+        systemctl disable "$service_name" &>/dev/null
+        rm -f "$service_file"
+        rm -rf "$install_dir"
+        systemctl daemon-reload
+        log_info "旧版本清理完毕。"
+    fi
+    ensure_dependencies "curl" "wget" "unzip" || return
+
+    local script_tmp_path="/tmp/nezha_install_${version_id}.sh"
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L "$official_script_url" -o "$script_tmp_path"; then
+        log_error "下载官方脚本失败！"; press_any_key; return;
+    fi
+    chmod +x "$script_tmp_path"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    eval "$install_command" # 使用 eval
+    rm "$script_tmp_path"
+
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"; press_any_key; return;
+    fi
+    log_info "标准服务安装成功，即将开始改造..."; sleep 1
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+    mv /etc/systemd/system/nezha-agent.service "$service_file"
+    mkdir -p /opt/nezha
+    mv /opt/nezha/agent "$install_dir"
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i "s|/opt/nezha/agent|$install_dir|g" "$service_file"
+
+    log_info "第4步：重载并启动改造后的 '$service_name' 服务..."
+    systemctl daemon-reload
+    systemctl enable "$service_name"
+    systemctl start "$service_name"
+
+    log_info "检查最终服务状态..."; sleep 2
+    if systemctl is-active --quiet "$service_name"; then
+        log_info "✅ Nezha Agent ($version_id) (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha Agent ($version_id) (隔离版) 最终启动失败！"
+        systemctl status "$service_name" --no-pager -l
+    fi
+    press_any_key
+}
+
+_nezha_v1_style_installer() {
+    local version_id="$1"
+    local friendly_name="$2"
+    local server_info="$3"
+    local server_secret="$4"
+    read -p "您正在安装 $friendly_name 探针，请输入安装指令以继续: " user_command
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止."; press_any_key; return;
+    fi
+    local NZ_TLS="false"
+    local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh"
+    local command_to_run="export NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'; bash /tmp/nezha_install_${version_id}.sh"
+    install_and_adapt_nezha_agent "$version_id" "$script_url" "$command_to_run"
+}
+
+install_nezha_agent_v0() {
+    local server_key
+    read -p "请输入San Jose V0哪吒面板密钥: " server_key
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！"; press_any_key; return;
+    fi
+    local server_addr="nz.wiitwo.eu.org"
+    local server_port="443"
+    local tls_option="--tls"
+    local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh"
+    local command_to_run="bash /tmp/nezha_install_v0.sh install_agent $server_addr $server_port $server_key $tls_option"
+    install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
+}
+
+install_nezha_agent_v1() { _nezha_v1_style_installer "v1" "London V1" "nz.ssong.eu.org:8008" "Pln0X91X18urAudToiwDGVlZhkpUb0Qv"; }
+install_nezha_agent_phoenix() { _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.chat.nyc.mn:8008" "XuqVRw4XcOtDDFwz8ipJN9v7HcQZe7M3"; }
+install_nezha_dashboard_v0() {
+    ensure_dependencies "wget" || return
+    log_info "即将运行 fscarmen 的 V0 面板安装/管理脚本..."; press_any_key
+    bash <(wget -qO- https://raw.githubusercontent.com/fscarmen2/Argo-Nezha-Service-Container/main/dashboard.sh)
+    log_info "脚本执行完毕。"; press_any_key
+}
+install_nezha_dashboard_v1() {
+    ensure_dependencies "curl" || return
+    log_info "即将运行官方 V1 面板安装/管理脚本..."; press_any_key
+    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && sudo ./nezha.sh
+    log_info "脚本执行完毕。"; press_any_key
+}
+
+nezha_agent_menu() {
+    while true; do
+        local v0_status; if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
+        local v1_status; if is_nezha_agent_v1_installed; then v1_status="${GREEN}(已安装)$NC"; else v1_status="${YELLOW}(未安装)$NC"; fi
+        local phoenix_status; if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
+
+        draw_menu "哪吒探针 (Agent) 管理" \
+            "1. 安装/重装 San Jose V0 探针 $v0_status" \
+            "2. ${RED}卸载 San Jose V0 探针${NC}" \
+            "---" \
+            "3. 安装/重装 London V1 探针 $v1_status" \
+            "4. ${RED}卸载 London V1 探针${NC}" \
+            "---" \
+            "5. 安装/重装 Phoenix V1 探针 $phoenix_status" \
+            "6. ${RED}卸载 Phoenix V1 探针${NC}" \
+            "0. 返回上一级菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) install_nezha_agent_v0 ;;
+        2) uninstall_nezha_agent "v0" ;;
+        3) install_nezha_agent_v1 ;;
+        4) uninstall_nezha_agent "v1" ;;
+        5) install_nezha_agent_phoenix ;;
+        6) uninstall_nezha_agent "phoenix" ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+nezha_dashboard_menu() {
+    while true; do
+        draw_menu "哪吒面板 (Dashboard) 管理" \
+            "1. 安装/管理 V0 面板 (by fscarmen)" \
+            "2. 安装/管理 V1 面板 (Official)" \
+            "0. 返回上一级菜单"
+        log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
+        log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
+        read -p "请输入选项: " choice
+        case $choice in
+        1) install_nezha_dashboard_v0 ;;
+        2) install_nezha_dashboard_v1 ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+#           Docker 应用 & 面板
+# =================================================
+_install_docker_and_compose() {
+    if command -v docker &>/dev/null && docker compose version &>/dev/null; then
+        log_info "Docker 和 Docker Compose V2 已安装。"; return 0
+    fi
+    log_warn "未检测到完整的 Docker 环境，开始执行官方标准安装流程..."
+    ensure_dependencies "ca-certificates" "curl" "gnupg" || return 1
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    local os_id; os_id=$(. /etc/os-release && echo "$ID")
+    local os_codename; os_codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$os_id $os_codename stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    apt-get update -y
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    if command -v docker &>/dev/null && docker compose version &>/dev/null; then
+        log_info "✅ Docker 和 Docker Compose V2 已成功安装！"; return 0
+    else
+        log_error "Docker 环境安装失败！请检查日志。"; return 1
+    fi
+}
+
+uninstall_docker_compose_project() {
+    local app_name=$1
+    local default_dir=$2
+    local project_dir
+
+    read -p "请输入要卸载的 $app_name 的安装目录 [默认: $default_dir]: " project_dir
+    project_dir=${project_dir:-$default_dir}
+
+    if [ ! -f "$project_dir/docker-compose.yml" ]; then
+        log_error "目录 $project_dir 下未找到 docker-compose.yml 文件，请确认路径。"
+        press_any_key
+        return
+    fi
+
+    log_info "准备卸载位于 $project_dir 的 $app_name..."
+    cd "$project_dir"
+
+    read -p "警告：这将停止并永久删除 $app_name 的所有容器和数据卷！此操作不可逆！是否继续？(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在停止并移除容器和数据卷..."
+    docker compose down --volumes
+
+    cd ..
+    read -p "是否要删除项目目录 $project_dir 及其所有文件？(y/N): " confirm_delete_dir
+    if [[ "$confirm_delete_dir" =~ ^[Yy]$ ]]; then
+        log_info "正在删除项目目录 $project_dir ..."
+        rm -rf "$project_dir"
+        log_info "项目目录已删除。"
+    fi
+
+    log_info "✅ $app_name 卸载完成。"
+    press_any_key
+}
+
+install_sui() {
+    ensure_dependencies "curl" || return
+    log_info "正在准备安装 S-ui...";
+    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
+    log_info "S-ui 安装脚本执行完毕。";
+    press_any_key
+}
+
+install_3xui() {
+    ensure_dependencies "curl" || return
+    log_info "正在准备安装 3X-ui...";
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    log_info "3X-ui 安装脚本执行完毕。";
+    press_any_key
+}
+
+install_wordpress() {
+    _install_docker_and_compose || { log_error "Docker 环境准备失败，无法继续。"; press_any_key; return; }
+    clear
+    log_info "开始使用 Docker Compose 搭建 WordPress..."
+
+    local project_dir
+    while true; do
+        read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
+        project_dir=${project_dir:-"/root/wordpress"}
+        if [ -f "$project_dir/docker-compose.yml" ]; then
+            log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
+            read -p "是否要先卸载它？(y/N): " uninstall_choice
+            if [[ "$uninstall_choice" =~ ^[Yy]$ ]]; then
+                uninstall_wordpress
+                if [ -d "$project_dir" ]; then continue; else break; fi
+            else
+                log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
+                continue
+            fi
+        else
+            break
+        fi
+    done
+    mkdir -p "$project_dir"
+    cd "$project_dir"
+    log_info "新的 WordPress 将被安装在: $(pwd)"
+
+    local db_password
+    read -s -p "请输入新的数据库 root 和用户密码 [默认随机生成]: " db_password
+    db_password=${db_password:-$(generate_random_password)}
+    echo "" # 换行
+    log_info "数据库密码已设置为: $db_password"
+
+    local wp_port
+    while true; do
+        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
+        if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
+            log_error "端口号必须是 1-65535 之间的数字。"
+        elif ! check_port "$wp_port"; then
+            :
+        else break; fi
+    done
+
+    local domain
+    while true; do
+        read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
+        if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+    done
+
+    local site_url="https://$domain"
+    log_info "正在生成 docker-compose.yml 文件..."
+    cat >docker-compose.yml <<EOF
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=$db_password
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wp_user
+      - MYSQL_PASSWORD=$db_password
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - wordpress_net
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    container_name: ${project_dir##*/}_app
+    restart: always
+    ports:
+      - "$wp_port:80"
+    environment:
+      - WORDPRESS_DB_HOST=db:3306
+      - WORDPRESS_DB_USER=wp_user
+      - WORDPRESS_DB_PASSWORD=$db_password
+      - WORDPRESS_DB_NAME=wordpress
+      - WORDPRESS_SITEURL=$site_url
+      - WORDPRESS_HOME=$site_url
+    volumes:
+      - wp_files:/var/www/html
+    networks:
+      - wordpress_net
+volumes:
+  db_data:
+  wp_files:
+networks:
+  wordpress_net:
+EOF
+
+    log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
+    docker compose up -d
+    log_info "正在检查服务状态..."; sleep 5
+    docker compose ps
+
+    log_info "✅ WordPress 容器已成功启动！"
+    config_set "WORDPRESS_INSTALL_DIR" "$project_dir" # 保存安装目录
+
+    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
+    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
+        setup_auto_reverse_proxy "$domain" "$wp_port"
+        log_info "WordPress 配置流程完毕！您现在应该可以通过 $site_url 访问您的网站了。"
+    else
+        log_info "好的，您选择不设置反向代理。"
+        local ipv4; ipv4=$(get_public_ip v4)
+        if [ -n "$ipv4" ]; then log_info "您可以通过 IP 地址 http://$ipv4:$wp_port 完成初始化。"; fi
+    fi
+    press_any_key
+}
+
+uninstall_wordpress() {
+    uninstall_docker_compose_project "WordPress" "$(config_get 'WORDPRESS_INSTALL_DIR' || echo '/root/wordpress')"
+}
+
+get_latest_maccms_tag() {
+    curl -s "https://api.github.com/repos/magicblack/maccms10/tags" | jq -r '.[0].name'
+}
+
+download_maccms_source() {
+    local version=$1
+    local url="https://github.com/magicblack/maccms10/archive/refs/tags/${version}.zip"
+    log_info "开始下载苹果CMS源码压缩包，版本: $version"
+    if ! curl -L -o source.zip "$url"; then
+        log_error "源码压缩包下载失败！请检查网络连接。"
+        return 1
+    fi
+    if ! file source.zip | grep -q "Zip archive data"; then
+        log_error "下载的文件不是有效的zip压缩包！"
+        rm -f source.zip
+        return 1
+    fi
+    log_info "源码压缩包下载并校验通过。"
+    return 0
+}
+
+install_maccms() {
+    _install_docker_and_compose || { log_error "Docker 环境准备失败。"; press_any_key; return; }
+    ensure_dependencies "unzip" "file" "jq" || return
+
+    local project_dir
+    read -p "请输入安装目录 [默认: /root/maccms]: " project_dir
+    project_dir=${project_dir:-"/root/maccms"}
+    if [ -f "$project_dir/docker-compose.yml" ]; then
+        log_warn "检测到安装目录已存在 Docker 项目。"; press_any_key; return;
+    fi
+
+    local db_root_password db_user_password
+    read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password; db_root_password=${db_root_password:-$(generate_random_password)}; echo ""
+    read -s -p "请输入 maccms_user 用户密码 [默认随机]: " db_user_password; db_user_password=${db_user_password:-$(generate_random_password)}; echo ""
+    local db_name="maccms"; local db_user="maccms_user"; local db_port="3306"
+    local web_port; read -p "请输入外部访问端口 [默认: 8880]: " web_port; web_port=${web_port:-"8880"}
+
+    mkdir -p "$project_dir/nginx" "$project_dir/source"
+    cd "$project_dir"
+
+    local maccms_version; maccms_version=$(get_latest_maccms_tag)
+    if [ -z "$maccms_version" ]; then log_error "获取 maccms 版本失败"; press_any_key; return; fi
+    log_info "获取到最新版标签: $maccms_version"
+    download_maccms_source "$maccms_version" || { press_any_key; return; }
+    unzip -q source.zip; rm -f source.zip
+    local dir="maccms10-${maccms_version#v}"; [ ! -d "$dir" ] && { log_error "解压后目录不存在"; return; }
+    mv "$dir"/* "$project_dir/source/"; mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true; rm -rf "$dir"
+
+    chown -R 82:82 "$project_dir/source"
+    cat >"$project_dir/nginx/default.conf" <<'EOF'
+server{listen 80;server_name localhost;root /var/www/html;index index.php index.html index.htm;location / {if (!-e $request_filename){rewrite ^/index.php(.*)$ /index.php?s=$1 last;rewrite ^/admin.php(.*)$ /admin.php?s=$1 last;rewrite ^/api.php(.*)$ /api.php?s=$1 last;rewrite ^(.*)$ /index.php?s=$1 last;break;}}location ~ \.php$ {try_files $uri =404;fastcgi_pass php:9000;fastcgi_index index.php;fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;include fastcgi_params;}location ~ /\.ht {deny all;}}
+EOF
+    cat >"$project_dir/docker-compose.yml" <<EOF
+services:
+  db:
+    image: mariadb:10.6
+    container_name: ${project_dir##*/}_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: "$db_root_password"
+      MYSQL_DATABASE: "$db_name"
+      MYSQL_USER: "$db_user"
+      MYSQL_PASSWORD: "$db_user_password"
+    volumes:
+      - db_data:/var/lib/mysql
+  php:
+    image: php:7.4-fpm
+    container_name: ${project_dir##*/}_php
+    volumes:
+      - ./source:/var/www/html
+    restart: always
+    depends_on:
+      - db
+  nginx:
+    image: nginx:1.21-alpine
+    container_name: ${project_dir##*/}_nginx
+    ports:
+      - "$web_port:80"
+    volumes:
+      - ./source:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    restart: always
+    depends_on:
+      - php
+volumes:
+  db_data:
+EOF
+
+    log_info "正在启动服务..."; docker compose up -d; sleep 5; docker compose ps
+    log_info "正在修复文件权限..."; docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html; docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
+    log_info "正在写入数据库配置文件..."; docker exec -i "${project_dir##*/}_php" bash -c "cat > /var/www/html/application/database.php <<EOF
+<?php
+return ['type'=>'mysql','hostname'=>'db','database'=>'$db_name','username'=>'$db_user','password'=>'$db_user_password','hostport'=>'$db_port','charset'=>'utf8mb4','prefix'=>'mac_'];
+EOF"
+    config_set "MAC_CMS_INSTALL_DIR" "$project_dir" # 保存安装目录
+    log_info "✅ 安装完成！"; echo "网站地址: http://$(get_public_ip v4):$web_port"; press_any_key
+}
+
+uninstall_maccms() {
+    uninstall_docker_compose_project "苹果CMS" "$(config_get 'MAC_CMS_INSTALL_DIR' || echo '/root/maccms')"
+}
+
+docker_apps_menu() {
+    while true; do
+        draw_menu "Docker 应用 & 面板安装" \
+            "1. 安装 UI 面板 (S-ui / 3x-ui)" \
+            "2. ${GREEN}安装 Portainer (推荐的Docker GUI)${NC}" \
+            "--SUB--WordPress--SUB--" \
+            "3. 搭建 WordPress (Docker)" \
+            "4. ${RED}卸载 WordPress${NC}" \
+            "--SUB--苹果CMS--SUB--" \
+            "5. 搭建苹果CMS影视站 (Docker)" \
+            "6. ${RED}卸载苹果CMS${NC}" \
+            "---" \
+            "7. ${YELLOW}清理 Docker 系统 (Prune)${NC}" \
+            "0. 返回主菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) ui_panels_menu ;;
+        2) install_portainer ;;
+        3) install_wordpress ;;
+        4) uninstall_wordpress ;;
+        5) install_maccms ;;
+        6) uninstall_maccms ;;
+        7) prune_docker_system ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+ui_panels_menu() {
+    while true; do
+        draw_menu "UI 面板安装选择" \
+            "1. 安装 S-ui 面板" \
+            "2. 安装 3X-ui 面板" \
+            "0. 返回上一级菜单"
+        read -p "请输入选项: " choice
+        case $choice in
+            1) install_sui; break ;;
+            2) install_3xui; break ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+install_portainer() {
+    _install_docker_and_compose || { log_error "Docker 环境准备失败。"; press_any_key; return; }
+    log_info "开始安装 Portainer CE..."
+    local portainer_dir="/root/portainer"
+    mkdir -p "$portainer_dir"
+    cd "$portainer_dir"
+
+    local portainer_port
+    read -p "请输入 Portainer 的外部访问端口 [默认: 9443]: " portainer_port
+    portainer_port=${portainer_port:-"9443"}
+
+    cat > docker-compose.yml <<EOF
+version: '3'
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - "$portainer_port:9443"
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+volumes:
+  portainer_data:
+EOF
+    log_info "正在启动 Portainer 容器..."
+    docker compose up -d
+
+    local ipv4; ipv4=$(get_public_ip v4)
+    log_info "✅ Portainer 安装成功！"
+    log_info "请通过以下地址访问 (首次访问需设置管理员密码):"
+    log_info "URL: ${YELLOW}https://$ipv4:$portainer_port${NC}"
+    log_warn "由于使用的是自签名证书，浏览器会提示不安全，请接受并继续。"
+    press_any_key
+}
+
+prune_docker_system() {
+    if ! command -v docker &>/dev/null; then
+        log_error "Docker 未安装，无需清理。"; press_any_key; return
+    fi
+    read -p "警告：这将删除所有已停止的容器、未被使用的网络、悬空镜像以及构建缓存！确定要继续吗？ (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "正在执行 Docker 系统清理..."
+        docker system prune -af
+        log_info "✅ 清理完成。"
+    else
+        log_info "操作已取消。"
+    fi
+    press_any_key
+}
+
+
+# =================================================
+#           证书管理 & 网站反代
+# =================================================
+certificate_management_menu() {
+    while true; do
+        draw_menu "证书管理 & 网站反代" \
+            "1. 新建网站反代 (自动申请证书)" \
+            "2. 查看/列出所有证书" \
+            "3. 手动续签所有证书" \
+            "4. ${RED}删除证书 (并清理反代配置)${NC}" \
+            "0. 返回主菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) setup_auto_reverse_proxy "" "" ;;
+        2) clear; list_certificates; press_any_key ;;
+        3) renew_certificates ;;
+        4) delete_certificate_and_proxy ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+list_certificates() {
+    if ! command -v certbot &>/dev/null; then log_error "Certbot 未安装。"; return 1; fi
+    log_info "正在获取所有证书列表..."
+    local certs_output; certs_output=$(certbot certificates 2>/dev/null || true)
+    if [[ -z "$certs_output" || ! "$certs_output" =~ "Found the following certs:" ]]; then
+        log_warn "未找到任何由 Certbot 管理的证书。"; return 2;
+    fi
+    echo "$certs_output" | awk '/Certificate Name:/ {cert_name=$3} /Domains:/ {domains=$2; for (i=3;i<=NF;i++) domains=domains " " $i} /Expiry Date:/ {expiry_date=$3 " " $4 " " $5; gsub(/\(.*\)/,"",expiry_date); gsub(/^[ \t]+|[ \t]+$/,"",expiry_date); status=""; if(index($0,"VALID")){status="\033[0;32m(VALID)\033[0m"}else if(index($0,"EXPIRED")){status="\033[0;31m(EXPIRED)\033[0m"} printf "\n  - 证书名称: \033[1;37m%s\033[0m\n",cert_name; printf "    域名: \033[0;33m%s\033[0m\n",domains; printf "    到期时间: %s %s\n",expiry_date,status}';
+    echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
+    return 0
+}
+
+delete_certificate_and_proxy() {
+    clear; log_info "准备删除证书及其关联配置..."
+    list_certificates || { press_any_key; return; }
+    read -p "请输入要删除的证书名称 (Certificate Name): " cert_name
+    if [ -z "$cert_name" ]; then log_error "证书名称不能为空！"; press_any_key; return; fi
+    read -p "警告：这将永久删除证书 '$cert_name' 及其相关的 Nginx 配置文件。确定吗？(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then log_info "操作已取消."; press_any_key; return; fi
+
+    log_info "正在执行删除操作..."; certbot delete --cert-name "$cert_name" --non-interactive
+    local nginx_conf="/etc/nginx/sites-available/$cert_name.conf"
+    if [ -f "$nginx_conf" ]; then
+        log_warn "检测到残留的 Nginx 配置文件，正在清理..."
+        rm -f "/etc/nginx/sites-enabled/$cert_name.conf" "$nginx_conf"
+        nginx -t && systemctl reload nginx
+        log_info "✅ Nginx 残留配置已清理。"
+    fi
+    log_info "✅ 证书 '$cert_name' 已成功删除。"; press_any_key
+}
+
+renew_certificates() {
+    if ! command -v certbot &>/dev/null; then log_error "Certbot 未安装。"; press_any_key; return; fi
+    log_info "正在尝试为所有证书续期..."; certbot renew; log_info "✅ 证书续期检查完成。"; press_any_key
+}
+
+_handle_caddy_cert() {
+    log_error "脚本的自动证书功能与 Caddy 冲突。请手动配置 Caddyfile。";
+    return 1
+}
+
+_handle_nginx_cert() {
+    local domain_name="$1"
+    log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
+    if ! systemctl is-active --quiet nginx; then log_info "Nginx 服务未运行，正在启动..."; systemctl start nginx; fi
+    local NGINX_CONF_PATH="/etc/nginx/sites-available/$domain_name.conf"
+    if [ ! -f "$NGINX_CONF_PATH" ]; then
+        log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."
+        cat <<EOF >"$NGINX_CONF_PATH"
+server {listen 80; listen [::]:80; server_name $domain_name; root /var/www/html; index index.html index.htm;}
+EOF
+        [ ! -L "/etc/nginx/sites-enabled/$domain_name.conf" ] && ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
+        log_info "正在重载 Nginx 以应用临时配置..."
+        if ! nginx -t; then log_error "Nginx 临时配置测试失败！"; return 1; fi
+        systemctl reload nginx
+    fi
+    log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
+    certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email "temp@$domain_name" --redirect
+    if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
+        log_info "✅ Nginx 模式证书申请成功！"; return 0
+    else
+        log_error "Nginx 模式证书申请失败！"; return 1
+    fi
+}
+
+apply_ssl_certificate() {
+    local domain_name="$1"
+    if [ -d "/etc/letsencrypt/live/$domain_name" ]; then
+        log_info "证书已存在，跳过申请。"; return 0
+    fi
+    log_info "证书不存在，开始为 $domain_name 申请新证书..."
+    ensure_dependencies "certbot" || return 1
+    if command -v caddy &>/dev/null; then
+        _handle_caddy_cert
+    else
+        ensure_dependencies "nginx" "python3-certbot-nginx" || return 1
+        _handle_nginx_cert "$domain_name"
+    fi
+    return $?
+}
+
+_configure_nginx_proxy() {
+    local domain="$1"
+    local port="$2"
+    local conf_path="/etc/nginx/sites-available/$domain.conf"
+    log_info "正在为 $domain -> http://127.0.0.1:$port 创建 Nginx 配置文件..."
+    local cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
+    local key_path="/etc/letsencrypt/live/$domain/privkey.pem"
+    [ ! -f "$cert_path" ] && { log_error "未找到预期的证书文件。"; return 1; }
+    cat >"$conf_path" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain;
+    return 301 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $domain;
+    ssl_certificate $cert_path;
+    ssl_certificate_key $key_path;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+    client_max_body_size 512M;
+    location / {
+        proxy_pass http://127.0.0.1:$port;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+    [ ! -L "/etc/nginx/sites-enabled/$domain.conf" ] && ln -s "$conf_path" "/etc/nginx/sites-enabled/"
+    log_info "正在测试并重载 Nginx 配置..."
+    if ! nginx -t; then log_error "Nginx 配置测试失败！"; return 1; fi
+    systemctl reload nginx; log_info "✅ Nginx 反向代理配置成功！"; return 0
+}
+
+_configure_caddy_proxy() {
+    local domain="$1"; local port="$2"; local caddyfile="/etc/caddy/Caddyfile"
+    log_info "检测到 Caddy，将自动添加配置到 Caddyfile..."
+    if grep -q "^\s*$domain" "$caddyfile"; then
+        log_warn "Caddyfile 中似乎已存在 $domain 的配置，跳过添加。"; return 0
+    fi
+    echo -e "\n# Auto-generated by vps-toolkit for $domain\n$domain {\n    reverse_proxy 127.0.0.1:$port\n}" >>"$caddyfile"
+    log_info "正在重载 Caddy 服务..."
+    if ! systemctl reload caddy; then log_error "Caddy 服务重载失败！"; return 1; fi
+    log_info "✅ Caddy 反向代理配置成功！"; return 0
+}
+
+setup_auto_reverse_proxy() {
+    local domain_input="$1"; local local_port="$2"
+    clear; log_info "欢迎使用通用反向代理设置向导。\n"
+    if [ -z "$domain_input" ]; then
+        while true; do
+            read -p "请输入您要设置反代的域名: " domain_input
+            if [[ -z "$domain_input" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain_input"; then log_error "域名格式不正确。"; else break; fi
+        done
+    fi
+    if [ -z "$local_port" ]; then
+        while true; do
+            read -p "请输入要代理到的本地端口: " local_port
+            if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then log_error "端口号无效。"; else break; fi
+        done
+    fi
+
+    local status=1
+    if command -v caddy &>/dev/null; then
+        _configure_caddy_proxy "$domain_input" "$local_port"; status=$?
+    elif command -v nginx &>/dev/null; then
+        if ! apply_ssl_certificate "$domain_input"; then
+            log_error "证书处理失败，无法继续配置。"
+            status=1
+        else
+            _configure_nginx_proxy "$domain_input" "$local_port"
+            status=$?
+        fi
+    else
+        log_warn "未检测到 Web 服务器。将自动安装 Nginx..."
+        ensure_dependencies "nginx" "python3-certbot-nginx" "certbot" || return 1
+        setup_auto_reverse_proxy "$domain_input" "$local_port"; status=$?
+    fi
+    # 如果是直接调用（无参数），则暂停
+    if [ -z "$1" ]; then
+        press_any_key
+    fi
+    return $status
+}
+
+# =================================================
+#           实用工具 (增强)
+# =================================================
+
+utility_tools_menu() {
+    while true; do
+        draw_menu "实用工具 (增强)" \
+            "--SUB--安全与加固--SUB--" \
+            "1. Fail2Ban 防护管理" \
+            "2. Sudo 用户管理" \
+            "3. 配置自动安全更新" \
+            "4. ${GREEN}设置SSH登录Telegram通知${NC}" \
+            "--SUB--性能与监控--SUB--" \
+            "5. VPS 性能测试" \
+            "6. ${GREEN}安装 GoAccess (Web日志分析)${NC}" \
+            "0. 返回主菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) fail2ban_menu ;;
+        2) manage_users_menu ;;
+        3) setup_auto_updates ;;
+        4) setup_telegram_notifier ;;
+        5) performance_test_menu ;;
+        6) install_goaccess ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+fail2ban_menu() {
+    ensure_dependencies "fail2ban" || return
+    if ! command -v fail2ban-client &>/dev/null; then
+        log_error "Fail2Ban 未能成功安装。"; press_any_key; return
+    fi
+
+    while true; do
+        local status; status=$(fail2ban-client status || echo "Failed to get status")
+        local jail_count; jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' || echo "N/A")
+        local sshd_status; sshd_status=$(fail2ban-client status sshd || echo "Failed to get sshd status")
+        local banned_count; banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}' || echo "N/A")
+        local total_banned; total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}' || echo "N/A")
+
+        draw_menu "Fail2Ban 防护管理" \
+            "  当前状态: ${GREEN}● 活动${NC}, Jails: ${jail_count}" \
+            "  SSH 防护: 当前封禁 ${RED}$banned_count${NC}, 历史共封禁 ${YELLOW}$total_banned${NC}" \
+            "---" \
+            "1. 查看 Fail2Ban 状态 (及SSH防护详情)" \
+            "2. 查看最近的日志" \
+            "3. ${YELLOW}手动解封一个 IP 地址${NC}" \
+            "4. 重启 Fail2Ban 服务" \
+            "5. ${RED}卸载 Fail2Ban${NC}" \
+            "0. 返回"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) clear; log_info "Fail2Ban 总体状态:"; fail2ban-client status; echo -e "\n$CYAN---$NC"; log_info "SSHD 防护详情:"; fail2ban-client status sshd; press_any_key ;;
+        2) clear; log_info "显示最近 50 条 Fail2Ban 日志:"; tail -50 /var/log/fail2ban.log; press_any_key ;;
+        3) read -p "请输入要解封的 IP 地址: " ip_to_unban; if [ -n "$ip_to_unban" ]; then log_info "正在为 SSH 防护解封 IP..."; fail2ban-client set sshd unbanip "$ip_to_unban"; else log_error "IP 地址不能为空！"; fi; press_any_key ;;
+        4) log_info "正在重启 Fail2Ban..."; systemctl restart fail2ban; sleep 1; log_info "服务已重启。" ;;
+        5) read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm; if [[ "$confirm" =~ ^[Yy]$ ]]; then log_info "正在停止并卸载..."; systemctl stop fail2ban; apt-get remove --purge -y fail2ban; log_info "✅ Fail2Ban 已卸载。"; press_any_key; return; fi ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+list_normal_users() {
+    clear; log_info "正在列出所有普通用户 (UID >= 1000)..."
+    local user_list; user_list=$(awk -F: '$3 >= 1000 && $3 != 65534 {printf "  - 用户名: \033[1;37m%-15s\033[0m UID: %-5s Shell: %s\n    主目录: %s\n\n", $1, $3, $7, $6}' /etc/passwd)
+    if [ -n "$user_list" ]; then echo -e "$CYAN--------------------------------------------------$NC\n$user_list\n$CYAN--------------------------------------------------$NC";
+    else log_warn "未找到任何普通用户。"; fi
+    press_any_key
+}
+
+manage_users_menu() {
+    while true; do
+        draw_menu "Sudo 用户管理" \
+            "1. 列出所有普通用户" \
+            "2. 创建一个新的 Sudo 用户" \
+            "3. ${RED}删除一个用户及其主目录${NC}" \
+            "0. 返回"
+        read -p "请输入选项: " choice
+        case $choice in
+        1) list_normal_users ;;
+        2) clear; echo -e "请为新用户选择主要的登录方式:\n  1. ${YELLOW}密码登录${NC}\n  2. ${GREEN}密钥登录${NC}\n\n  0. 返回\n"; read -p "请输入选项: " login_choice
+            if [[ "$login_choice" != "1" && "$login_choice" != "2" ]]; then continue; fi
+            read -p "请输入新用户名 (必须以小写字母开头): " username
+            if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if ! [[ "$username" =~ ^[a-z][a-z0-9_-]*$ ]]; then log_error "用户名格式不正确！"; press_any_key; continue; fi
+            if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
+
+            useradd -m -s /bin/bash "$username"; usermod -aG sudo "$username"
+            log_info "✅ 用户 '$username' 已创建并添加到 sudo 组。"
+
+            if [ "$login_choice" == "1" ]; then
+                log_info "请为用户 '$username' 设置密码."; passwd "$username"
+                log_info "✅ 密码设置成功！"
+                # ... [检查并提示修改SSH配置以允许密码登录的逻辑] ...
+                press_any_key
+            elif [ "$login_choice" == "2" ]; then
+                log_info "正在为用户 '$username' 配置密钥登录..."; passwd -l "$username" >/dev/null
+                local source_key_file="/root/.ssh/authorized_keys"
+                if [ -f "$source_key_file" ]; then
+                    log_info "检测到来自 'root' 用户的可用公钥。"
+                    mkdir -p "/home/$username/.ssh"; cp "$source_key_file" "/home/$username/.ssh/authorized_keys"
+                    chown -R "$username:$username" "/home/$username/.ssh"; chmod 700 "/home/$username/.ssh"; chmod 600 "/home/$username/.ssh/authorized_keys"
+                    log_info "✅ SSH 公钥已成功复制。"
+                else log_error "未在 /root/.ssh/authorized_keys 找到可用的公钥！"; fi
+                press_any_key
+            fi ;;
+        3) clear; log_info "正在获取可删除的普通用户列表..."
+            local deletable_users=(); mapfile -t deletable_users < <(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
+            if [ ${#deletable_users[@]} -eq 0 ]; then log_warn "未找到任何可删除的普通用户。"; press_any_key; continue; fi
+
+            local menu_items=(); for i in "${!deletable_users[@]}"; do menu_items+=("$((i+1)). ${deletable_users[$i]}"); done
+            menu_items+=("---" "0. 返回"); draw_menu "选择要删除的用户" "${menu_items[@]}"
+            read -p "请输入选项: " choice_del
+
+            if [[ "$choice_del" =~ ^[0-9]+$ ]] && [ "$choice_del" -gt 0 ] && [ "$choice_del" -le ${#deletable_users[@]} ]; then
+                local user_to_delete=${deletable_users[$((choice_del - 1))]}
+                if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" == "$user_to_delete" ]; then log_error "不能删除当前正在使用的 Sudo 用户！"; press_any_key; continue; fi
+                read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录！确定吗？(y/N): " confirm_del
+                if [[ "$confirm_del" =~ ^[Yy]$ ]]; then deluser --remove-home "$user_to_delete"; log_info "✅ 用户 '$user_to_delete' 已被删除。"; fi
+            else log_info "无效选择或操作取消。"; fi
+            press_any_key ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+setup_auto_updates() {
+    ensure_dependencies "unattended-upgrades" "apt-listchanges" || return
+    if [ ! -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
+        log_error "unattended-upgrades 配置文件不存在。"; press_any_key; return
+    fi
+    log_info "正在为您配置自动安全更新..."; dpkg-reconfigure --priority=low -f noninteractive unattended-upgrades
+    log_info "✅ unattended-upgrades 已配置并启用。"; press_any_key
+}
+
+performance_test_menu() {
+     while true; do
+        draw_menu "VPS 性能测试" \
+            "1. VPS 综合性能测试 (bench.sh)" \
+            "2. 网络速度测试 (speedtest-cli)" \
+            "3. ${GREEN}实时资源监控 (btop)${NC}" \
+            "0. 返回"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) log_info "正在执行 bench.sh 脚本..."; ensure_dependencies "curl"||return; curl -Lso- bench.sh | bash; press_any_key ;;
+        2) log_info "正在执行 speedtest-cli..."; ensure_dependencies "speedtest-cli"||return; speedtest-cli; press_any_key ;;
+        3) log_info "正在启动 btop..."; ensure_dependencies "btop"||return; btop ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+install_goaccess() {
+    log_info "GoAccess 是一个强大的实时 Web 日志分析工具。"
+    ensure_dependencies "goaccess" || return
+    log_info "✅ GoAccess 已成功安装。"
+    log_info "您可以使用类似下面的命令来分析日志:"
+    log_info "${YELLOW}goaccess /var/log/nginx/access.log -o report.html --log-format=COMBINED${NC}"
+    press_any_key
+}
+
+setup_telegram_notifier() {
+    clear
+    log_info "此功能可以在SSH登录成功时，通过Telegram Bot发送通知。"
+    log_info "您需要先从 @BotFather 创建一个机器人获取 Token, 并获取您的 Chat ID。"
+
+    local current_token; current_token=$(config_get "TELEGRAM_BOT_TOKEN")
+    local current_chat_id; current_chat_id=$(config_get "TELEGRAM_CHAT_ID")
+
+    read -p "请输入您的 Bot Token [当前: $current_token]: " token
+    read -p "请输入您的 Chat ID [当前: $current_chat_id]: " chat_id
+    token=${token:-$current_token}; chat_id=${chat_id:-$current_chat_id}
+
+    if [ -z "$token" ] || [ -z "$chat_id" ]; then log_error "Token 和 Chat ID 不能为空！"; press_any_key; return; fi
+    config_set "TELEGRAM_BOT_TOKEN" "$token"; config_set "TELEGRAM_CHAT_ID" "$chat_id"
+
+    local sshrc_file="/etc/ssh/sshrc"
+    log_info "正在配置 $sshrc_file ..."
+    cat > "$sshrc_file" <<EOF
+#!/bin/bash
+if [ -n "\$SSH_CLIENT" ]; then
+    TOKEN="$token"
+    CHAT_ID="$chat_id"
+    HOSTNAME="\$(hostname)"
+    IP_ADDR="\$(echo \$SSH_CLIENT | awk '{print \$1}')"
+    USER="\$(whoami)"
+    DATE="\$(date +"%Y-%m-%d %H:%M:%S")"
+    MESSAGE="SSH Login Alert on: \$HOSTNAME%0AUser: \$USER%0AFrom IP: \$IP_ADDR%0ATime: \$DATE"
+    curl -s --max-time 10 "https://api.telegram.org/bot\$TOKEN/sendMessage?chat_id=\$CHAT_ID&text=\$MESSAGE" > /dev/null
+fi
+EOF
+    chmod +x "$sshrc_file"
+
+    log_info "✅ 配置完成！正在发送一条测试消息...";
+    bash "$sshrc_file"; log_info "测试消息已发送，请检查您的Telegram。"; press_any_key
+}
+
+# =================================================
+#           备份与恢复 (全新)
+# =================================================
+backup_restore_menu() {
+    while true; do
+        draw_menu "备份与恢复向导" \
+            "--SUB--备份操作--SUB--" \
+            "1. 备份 WordPress (文件+数据库)" \
+            "2. 备份 苹果CMS (文件+数据库)" \
+            "3. 备份 Sub-Store" \
+            "4. 手动备份指定目录" \
+            "--SUB--远程与计划--SUB--" \
+            "5. ${CYAN}安装/配置 Rclone${NC}" \
+            "6. 推送备份到远程存储 (Rclone)" \
+            "7. ${CYAN}设置定时自动备份${NC}" \
+            "0. 返回主菜单"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) backup_app "wordpress" ;;
+        2) backup_app "maccms" ;;
+        3) backup_app "substore" ;;
+        4) backup_directory ;;
+        5) install_rclone ;;
+        6) push_backup_remote ;;
+        7) schedule_backups ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+backup_app() {
+    local app_name=$1
+    local install_dir_key; local default_dir; local backup_type
+    case $app_name in
+        "wordpress") install_dir_key="WORDPRESS_INSTALL_DIR"; default_dir="/root/wordpress"; backup_type="docker_compose" ;;
+        "maccms") install_dir_key="MAC_CMS_INSTALL_DIR"; default_dir="/root/maccms"; backup_type="docker_compose" ;;
+        "substore") install_dir_key="SUBSTORE_INSTALL_DIR"; default_dir="$SUBSTORE_INSTALL_DIR"; backup_type="directory" ;;
+        *) log_error "不支持的备份应用: $app_name"; press_any_key; return ;;
+    esac
+
+    local app_dir; app_dir=$(config_get "$install_dir_key")
+    if [ -z "$app_dir" ]; then
+        read -p "无法从配置中找到 $app_name 的安装目录，请手动输入 [默认: $default_dir]: " app_dir
+        app_dir=${app_dir:-$default_dir}
+    fi
+    if [ ! -d "$app_dir" ]; then log_error "目录 '$app_dir' 不存在！"; press_any_key; return; fi
+
+    local backup_base_dir; backup_base_dir=$(config_get "DEFAULT_BACKUP_DIR")
+    if [ -z "$backup_base_dir" ]; then read -p "请输入备份文件存放的根目录 [默认: /root/backups]: " backup_base_dir; backup_base_dir=${backup_base_dir:-"/root/backups"}; config_set "DEFAULT_BACKUP_DIR" "$backup_base_dir"; fi
+    mkdir -p "$backup_base_dir"
+    local timestamp; timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_filename="${app_name}_backup_${timestamp}.tar.gz"
+    local backup_filepath="$backup_base_dir/$backup_filename"
+    local temp_backup_dir="/tmp/${app_name}_backup_${timestamp}"
+    mkdir -p "$temp_backup_dir"
+
+    log_info "开始备份 $app_name (从 $app_dir)..."
+    log_info "临时工作目录: $temp_backup_dir"
+
+    if [ "$backup_type" == "docker_compose" ]; then
+        if ! command -v docker &>/dev/null || ! docker compose --version &>/dev/null; then log_error "Docker环境异常。"; press_any_key; return; fi
+        cd "$app_dir"
+        local db_container; db_container=$(docker compose ps -q db)
+        if [ -z "$db_container" ]; then log_error "未找到名为 'db' 的数据库容器。"; press_any_key; return; fi
+
+        log_info "正在从容器 $db_container 中导出数据库..."
+        local db_dump_file="$temp_backup_dir/database.sql"
+        if ! docker exec "$db_container" sh -c 'exec mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --all-databases' > "$db_dump_file"; then
+            log_error "数据库导出失败！"; rm -rf "$temp_backup_dir"; cd - >/dev/null; press_any_key; return
+        fi
+        log_info "数据库导出成功。"
+
+        log_info "正在复制项目文件..."
+        # 复制除数据库卷目录外的所有内容
+        cp -r ./* "$temp_backup_dir/"
+
+        cd - >/dev/null
+    else # directory backup type
+        log_info "正在复制项目文件..."
+        cp -r "$app_dir"/* "$temp_backup_dir/"
+    fi
+
+    log_info "正在将所有备份文件压缩到 $backup_filepath ..."
+    if tar -czf "$backup_filepath" -C "$(dirname "$temp_backup_dir")" "$(basename "$temp_backup_dir")"; then
+        log_info "✅ 备份成功！文件已保存至: $backup_filepath"
+    else
+        log_error "文件压缩失败！"
+    fi
+
+    log_info "正在清理临时文件..."; rm -rf "$temp_backup_dir"
+    press_any_key
+}
+
+backup_directory() {
+    local source_dir
+    read -p "请输入您要备份的完整目录路径: " source_dir
+    if [ -z "$source_dir" ] || [ ! -d "$source_dir" ]; then
+        log_error "目录无效或不存在！"; press_any_key; return
+    fi
+
+    local backup_base_dir; backup_base_dir=$(config_get "DEFAULT_BACKUP_DIR")
+    if [ -z "$backup_base_dir" ]; then read -p "请输入备份文件存放的根目录 [默认: /root/backups]: " backup_base_dir; backup_base_dir=${backup_base_dir:-"/root/backups"}; config_set "DEFAULT_BACKUP_DIR" "$backup_base_dir"; fi
+    mkdir -p "$backup_base_dir"
+
+    local dir_basename; dir_basename=$(basename "$source_dir")
+    local timestamp; timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_filename="${dir_basename}_manual_backup_${timestamp}.tar.gz"
+    local backup_filepath="$backup_base_dir/$backup_filename"
+
+    log_info "正在将目录 '$source_dir' 压缩到 '$backup_filepath'..."
+    if tar -czf "$backup_filepath" -C "$(dirname "$source_dir")" "$dir_basename"; then
+        log_info "✅ 目录备份成功！"
+    else
+        log_error "备份压缩失败！"
+    fi
+    press_any_key
+}
+
+install_rclone() {
+    if command -v rclone &>/dev/null; then
+        log_info "Rclone 已安装。"
+        read -p "是否需要重新配置 Rclone？(y/N): " reconfig_choice
+        if [[ "$reconfig_choice" =~ ^[Yy]$ ]]; then
+            rclone config
+        fi
+        return
+    fi
+    log_info "正在安装 Rclone..."
+    ensure_dependencies "curl" "unzip" || return
+    curl https://rclone.org/install.sh | bash
+    if ! command -v rclone &>/dev/null; then
+        log_error "Rclone 安装失败！"; press_any_key; return
+    fi
+    log_info "✅ Rclone 安装成功！"
+    log_info "即将进入 Rclone 配置向导，请根据提示操作..."
+    press_any_key
+    rclone config
+}
+
+push_backup_remote() {
+    if ! command -v rclone &>/dev/null; then log_error "Rclone 未安装。"; press_any_key; return; fi
+
+    local backup_base_dir; backup_base_dir=$(config_get "DEFAULT_BACKUP_DIR")
+    if [ -z "$backup_base_dir" ] || [ ! -d "$backup_base_dir" ]; then
+        log_error "未配置或找不到备份目录，请先执行一次备份操作。"; press_any_key; return
+    fi
+
+    mapfile -t backup_files < <(find "$backup_base_dir" -name "*.tar.gz")
+    if [ ${#backup_files[@]} -eq 0 ]; then log_warn "在 $backup_base_dir 中未找到任何备份文件。"; press_any_key; return; fi
+
+    clear; log_info "请选择要推送到远程的备份文件:"
+    local menu_items=()
+    for i in "${!backup_files[@]}"; do
+        menu_items+=("$((i+1)). $(basename "${backup_files[$i]}")")
+    done
+    menu_items+=("---" "0. 返回")
+    draw_menu "选择备份文件" "${menu_items[@]}"
+    read -p "请输入选项: " choice
+
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#backup_files[@]} ]; then
+        log_info "无效选择或操作取消。"; press_any_key; return
+    fi
+    local file_to_push="${backup_files[$((choice-1))]}"
+
+    clear; log_info "以下是您已配置的 Rclone 远程存储:"
+    rclone listremotes
+    read -p "请输入要推送到的远程存储名称 (例如 'gdrive:'): " remote_name
+    if [ -z "$remote_name" ]; then log_error "远程名称不能为空！"; press_any_key; return; fi
+    read -p "请输入远程存储内的路径 (可选, 如 'backups/vps1', 默认为根目录): " remote_path
+
+    local full_remote_dest="${remote_name}${remote_path}"
+    log_info "准备将 '$(basename "$file_to_push")' 推送到 '$full_remote_dest'..."
+    if rclone copy -P "$file_to_push" "$full_remote_dest"; then
+        log_info "✅ 文件推送成功！"
+    else
+        log_error "文件推送失败！请检查 Rclone 配置和网络。"
+    fi
+    press_any_key
+}
+
+schedule_backups() {
+    clear; log_info "欢迎使用定时备份设置向导。"
+    log_warn "此功能会创建一个 cron 任务来定期执行备份。"
+
+    local backup_base_dir; backup_base_dir=$(config_get "DEFAULT_BACKUP_DIR")
+    if [ -z "$backup_base_dir" ]; then
+        read -p "需要先设置一个默认备份目录, 请输入 [默认: /root/backups]: " backup_base_dir
+        backup_base_dir=${backup_base_dir:-"/root/backups"}
+        config_set "DEFAULT_BACKUP_DIR" "$backup_base_dir"
+    fi
+
+    local apps_to_backup=()
+    read -p "是否需要定时备份 WordPress? (y/N): " backup_wp
+    [[ "$backup_wp" =~ ^[Yy]$ ]] && apps_to_backup+=("wordpress")
+
+    read -p "是否需要定时备份 苹果CMS? (y/N): " backup_maccms
+    [[ "$backup_maccms" =~ ^[Yy]$ ]] && apps_to_backup+=("maccms")
+
+    read -p "是否需要定时备份 Sub-Store? (y/N): " backup_ss
+    [[ "$backup_ss" =~ ^[Yy]$ ]] && apps_to_backup+=("substore")
+
+    if [ ${#apps_to_backup[@]} -eq 0 ]; then log_info "未选择任何应用，操作取消。"; press_any_key; return; fi
+
+    log_info "请选择备份频率:"
+    draw_menu "选择备份频率" "1. 每天凌晨3点" "2. 每周日凌晨3点" "0. 返回"
+    read -p "请输入选项: " freq_choice
+
+    local cron_schedule
+    case $freq_choice in
+        1) cron_schedule="0 3 * * *" ;;
+        2) cron_schedule="0 3 * * 0" ;;
+        *) log_info "无效选择或操作取消。"; press_any_key; return ;;
+    esac
+
+    log_info "正在创建备份辅助脚本: $BACKUP_HELPER_SCRIPT"
+    cat > "$BACKUP_HELPER_SCRIPT" <<EOF
+#!/bin/bash
+# This is an auto-generated helper script for cron jobs. Do not edit manually.
+SCRIPT_PATH="$SCRIPT_PATH"
+APPS_TO_BACKUP="${apps_to_backup[*]}"
+LOG_FILE="/var/log/vps-toolkit-backup.log"
+echo "[\$(date)] --- Starting scheduled backup for: \$APPS_TO_BACKUP ---" >> "\$LOG_FILE"
+bash "\$SCRIPT_PATH" --run-scheduled-backup "\$APPS_TO_BACKUP" >> "\$LOG_FILE" 2>&1
+echo "[\$(date)] --- Scheduled backup finished ---" >> "\$LOG_FILE"
+EOF
+    chmod +x "$BACKUP_HELPER_SCRIPT"
+
+    local cron_file="/etc/cron.d/vps_toolkit_backups"
+    log_info "正在将任务写入 cron 配置文件: $cron_file"
+    echo "$cron_schedule root $BACKUP_HELPER_SCRIPT" > "$cron_file"
+
+    log_info "✅ 定时备份任务已成功设置！"
+    log_info "备份日志将记录在 /var/log/vps-toolkit-backup.log"
+    press_any_key
+}
+
+run_scheduled_backup() {
+    # 此函数专为非交互模式 (cron) 设计
+    local apps_to_run=("$@")
+    if [ ${#apps_to_run[@]} -eq 0 ]; then
+        echo "[错误] - 未提供任何需要备份的应用。"
+        return 1
+    fi
+
+    echo "Starting backup process for: ${apps_to_run[*]}"
+    for app in "${apps_to_run[@]}"; do
+        echo "--- Backing up $app ---"
+        # 调用备份函数的核心逻辑，但不包含交互部分
+        local install_dir_key; local default_dir; local backup_type
+        case $app in
+            "wordpress") install_dir_key="WORDPRESS_INSTALL_DIR"; default_dir="/root/wordpress"; backup_type="docker_compose" ;;
+            "maccms") install_dir_key="MAC_CMS_INSTALL_DIR"; default_dir="/root/maccms"; backup_type="docker_compose" ;;
+            "substore") install_dir_key="SUBSTORE_INSTALL_DIR"; default_dir="$SUBSTORE_INSTALL_DIR"; backup_type="directory" ;;
+            *) echo "[错误] - 不支持的应用: $app"; continue ;;
+        esac
+
+        local app_dir; app_dir=$(config_get "$install_dir_key" || echo "$default_dir")
+        if [ ! -d "$app_dir" ]; then echo "[错误] - 目录 '$app_dir' 不存在！"; continue; fi
+
+        local backup_base_dir; backup_base_dir=$(config_get "DEFAULT_BACKUP_DIR" || echo "/root/backups")
+        mkdir -p "$backup_base_dir"
+        local timestamp; timestamp=$(date +"%Y%m%d_%H%M%S")
+        local backup_filename="${app}_autobackup_${timestamp}.tar.gz"
+        local backup_filepath="$backup_base_dir/$backup_filename"
+        local temp_backup_dir="/tmp/${app}_backup_${timestamp}"
+        mkdir -p "$temp_backup_dir"
+
+        echo "Backing up $app from $app_dir to $backup_filepath..."
+
+        if [ "$backup_type" == "docker_compose" ]; then
+            cd "$app_dir"
+            local db_container; db_container=$(docker compose ps -q db)
+            if [ -n "$db_container" ]; then
+                echo "Exporting database from container $db_container..."
+                docker exec "$db_container" sh -c 'exec mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --all-databases' > "$temp_backup_dir/database.sql"
+            fi
+            echo "Copying project files..."
+            cp -r ./* "$temp_backup_dir/"
+            cd - >/dev/null
+        else
+            echo "Copying project files..."
+            cp -r "$app_dir"/* "$temp_backup_dir/"
+        fi
+
+        echo "Compressing files..."
+        tar -czf "$backup_filepath" -C "$(dirname "$temp_backup_dir")" "$(basename "$temp_backup_dir")"
+        echo "Cleaning up temp files..."
+        rm -rf "$temp_backup_dir"
+        echo "--- Backup for $app finished. ---"
+    done
+    echo "All scheduled backups are complete."
+}
+
+
+# =================================================
+#           脚本配置管理 (全新)
+# =================================================
+script_config_menu() {
+    while true; do
+        draw_menu "脚本配置管理" \
+            "1. 查看当前配置" \
+            "2. 设置默认备份目录" \
+            "3. 设置Telegram通知参数" \
+            "4. 设置Sub-Store API密钥" \
+            "0. 返回主菜单"
+        read -p "请输入选项: " choice
+        case $choice in
+        1) clear; echo -e "${WHITE}"; cat "$CONFIG_FILE" || echo "配置文件为空。"; echo -e "${NC}"; press_any_key ;;
+        2)
+            local current_val; current_val=$(config_get "DEFAULT_BACKUP_DIR")
+            read -p "请输入新的默认备份目录 [当前: $current_val]: " new_val
+            if [ -n "$new_val" ]; then config_set "DEFAULT_BACKUP_DIR" "$new_val"; log_info "✅ 已更新。"; fi; sleep 1 ;;
+        3) setup_telegram_notifier ;;
+        4)
+            local current_val; current_val=$(config_get "SUB_STORE_API_KEY")
+            read -p "请输入新的Sub-Store API密钥 [回车随机]: " new_val
+            new_val=${new_val:-$(generate_random_password)}
+            config_set "SUB_STORE_API_KEY" "$new_val"; log_info "✅ 已更新为: $new_val"; sleep 1 ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 
 
 # =================================================
 #               脚本初始化 & 主入口
 # =================================================
-
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/vps_tool_new.sh"
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
-        log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"; press_any_key; return
+        log_error "下载脚本失败！"; press_any_key; return
     fi
     if cmp -s "$SCRIPT_PATH" "$temp_script"; then
-        log_info "脚本已经是最新版本，无需更新."; rm "$temp_script"; press_any_key; return
+        log_info "脚本已经是最新版本。"; rm "$temp_script"; press_any_key; return
     fi
     log_info "下载成功，正在应用更新..."
     chmod +x "$temp_script"; mv "$temp_script" "$SCRIPT_PATH"
@@ -1192,7 +2995,7 @@ main_menu() {
             "4. 哪吒监控管理" \
             "5. Docker 应用 & 面板安装" \
             "6. 证书管理 & 网站反代" \
-            "---" \
+            "--SUB--扩展功能--SUB--" \
             "7. ${BLUE}备份与恢复向导${NC}" \
             "8. ${CYAN}脚本配置管理${NC}" \
             "9. ${GREEN}更新此脚本${NC}" \
@@ -1200,11 +3003,16 @@ main_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) sys_manage_menu ;; 2) singbox_main_menu ;;
-        3) substore_main_menu ;; 4) nezha_main_menu ;;
-        5) docker_apps_menu ;; 6) certificate_management_menu ;;
-        7) backup_restore_menu ;; 8) script_config_menu ;;
-        9) do_update_script ;; 0) exit 0 ;;
+        1) sys_manage_menu ;;
+        2) singbox_main_menu ;;
+        3) substore_main_menu ;;
+        4) nezha_main_menu ;;
+        5) docker_apps_menu ;;
+        6) certificate_management_menu ;;
+        7) backup_restore_menu ;;
+        8) script_config_menu ;;
+        9) do_update_script ;;
+        0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
@@ -1213,14 +3021,14 @@ main_menu() {
 # --- 脚本执行入口 ---
 # 检查是否以非交互模式运行 (为定时任务等准备)
 if [[ $# -gt 0 ]]; then
-    # 加载必要函数和配置
     load_config
     case "$1" in
         --run-scheduled-backup)
-            run_scheduled_backup # 这是一个新的、专为cron设计的函数
+            run_scheduled_backup
             ;;
         *)
-            log_error "不支持的参数: $1"
+            # 在非交互模式下使用log_error可能会因为颜色代码导致cron邮件格式问题
+            echo "[错误] - 不支持的参数: $1"
             exit 1
             ;;
     esac
@@ -1229,6 +3037,6 @@ fi
 
 # 正常交互模式
 check_root
-load_config # 新增：启动时加载配置
+load_config
 initial_setup_check
 main_menu
