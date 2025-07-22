@@ -164,12 +164,24 @@ show_system_info() {
         return
     fi
     log_info "正在获取网络信息..."
+
+    # --- 修改开始 ---
+    # 智能检测网络环境，为纯IPv6环境下的curl准备参数
+    local curl_flag=""
     local ipv4_addr
     ipv4_addr=$(get_public_ip v4)
     local ipv6_addr
     ipv6_addr=$(get_public_ip v6)
-    if [ -z "$ipv4_addr" ]; then ipv4_addr="获取失败"; fi
+
+    if [ -z "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+        log_warn "检测到纯IPv6环境，部分网络查询将强制使用IPv6。"
+        curl_flag="-6"
+    fi
+    # --- 修改结束 ---
+
+    if [ -z "$ipv4_addr" ]; then ipv4_addr="无或获取失败"; fi
     if [ -z "$ipv6_addr" ]; then ipv6_addr="无或获取失败"; fi
+
     local hostname_info
     hostname_info=$(hostname)
     local os_info
@@ -196,14 +208,21 @@ show_system_info() {
     net_info_rx=$(vnstat --oneline | awk -F';' '{print $4}')
     local net_info_tx
     net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
-    local net_algo
-    net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+
+    # --- 修改开始 ---
+    # 检查IPv4参数文件是否存在，避免在纯IPv6环境下报错
+    local net_algo="N/A (纯IPv6环境)"
+    if [ -f "/proc/sys/net/ipv4/tcp_congestion_control" ]; then
+        net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+    fi
+    # --- 修改结束 ---
+
     local ip_info
-    ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
+    ip_info=$(curl -s $curl_flag http://ip-api.com/json | jq -r '.org')
     local dns_info
     dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
     local geo_info
-    geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
+    geo_info=$(curl -s $curl_flag http://ip-api.com/json | jq -r '.city + ", " + .country')
     local timezone
     timezone=$(timedatectl show --property=Timezone --value)
     local uptime_info
