@@ -437,20 +437,39 @@ dns_toolbox_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     DNS 工具箱                    $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        # --- 新增和修改的部分 ---
+        if command -v resolvectl &>/dev/null; then
+            local status_output
+            status_output=$(resolvectl status)
+            local current_dns_list
+            current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            if [ -z "$current_dns_list" ]; then
+                current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            fi
+            if [ -n "$current_dns_list" ]; then
+                 echo -e "$CYAN║$NC  当前DNS: $YELLOW$current_dns_list$NC $CYAN║$NC"
+            else
+                 echo -e "$CYAN║$NC  当前DNS: ${RED}读取失败$NC                               $CYAN║$NC"
+            fi
+        fi
+        # --- 修改结束 ---
+
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -471,8 +490,6 @@ dns_toolbox_menu() {
         esac
     done
 }
-
-
 # 备份DNS配置的函数
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
@@ -551,15 +568,25 @@ restore_dns_config() {
     press_any_key
 }
 # optimize_dns 函数 (现在它只负责手动选择的逻辑)
+# 替换: optimize_dns 函数
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
+    # --- 新增和修改的部分 ---
     if command -v resolvectl &>/dev/null; then
         local current_dns_list
-        current_dns_list=$(resolvectl status | grep -A 1 'Current DNS Server' | tail -n 1 | awk '{for(i=1;i<=NF;i++) printf "%s ", $i}')
+        local status_output
+        status_output=$(resolvectl status)
+        # 尝试两种常见的标签格式
+        current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+        if [ -z "$current_dns_list" ]; then
+            current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+        fi
     else
         current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
     fi
+    # --- 修改结束 ---
+
     if [ -n "$current_dns_list" ]; then log_info "当前系统使用的 DNS 服务器是: $YELLOW$current_dns_list$NC"; else log_warn "未检测到当前配置的 DNS 服务器。"; fi
     echo
 
@@ -3341,7 +3368,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
