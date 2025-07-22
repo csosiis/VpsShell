@@ -45,13 +45,11 @@
 Bash
 
 ```
-# 使用 curl
-bash <(curl -sL https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh)
+curl -o vps-toolkit.sh -L https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh
 ```
 
 ```
-# 或者使用 wget
-bash <(wget -qO- https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh)
+wget -O vps-toolkit.sh https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh
 ```
 
 **首次运行**，脚本会自动在 `/usr/local/bin/` 目录下创建一个名为 `sv` 的快捷方式。之后，您可以在任何路径下，通过输入以下命令来快速启动脚本：
