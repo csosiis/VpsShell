@@ -437,7 +437,7 @@ dns_toolbox_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     DNS 工具箱                     $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
         # --- 新增和修改的部分 ---
@@ -463,13 +463,13 @@ dns_toolbox_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                      $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}              $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                 $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -568,16 +568,13 @@ restore_dns_config() {
     press_any_key
 }
 # optimize_dns 函数 (现在它只负责手动选择的逻辑)
-# 替换: optimize_dns 函数
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
-    # --- 新增和修改的部分 ---
     if command -v resolvectl &>/dev/null; then
-        local current_dns_list
         local status_output
         status_output=$(resolvectl status)
-        # 尝试两种常见的标签格式
+        local current_dns_list
         current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
         if [ -z "$current_dns_list" ]; then
             current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
@@ -585,23 +582,32 @@ optimize_dns() {
     else
         current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
     fi
-    # --- 修改结束 ---
-
     if [ -n "$current_dns_list" ]; then log_info "当前系统使用的 DNS 服务器是: $YELLOW$current_dns_list$NC"; else log_warn "未检测到当前配置的 DNS 服务器。"; fi
     echo
 
     declare -A dns_providers
-    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
+    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:470t:4700::1001"
     dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
     dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
     dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
     local options=()
-    for provider in "${!dns_providers[@]}"; do options+=("$provider"); done
-    options+=("返回")
+    # 修改: 确保菜单顺序一致
+    options=("Cloudflare" "Google" "OpenDNS" "Quad9" "返回")
 
-    echo -e "请选择一个或多个 DNS 提供商 (可多选，用空格隔开):\n"
-    for i in "${!options[@]}"; do echo -e "   $((i + 1)). ${options[$i]}"; done
-    echo
+    # --- 菜单显示逻辑修改开始 ---
+    echo -e "$CYAN--- 请选择一个或多个 DNS 提供商 (可多选，用空格隔开) ---$NC\n"
+    for i in "${!options[@]}"; do
+        local option_name=${options[$i]}
+        if [ "$option_name" == "返回" ]; then
+            echo -e "$((i + 1)). $option_name\n"
+        else
+            local ips=${dns_providers[$option_name]}
+            # 使用 printf 精确控制格式
+            printf " %2d. %-12s\n" "$((i + 1))" "$option_name"
+            printf "      ${YELLOW}%s${NC}\n\n" "$ips"
+        fi
+    done
+    # --- 菜单显示逻辑修改结束 ---
 
     local choices
     read -p "请输入选项: " -a choices
