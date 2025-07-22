@@ -42,14 +42,12 @@
 
 使用 `curl` 或 `wget` 下载并运行脚本：
 
-Bash
-
 ```
-curl -o vps-toolkit.sh -L https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh
+curl -o vps-toolkit.sh -L https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh && chmod +x vps-toolkit.sh && ./vps-toolkit.sh
 ```
 
 ```
-wget -O vps-toolkit.sh https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh
+wget -O vps-toolkit.sh https://raw.githubusercontent.com/csosiis/VpsShell/main/shell/vps-toolkit.sh && chmod +x vps-toolkit.sh && ./vps-toolkit.sh
 ```
 
 **首次运行**，脚本会自动在 `/usr/local/bin/` 目录下创建一个名为 `sv` 的快捷方式。之后，您可以在任何路径下，通过输入以下命令来快速启动脚本：
@@ -221,13 +219,5 @@ wget https://github.com/spiritLHLS/ecs/raw/main/ecs.sh
 
 ```
 wget https://raw.githubusercontent.com/eooce/ssh_tool/main/ssh_tool.sh
-```
-
-
-
-#### GCP-Root登录
-
-```
-echo "root:n4fLA4z8frR04wV4gqvG" | sudo chpasswd root && sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config && sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config && sudo sed -i 's|^Include /etc/ssh/sshd_config.d/\*.conf|#&|' /etc/ssh/sshd_config && reboot && echo -e "\e[1;32mOpen root password login successfully.restart server......\033[0m" || echo -e "\e[1;91mFailed to open root password \033[0m"
 ```
 
