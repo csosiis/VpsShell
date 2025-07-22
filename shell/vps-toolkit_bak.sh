@@ -3,7 +3,7 @@
 #               全功能 VPS & 应用管理脚本
 #
 #   Author: Jcole
-#   Version: 3.0 (Optimized & Refactored)
+#   Version: 4.0 (Added Security, Benchmark & Backup Tools)
 #   Created: 2024
 #
 # =================================================================
@@ -164,12 +164,24 @@ show_system_info() {
         return
     fi
     log_info "正在获取网络信息..."
+
+    # --- 修改开始 ---
+    # 智能检测网络环境，为纯IPv6环境下的curl准备参数
+    local curl_flag=""
     local ipv4_addr
     ipv4_addr=$(get_public_ip v4)
     local ipv6_addr
     ipv6_addr=$(get_public_ip v6)
-    if [ -z "$ipv4_addr" ]; then ipv4_addr="获取失败"; fi
+
+    if [ -z "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+        log_warn "检测到纯IPv6环境，部分网络查询将强制使用IPv6。"
+        curl_flag="-6"
+    fi
+    # --- 修改结束 ---
+
+    if [ -z "$ipv4_addr" ]; then ipv4_addr="无或获取失败"; fi
     if [ -z "$ipv6_addr" ]; then ipv6_addr="无或获取失败"; fi
+
     local hostname_info
     hostname_info=$(hostname)
     local os_info
@@ -196,14 +208,21 @@ show_system_info() {
     net_info_rx=$(vnstat --oneline | awk -F';' '{print $4}')
     local net_info_tx
     net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
-    local net_algo
-    net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+
+    # --- 修改开始 ---
+    # 检查IPv4参数文件是否存在，避免在纯IPv6环境下报错
+    local net_algo="N/A (纯IPv6环境)"
+    if [ -f "/proc/sys/net/ipv4/tcp_congestion_control" ]; then
+        net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
+    fi
+    # --- 修改结束 ---
+
     local ip_info
-    ip_info=$(curl -s http://ip-api.com/json | jq -r '.org')
+    ip_info=$(curl -s $curl_flag http://ip-api.com/json | jq -r '.org')
     local dns_info
     dns_info=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ' ')
     local geo_info
-    geo_info=$(curl -s http://ip-api.com/json | jq -r '.city + ", " + .country')
+    geo_info=$(curl -s $curl_flag http://ip-api.com/json | jq -r '.city + ", " + .country')
     local timezone
     timezone=$(timedatectl show --property=Timezone --value)
     local uptime_info
@@ -279,9 +298,9 @@ change_hostname() {
     press_any_key
 }
 # =================================================
-#                 DNS 工具箱 (新增/重构)
+#                 DNS 工具箱
 # =================================================
-# 新增: 可复用的DNS配置应用函数
+# 可复用的DNS配置应用函数
 apply_dns_config() {
     local dns_string="$1"
 
@@ -320,31 +339,57 @@ apply_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-
-# 新增: 自动测试并推荐最佳DNS的函数
+# 替换: 自动测试并推荐最佳DNS的函数
 recommend_best_dns() {
     clear
     log_info "开始自动测试延迟以寻找最佳 DNS..."
 
-    declare -A dns_map
-    dns_map["Cloudflare"]="1.1.1.1"
-    dns_map["Google"]="8.8.8.8"
-    dns_map["Quad9"]="9.9.9.9"
-    dns_map["OpenDNS"]="208.67.222.222"
+    # 修改: 使用我们已有的包含v4和v6地址的数组
+    declare -A dns_providers
+    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
+    dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
+    dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
+    dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
+
+    # 新增: 检测服务器的网络能力
+    local ping_cmd="ping"
+    local ip_type="v4"
+    if ! get_public_ip v4 >/dev/null 2>&1 || [ -z "$(get_public_ip v4)" ]; then
+        log_warn "未检测到IPv4网络，将切换到IPv6模式进行测试。"
+        ping_cmd="ping6" # 在多数系统中是ping6, 有些是 ping -6
+        ip_type="v6"
+    fi
 
     declare -A results
+    declare -A ip_to_provider_map # 用于最后显示名字
     echo
-    for provider in "${!dns_map[@]}"; do
-        local ip=${dns_map[$provider]}
-        echo -ne "$CYAN  正在测试: $provider ($ip)...$NC"
+    for provider in "${!dns_providers[@]}"; do
+        local all_ips=${dns_providers[$provider]}
+        local ip_to_test=""
+
+        # 修改: 根据网络能力选择要测试的IP地址
+        if [ "$ip_type" == "v6" ]; then
+            ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i ~ /:/) {print $i; exit}}')
+        else
+            ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i !~ /:/) {print $i; exit}}')
+        fi
+
+        if [ -z "$ip_to_test" ]; then
+            log_warn "未能为 $provider 找到合适的 $ip_type 地址，跳过测试。"
+            continue
+        fi
+
+        ip_to_provider_map[$ip_to_test]=$provider
+        echo -ne "$CYAN  正在测试: $provider ($ip_to_test)...$NC"
         local avg_latency
-        avg_latency=$(ping -c 4 -W 1 "$ip" | tail -1 | awk -F '/' '{print $5}')
+        # 修改: 使用正确的ping命令
+        avg_latency=$($ping_cmd -c 4 -W 1 "$ip_to_test" | tail -1 | awk -F '/' '{print $5}')
 
         if [ -n "$avg_latency" ]; then
-            results[$ip]=$avg_latency
+            results[$ip_to_test]=$avg_latency
             echo -e "$GREEN  延迟: $avg_latency ms$NC"
         else
-            results[$ip]="9999" # 代表超时
+            results[$ip_to_test]="9999" # 代表超时
             echo -e "$RED  请求超时!$NC"
         fi
     done
@@ -358,37 +403,54 @@ recommend_best_dns() {
     done | sort -n)
 
     echo -e "$WHITE"
-    echo "$sorted_results" | awk '{printf "  %-15s -> %s ms\n", $2, $1}' | sed 's/9999/超时/'
+    # 修改: 同时显示提供商名称
+    echo "$sorted_results" | while read -r latency ip; do
+        provider_name=${ip_to_provider_map[$ip]}
+        printf "  %-12s (%-15s) -> %s ms\n" "$provider_name" "$ip" "$latency"
+    done | sed 's/9999/超时/'
     echo -e "$NC"
 
     # 提取最佳和备用DNS
-    local best_dns
-    best_dns=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
-    local backup_dns
-    backup_dns=$(echo "$sorted_results" | head -n 2 | tail -n 1 | awk '{print $2}')
+    local best_ip
+    best_ip=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
+    local backup_ip
+    backup_ip=$(echo "$sorted_results" | head -n 2 | tail -n 1 | awk '{print $2}')
 
-    if [ -z "$best_dns" ] || [ "$best_dns" == "$backup_dns" ]; then
-        log_error "测试失败，无法给出有效建议。"
+    if [ -z "$best_ip" ] || [ "$(echo "${results[$best_ip]}" | cut -d'.' -f1)" == "9999" ]; then
+        log_error "所有DNS服务器测试超时，无法给出有效建议。"
         press_any_key
         return
     fi
 
+    # 获取完整的DNS服务器列表（包括v4和v6）
+    local best_dns_provider_name=${ip_to_provider_map[$best_ip]}
+    local best_dns_full_list=${dns_providers[$best_dns_provider_name]}
+    local final_dns_to_apply="$best_dns_full_list"
+
     echo
     log_info "优化建议:"
-    echo -e "$GREEN  最佳DNS (主): $best_dns$NC"
-    echo -e "$YELLOW  备用DNS (备): $backup_dns$NC"
-    echo
+    echo -e "$GREEN  最佳DNS提供商 (主): $best_dns_provider_name ($best_ip)$NC"
 
+    if [ -n "$backup_ip" ] && [ "$best_ip" != "$backup_ip" ] && [ "$(echo "${results[$backup_ip]}" | cut -d'.' -f1)" != "9999" ]; then
+        local backup_dns_provider_name=${ip_to_provider_map[$backup_ip]}
+        local backup_dns_full_list=${dns_providers[$backup_dns_provider_name]}
+        final_dns_to_apply="$final_dns_to_apply $backup_dns_full_list"
+        echo -e "$YELLOW  备用DNS提供商 (备): $backup_dns_provider_name ($backup_ip)$NC"
+    fi
+
+    echo
     read -p "是否要立即应用此优化建议? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "正在应用推荐配置: 主=$best_dns, 备=$backup_dns"
-        apply_dns_config "$best_dns $backup_dns"
+        log_info "正在应用推荐配置..."
+        local unique_servers
+        unique_servers=$(echo "$final_dns_to_apply" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+        apply_dns_config "$unique_servers"
     else
         log_info "操作已取消。"
         press_any_key
     fi
 }
-# 新增: DNS 功能的子菜单
+# DNS 功能的子菜单
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     while true; do
@@ -396,18 +458,37 @@ dns_toolbox_menu() {
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        # --- 新增和修改的部分 ---
+        if command -v resolvectl &>/dev/null; then
+            local status_output
+            status_output=$(resolvectl status)
+            local current_dns_list
+            current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            if [ -z "$current_dns_list" ]; then
+                current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            fi
+            if [ -n "$current_dns_list" ]; then
+                 echo -e "$CYAN║$NC  当前DNS: $YELLOW$current_dns_list$NC $CYAN║$NC"
+            else
+                 echo -e "$CYAN║$NC  当前DNS: ${RED}读取失败$NC                               $CYAN║$NC"
+            fi
+        fi
+        # --- 修改结束 ---
+
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         if [ -f "$backup_file" ]; then
             echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                 $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -428,9 +509,7 @@ dns_toolbox_menu() {
         esac
     done
 }
-
-
-# 新增: 备份DNS配置的函数
+# 备份DNS配置的函数
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     log_info "开始备份当前 DNS 配置..."
@@ -464,7 +543,7 @@ backup_dns_config() {
     press_any_key
 }
 
-# 新增: 恢复DNS配置的函数
+# 恢复DNS配置的函数
 restore_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     if [ ! -f "$backup_file" ]; then
@@ -507,13 +586,18 @@ restore_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-# 替换: optimize_dns 函数 (现在它只负责手动选择的逻辑)
+# optimize_dns 函数 (现在它只负责手动选择的逻辑)
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
     if command -v resolvectl &>/dev/null; then
+        local status_output
+        status_output=$(resolvectl status)
         local current_dns_list
-        current_dns_list=$(resolvectl status | grep -A 1 'Current DNS Server' | tail -n 1 | awk '{for(i=1;i<=NF;i++) printf "%s ", $i}')
+        current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+        if [ -z "$current_dns_list" ]; then
+            current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+        fi
     else
         current_dns_list=$(grep '^nameserver' /etc/resolv.conf | awk '{printf "%s ", $2}')
     fi
@@ -521,17 +605,28 @@ optimize_dns() {
     echo
 
     declare -A dns_providers
-    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
+    dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:470t:4700::1001"
     dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
     dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
     dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
     local options=()
-    for provider in "${!dns_providers[@]}"; do options+=("$provider"); done
-    options+=("返回")
+    # 修改: 确保菜单顺序一致
+    options=("Cloudflare" "Google" "OpenDNS" "Quad9" "返回")
 
-    echo -e "请选择一个或多个 DNS 提供商 (可多选，用空格隔开):\n"
-    for i in "${!options[@]}"; do echo -e "   $((i + 1)). ${options[$i]}"; done
-    echo
+    # --- 菜单显示逻辑修改开始 ---
+    echo -e "$CYAN--- 请选择一个或多个 DNS 提供商 (可多选，用空格隔开) ---$NC\n"
+    for i in "${!options[@]}"; do
+        local option_name=${options[$i]}
+        if [ "$option_name" == "返回" ]; then
+            echo -e "$((i + 1)). $option_name\n"
+        else
+            local ips=${dns_providers[$option_name]}
+            # 使用 printf 精确控制格式
+            printf " %2d. %-12s\n" "$((i + 1))" "$option_name"
+            printf "      ${YELLOW}%s${NC}\n\n" "$ips"
+        fi
+    done
+    # --- 菜单显示逻辑修改结束 ---
 
     local choices
     read -p "请输入选项: " -a choices
@@ -555,32 +650,152 @@ optimize_dns() {
 
     apply_dns_config "$servers_to_apply"
 }
-set_network_priority() {
+# 新增: 自动测试并推荐优先级的函数
+test_and_recommend_priority() {
     clear
-    echo -e "请选择网络优先级设置:\n"
-    echo -e "1. IPv6 优先\n"
-    echo -e "2. IPv4 优先\n"
-    echo -e "0. 返回\n"
-    read -p "请输入选择: " choice
-    case $choice in
-    1)
-        log_info "正在设置 IPv6 优先..."
-        sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
-        log_info "✅ IPv6 优先已设置。"
-        ;;
-    2)
-        log_info "正在设置 IPv4 优先..."
-        if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-            echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+    log_info "开始进行 IPv4 与 IPv6 网络质量测试..."
+
+    # 检查服务器是否同时拥有 v4 和 v6 地址
+    local ipv4_addr
+    ipv4_addr=$(get_public_ip v4)
+    local ipv6_addr
+    ipv6_addr=$(get_public_ip v6)
+
+    if [ -z "$ipv4_addr" ] || [ -z "$ipv6_addr" ]; then
+        log_error "您的服务器不是一个标准的双栈网络环境，无法进行有意义的比较。"
+        press_any_key
+        return
+    fi
+
+    local test_url="http://cachefly.cachefly.net/100kb.test"
+    log_info "将通过两种协议分别连接测试点: $test_url"
+
+    local time_v4 time_v6
+
+    log_info "正在测试 IPv4 连接速度..."
+    # 使用 timeout 防止命令卡死
+    time_v4=$(timeout 10 curl -4 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    log_info "正在测试 IPv6 连接速度..."
+    time_v6=$(timeout 10 curl -6 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    echo
+    log_info "测试结果:"
+
+    local recommendation=""
+
+    # 检查IPv4测试结果
+    if [ -n "$time_v4" ] && [ "$(echo "$time_v4 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv4 连接耗时: $time_v4 秒$NC"
+    else
+        time_v4="999" # 标记为失败
+        echo -e "$RED  IPv4 连接失败或超时$NC"
+    fi
+
+    # 检查IPv6测试结果
+    if [ -n "$time_v6" ] && [ "$(echo "$time_v6 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv6 连接耗时: $time_v6 秒$NC"
+    else
+        time_v6="999" # 标记为失败
+        echo -e "$RED  IPv6 连接失败或超时$NC"
+    fi
+
+    echo
+    # 分析结果并给出建议
+    if [ "$time_v6" == "999" ] && [ "$time_v4" != "999" ]; then
+        recommendation="IPv4"
+        log_warn "测试发现 IPv6 连接存在问题，强烈建议您设置为【IPv4 优先】以保证网络稳定性。"
+    elif [ "$time_v4" == "999" ] && [ "$time_v6" != "999" ]; then
+        recommendation="IPv6"
+        log_info "测试发现 IPv4 连接存在问题，您的网络环境可能更适合【IPv6 优先】。"
+    elif [ "$time_v4" != "999" ] && [ "$time_v6" != "999" ]; then
+        # 如果IPv6比IPv4慢超过30%，则推荐用IPv4，否则默认推荐IPv6
+        if (( $(echo "$time_v6 > $time_v4 * 1.3" | bc -l) )); then
+            recommendation="IPv4"
+            log_info "测试结果表明，您的 IPv4 连接速度明显优于 IPv6，推荐设置为【IPv4 优先】。"
+        else
+            recommendation="IPv6"
+            log_info "测试结果表明，您的 IPv6 连接质量良好，推荐设置为【IPv6 优先】以使用现代网络。"
         fi
-        log_info "✅ IPv4 优先已设置。"
-        ;;
-    0) return 0 ;;
-    *) log_error "无效选择。" ;;
-    esac
+    else
+        log_error "两种协议均连接失败，无法给出建议。请检查您的服务器网络配置。"
+        press_any_key
+        return
+    fi
+
+    echo
+    read -p "是否要采纳此建议并应用设置? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        if [ "$recommendation" == "IPv6" ]; then
+            log_info "正在设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+        elif [ "$recommendation" == "IPv4" ]; then
+            log_info "正在设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+        fi
+    else
+        log_info "操作已取消。"
+    fi
     press_any_key
 }
 
+# 新增: 网络优先级设置的子菜单
+network_priority_menu() {
+    while true; do
+        clear
+        local current_setting="未知"
+        if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+             current_setting="${GREEN}IPv6 优先${NC}"
+        else
+             current_setting="${YELLOW}IPv4 优先${NC}"
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            test_and_recommend_priority
+            ;;
+        2)
+            log_info "正在手动设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+            press_any_key
+            ;;
+        3)
+            log_info "正在手动设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+            press_any_key
+            ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -2256,7 +2471,7 @@ _install_docker_and_compose() {
     os_id=$(. /etc/os-release && echo "$ID")
     echo \
         "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$os_id \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     log_info "正在更新软件包列表以识别新的 Docker 仓库..."
     set -e
     apt-get update -y
@@ -2980,6 +3195,455 @@ setup_auto_reverse_proxy() {
     fi
     return $status
 }
+# =================================================
+#           实用工具 (增强)
+# =================================================
+
+# --- Fail2Ban ---
+fail2ban_menu() {
+    ensure_dependencies "fail2ban"
+    if ! command -v fail2ban-client &>/dev/null; then
+        log_error "Fail2Ban 未能成功安装，请检查依赖。"
+        press_any_key
+        return
+    fi
+
+    while true; do
+        clear
+        local status
+        status=$(fail2ban-client status)
+        local jail_count
+        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
+        local sshd_status
+        sshd_status=$(fail2ban-client status sshd)
+        local banned_count
+        banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
+        local total_banned
+        total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            clear
+            log_info "Fail2Ban 总体状态:"
+            fail2ban-client status
+            echo -e "\n$CYAN----------------------------------------------------$NC"
+            log_info "SSHD 防护详情:"
+            fail2ban-client status sshd
+            press_any_key
+            ;;
+        2)
+            clear
+            log_info "显示最近 50 条 Fail2Ban 日志:"
+            tail -50 /var/log/fail2ban.log
+            press_any_key
+            ;;
+        3)
+            read -p "请输入要解封的 IP 地址: " ip_to_unban
+            if [ -n "$ip_to_unban" ]; then
+                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
+                fail2ban-client set sshd unbanip "$ip_to_unban"
+            else
+                log_error "IP 地址不能为空！"
+            fi
+            press_any_key
+            ;;
+        4)
+            log_info "正在重启 Fail2Ban..."
+            systemctl restart fail2ban
+            sleep 1
+            log_info "服务已重启。"
+            ;;
+        5)
+            read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                log_info "正在停止并卸载 Fail2Ban..."
+                systemctl stop fail2ban
+                apt-get remove --purge -y fail2ban
+                log_info "✅ Fail2Ban 已卸载。"
+                press_any_key
+                return
+            fi
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- 用户管理 ---
+manage_users_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}创建一个新的 Sudo 用户$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            read -p "请输入新用户名: " username
+            if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
+
+            adduser "$username"
+            usermod -aG sudo "$username"
+            log_info "✅ 用户 '$username' 已创建并添加到 sudo 组。"
+
+            read -p "是否要将 root 的 SSH 公钥复制给新用户 '$username'？ (y/N): " copy_key
+            if [[ "$copy_key" =~ ^[Yy]$ ]]; then
+                if [ -f "/root/.ssh/authorized_keys" ]; then
+                    mkdir -p "/home/$username/.ssh"
+                    cp "/root/.ssh/authorized_keys" "/home/$username/.ssh/"
+                    chown -R "$username:$username" "/home/$username/.ssh"
+                    chmod 700 "/home/$username/.ssh"
+                    chmod 600 "/home/$username/.ssh/authorized_keys"
+                    log_info "✅ SSH 公钥已成功复制。"
+                    log_info "您现在可以使用密钥通过 'ssh $username@<服务器IP>' 登录。"
+                else
+                    log_warn "未找到 /root/.ssh/authorized_keys 文件，跳过复制。"
+                fi
+            fi
+            press_any_key
+            ;;
+        2)
+            read -p "请输入要删除的用户名: " user_to_delete
+            if [ -z "$user_to_delete" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if [ "$user_to_delete" == "root" ]; then log_error "不能删除 root 用户！"; press_any_key; continue; fi
+            if ! id "$user_to_delete" &>/dev/null; then log_error "用户 '$user_to_delete' 不存在！"; press_any_key; continue; fi
+
+            read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录下的所有文件！确定吗？(y/N): " confirm_del
+            if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
+                deluser --remove-home "$user_to_delete"
+                log_info "✅ 用户 '$user_to_delete' 已被删除。"
+            else
+                log_info "操作已取消。"
+            fi
+            press_any_key
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+# --- 自动更新 ---
+setup_auto_updates() {
+    ensure_dependencies "unattended-upgrades" "apt-listchanges"
+    if [ ! -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
+        log_error "unattended-upgrades 配置文件不存在，配置失败。"
+        press_any_key
+        return
+    fi
+    log_info "正在为您配置自动安全更新..."
+    dpkg-reconfigure --priority=low -f noninteractive unattended-upgrades
+    log_info "✅ unattended-upgrades 已配置并启用。"
+    log_warn "系统现在会自动安装重要的安全更新。"
+    press_any_key
+}
+
+# --- 性能测试 ---
+performance_test_menu() {
+     while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 VPS 性能测试                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            log_info "正在执行 bench.sh 脚本..."
+            ensure_dependencies "curl"
+            curl -Lso- bench.sh | bash
+            press_any_key
+            ;;
+        2)
+            log_info "正在执行 speedtest-cli..."
+            ensure_dependencies "speedtest-cli"
+            speedtest-cli
+            press_any_key
+            ;;
+        3)
+            log_info "正在启动 btop..."
+            ensure_dependencies "btop"
+            btop
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- 文件备份 ---
+backup_directory() {
+    clear
+    log_info "开始手动备份指定目录..."
+
+    local source_dir
+    read -p "请输入需要备份的目录的绝对路径 (例如 /var/www): " source_dir
+    if [ ! -d "$source_dir" ]; then
+        log_error "目录 '$source_dir' 不存在或不是一个目录！"
+        press_any_key
+        return
+    fi
+
+    local backup_dest
+    read -p "请输入备份文件存放的目标目录 [默认: /root]: " backup_dest
+    backup_dest=${backup_dest:-"/root"}
+    if [ ! -d "$backup_dest" ]; then
+        log_warn "目标目录 '$backup_dest' 不存在，将尝试创建它..."
+        mkdir -p "$backup_dest"
+        if [ $? -ne 0 ]; then
+            log_error "创建目标目录失败！"
+            press_any_key
+            return
+        fi
+    fi
+
+    local dir_name
+    dir_name=$(basename "$source_dir")
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
+    local full_backup_path="$backup_dest/$backup_filename"
+
+    log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
+    if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
+        log_info "✅ 备份成功！文件大小: $(du -sh "$full_backup_path" | awk '{print $1}')"
+    else
+        log_error "备份过程中发生错误！"
+        rm -f "$full_backup_path"
+    fi
+
+    press_any_key
+}
+# 新增: 自动测试并推荐优先级的函数
+test_and_recommend_priority() {
+    clear
+    log_info "开始进行 IPv4 与 IPv6 网络质量测试..."
+
+    # 检查服务器是否同时拥有 v4 和 v6 地址
+    local ipv4_addr
+    ipv4_addr=$(get_public_ip v4)
+    local ipv6_addr
+    ipv6_addr=$(get_public_ip v6)
+
+    if [ -z "$ipv4_addr" ] || [ -z "$ipv6_addr" ]; then
+        log_error "您的服务器不是一个标准的双栈网络环境，无法进行有意义的比较。"
+        press_any_key
+        return
+    fi
+
+    local test_url="http://cachefly.cachefly.net/100kb.test"
+    log_info "将通过两种协议分别连接测试点: $test_url"
+
+    local time_v4 time_v6
+
+    log_info "正在测试 IPv4 连接速度..."
+    # 使用 timeout 防止命令卡死
+    time_v4=$(timeout 10 curl -4 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    log_info "正在测试 IPv6 连接速度..."
+    time_v6=$(timeout 10 curl -6 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    echo
+    log_info "测试结果:"
+
+    local recommendation=""
+
+    # 检查IPv4测试结果
+    if [ -n "$time_v4" ] && [ "$(echo "$time_v4 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv4 连接耗时: $time_v4 秒$NC"
+    else
+        time_v4="999" # 标记为失败
+        echo -e "$RED  IPv4 连接失败或超时$NC"
+    fi
+
+    # 检查IPv6测试结果
+    if [ -n "$time_v6" ] && [ "$(echo "$time_v6 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv6 连接耗时: $time_v6 秒$NC"
+    else
+        time_v6="999" # 标记为失败
+        echo -e "$RED  IPv6 连接失败或超时$NC"
+    fi
+
+    echo
+    # 分析结果并给出建议
+    if [ "$time_v6" == "999" ] && [ "$time_v4" != "999" ]; then
+        recommendation="IPv4"
+        log_warn "测试发现 IPv6 连接存在问题，强烈建议您设置为【IPv4 优先】以保证网络稳定性。"
+    elif [ "$time_v4" == "999" ] && [ "$time_v6" != "999" ]; then
+        recommendation="IPv6"
+        log_info "测试发现 IPv4 连接存在问题，您的网络环境可能更适合【IPv6 优先】。"
+    elif [ "$time_v4" != "999" ] && [ "$time_v6" != "999" ]; then
+        # 如果IPv6比IPv4慢超过30%，则推荐用IPv4，否则默认推荐IPv6
+        if (( $(echo "$time_v6 > $time_v4 * 1.3" | bc -l) )); then
+            recommendation="IPv4"
+            log_info "测试结果表明，您的 IPv4 连接速度明显优于 IPv6，推荐设置为【IPv4 优先】。"
+        else
+            recommendation="IPv6"
+            log_info "测试结果表明，您的 IPv6 连接质量良好，推荐设置为【IPv6 优先】以使用现代网络。"
+        fi
+    else
+        log_error "两种协议均连接失败，无法给出建议。请检查您的服务器网络配置。"
+        press_any_key
+        return
+    fi
+
+    echo
+    read -p "是否要采纳此建议并应用设置? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        if [ "$recommendation" == "IPv6" ]; then
+            log_info "正在设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+        elif [ "$recommendation" == "IPv4" ]; then
+            log_info "正在设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+        fi
+    else
+        log_info "操作已取消。"
+    fi
+    press_any_key
+}
+
+# 新增: 网络优先级设置的子菜单
+network_priority_menu() {
+    while true; do
+        clear
+        local current_setting="未知"
+        if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+             current_setting="${GREEN}IPv6 优先${NC}"
+        else
+             current_setting="${YELLOW}IPv4 优先${NC}"
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            test_and_recommend_priority
+            ;;
+        2)
+            log_info "正在手动设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+            press_any_key
+            ;;
+        3)
+            log_info "正在手动设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+            press_any_key
+            ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# 实用工具主菜单
+utility_tools_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE性能与备份$CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) fail2ban_menu ;;
+        2) manage_users_menu ;;
+        3) setup_auto_updates ;;
+        4) performance_test_menu ;;
+        5) backup_directory ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
 
 sys_manage_menu() {
     while true; do
@@ -3021,8 +3685,8 @@ sys_manage_menu() {
         1) show_system_info ;;
         2) clean_system ;;
         3) change_hostname ;;
-        4) dns_toolbox_menu ;; # 调用新的子菜单
-        5) set_network_priority ;;
+        4) dns_toolbox_menu ;;
+        5) network_priority_menu ;;
         6) manage_root_login ;;
         7) set_timezone ;;
         8) change_ssh_port ;;
@@ -3331,7 +3995,9 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}证书管理 & 网站反代$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. ${GREEN}实用工具 (增强)${NC}                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3349,6 +4015,7 @@ main_menu() {
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
         6) certificate_management_menu ;;
+        7) utility_tools_menu ;;
         9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
@@ -3359,5 +4026,6 @@ main_menu() {
 
 # --- 脚本执行入口 ---
 check_root
+# 首次运行时不检查，因为可能会立即安装依赖导致冲突
 initial_setup_check
 main_menu
