@@ -153,7 +153,61 @@ ensure_dependencies() {
 # =================================================
 #                系统管理 (sys_manage_menu)
 # =================================================
+sys_manage_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 修改 SSH 端口                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 设置系统时区                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. DNS 工具箱 (优化/备份/恢复)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 (增强)${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
+        read -p "请输入选项: " choice
+        case $choice in
+        1) show_system_info ;;
+        2) clean_system ;;
+        3) change_hostname ;;
+        4) manage_root_login ;;
+        5) change_ssh_port ;;
+        6) set_timezone ;;
+        7) network_priority_menu ;;
+        8) dns_toolbox_menu ;;
+        9) manage_bbr ;;
+        10) install_warp ;;
+        11) utility_tools_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 show_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
@@ -344,6 +398,9 @@ recommend_best_dns() {
     clear
     log_info "开始自动测试延迟以寻找最佳 DNS..."
 
+    # 新增: 确保 ping 命令已安装
+    ensure_dependencies "iputils-ping"
+
     # 修改: 使用我们已有的包含v4和v6地址的数组
     declare -A dns_providers
     dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
@@ -488,7 +545,7 @@ dns_toolbox_menu() {
         if [ -f "$backup_file" ]; then
             echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                 $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
         fi
 
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3294,8 +3351,29 @@ fail2ban_menu() {
         esac
     done
 }
+# 新增: 列出所有普通用户的函数
+list_normal_users() {
+    clear
+    log_info "正在列出所有普通用户 (UID >= 1000)..."
 
-# --- 用户管理 ---
+    # 使用 awk 解析 /etc/passwd 文件，格式化输出
+    local user_list
+    user_list=$(awk -F: '$3 >= 1000 && $3 != 65534 {
+        printf "  - 用户名: \033[1;37m%-15s\033[0m UID: %-5s Shell: %s\n", $1, $3, $7
+        printf "    主目录: %s\n\n", $6
+    }' /etc/passwd)
+
+    if [ -n "$user_list" ]; then
+        echo -e "$CYAN--------------------------------------------------------------------$NC"
+        echo -e "$user_list"
+        echo -e "$CYAN--------------------------------------------------------------------$NC"
+    else
+        log_warn "未找到任何普通用户。"
+    fi
+
+    press_any_key
+}
+# 最终修复版: manage_users_menu 函数
 manage_users_menu() {
     while true; do
         clear
@@ -3303,9 +3381,11 @@ manage_users_menu() {
         echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}创建一个新的 Sudo 用户$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 列出所有普通用户                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 创建一个新的 Sudo 用户                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
@@ -3314,35 +3394,159 @@ manage_users_menu() {
         read -p "请输入选项: " choice
         case $choice in
         1)
-            read -p "请输入新用户名: " username
+            list_normal_users
+            ;;
+        2)
+            clear
+            echo -e "请为新用户选择主要的登录方式:\n"
+            echo -e "  1. ${YELLOW}密码登录$NC (创建一个带密码的新用户)"
+            echo -e "  2. ${GREEN}密钥登录$NC (创建用户, 并从现有用户复制公钥)"
+            echo -e "\n  0. 返回\n"
+            read -p "请输入选项: " login_choice
+
+            if [[ "$login_choice" != "1" && "$login_choice" != "2" ]]; then
+                continue
+            fi
+
+            read -p "请输入新用户名 (必须以小写字母开头): " username
             if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if ! [[ "$username" =~ ^[a-z][a-z0-9_-]*$ ]]; then log_error "用户名格式不正确！"; press_any_key; continue; fi
             if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
 
-            adduser "$username"
+            useradd -m -s /bin/bash "$username"
+            if [ $? -ne 0 ]; then
+                log_error "创建用户 '$username' 失败！"
+                press_any_key
+                continue
+            fi
             usermod -aG sudo "$username"
             log_info "✅ 用户 '$username' 已创建并添加到 sudo 组。"
 
-            read -p "是否要将 root 的 SSH 公钥复制给新用户 '$username'？ (y/N): " copy_key
-            if [[ "$copy_key" =~ ^[Yy]$ ]]; then
-                if [ -f "/root/.ssh/authorized_keys" ]; then
+            if [ "$login_choice" == "1" ]; then
+                log_info "请为用户 '$username' 设置密码。"
+                passwd "$username"
+                if [ $? -eq 0 ]; then
+                    log_info "✅ 密码设置成功！"
+
+                    local ssh_config_file="/etc/ssh/sshd_config"
+                    if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file" || grep -q -E "^\s*AuthenticationMethods"; then
+                        echo
+                        log_warn "检测到服务器当前可能禁止或限制密码登录。"
+                        read -p "是否要自动修改SSH配置以确保密码登录可用? (Y/n): " allow_pwd
+                        if [[ ! "$allow_pwd" =~ ^[Nn]$ ]]; then
+                            sed -i -E 's/^\s*#?\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/' "$ssh_config_file"
+                            if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file"; then
+                                echo "" >> "$ssh_config_file"; echo "PasswordAuthentication yes" >> "$ssh_config_file"
+                            fi
+                            sed -i -E 's/^(\s*AuthenticationMethods\s+.*)/#\1/' "$ssh_config_file"
+
+                            log_info "正在重启SSH服务以应用更改..."
+                            if systemctl restart ssh || systemctl restart sshd; then # 修正: 优先尝试 ssh
+                                log_info "✅ SSH服务已重启, 密码登录应该已开启。"
+                            else
+                                log_error "SSH服务重启失败！请手动检查。"
+                            fi
+                        else
+                            log_warn "您选择了不修改配置，新用户 '$username' 可能无法通过SSH登录。"
+                        fi
+                    fi
+                else
+                    log_error "密码设置失败或被取消！"
+                fi
+                press_any_key
+
+            elif [ "$login_choice" == "2" ]; then
+                # ... 密钥登录的代码 ...
+                log_info "正在为用户 '$username' 配置密钥登录..."
+                passwd -l "$username" >/dev/null # 锁定密码
+
+                local source_user=""
+                local source_key_file=""
+                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ] && [ -f "/home/$SUDO_USER/.ssh/authorized_keys" ]; then
+                    source_user="$SUDO_USER"
+                    source_key_file="/home/$source_user/.ssh/authorized_keys"
+                else
+                    local normal_users=$(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
+                    for user in $normal_users; do
+                        if [ -f "/home/$user/.ssh/authorized_keys" ]; then
+                            source_user="$user"
+                            source_key_file="/home/$user/.ssh/authorized_keys"
+                            break
+                        fi
+                    done
+                fi
+                if [ -z "$source_user" ] && [ -f "/root/.ssh/authorized_keys" ]; then
+                    source_user="root"
+                    source_key_file="/root/.ssh/authorized_keys"
+                fi
+
+                if [ -n "$source_user" ]; then
+                    log_info "检测到来自用户 '$source_user' 的可用公钥。"
                     mkdir -p "/home/$username/.ssh"
-                    cp "/root/.ssh/authorized_keys" "/home/$username/.ssh/"
+                    cp "$source_key_file" "/home/$username/.ssh/authorized_keys"
                     chown -R "$username:$username" "/home/$username/.ssh"
                     chmod 700 "/home/$username/.ssh"
                     chmod 600 "/home/$username/.ssh/authorized_keys"
                     log_info "✅ SSH 公钥已成功复制。"
-                    log_info "您现在可以使用密钥通过 'ssh $username@<服务器IP>' 登录。"
+
+                    echo
+                    read -p "是否要配置sudo使其无需密码? (推荐 Y/n): " sudo_nopasswd
+                    if [[ ! "$sudo_nopasswd" =~ ^[Nn]$ ]]; then
+                        local sudo_config_file="/etc/sudoers.d/90-nopasswd-sudo"
+                        echo "Defaults timestamp_timeout=-1" > "$sudo_config_file"
+                        echo "%sudo ALL=(ALL) NOPASSWD: ALL" >> "$sudo_config_file"
+                        chmod 440 "$sudo_config_file"
+                        log_info "✅ Sudo 已配置为免密。下次 '$username' 登录后可直接使用 sudo -i。"
+                    fi
+                    log_warn "现在, 你应该可以使用与 '$source_user' 相同的密钥直接登录 '$username' 用户了。"
                 else
-                    log_warn "未找到 /root/.ssh/authorized_keys 文件，跳过复制。"
+                    log_error "未在系统中找到任何可用的 SSH 公钥文件进行复制！"
+                    log_warn "用户 '$username' 已创建但未配置密钥，且密码已被锁定。"
                 fi
+                press_any_key
             fi
-            press_any_key
             ;;
-        2)
-            read -p "请输入要删除的用户名: " user_to_delete
-            if [ -z "$user_to_delete" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+        3)
+            # ... 删除用户的代码 ...
+            clear
+            log_info "正在获取可删除的普通用户列表..."
+
+            local deletable_users=()
+            mapfile -t deletable_users < <(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
+
+            if [ ${#deletable_users[@]} -eq 0 ]; then
+                log_warn "未找到任何可删除的普通用户。"
+                press_any_key
+                continue
+            fi
+
+            log_info "请选择要删除的用户:\n"
+            for i in "${!deletable_users[@]}"; do
+                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "${deletable_users[$i]}" ]; then
+                     echo -e "   $((i + 1)). ${deletable_users[$i]} ${RED}(当前Sudo用户, 不可删除)${NC}"
+                else
+                     echo -e "   $((i + 1)). ${deletable_users[$i]}"
+                fi
+            done
+            echo -e "\n   0. 返回\n"
+
+            read -p "请输入选项: " choice_del
+            if ! [[ "$choice_del" =~ ^[0-9]+$ ]]; then log_error "无效输入。"; press_any_key; continue; fi
+            if [ "$choice_del" -eq 0 ]; then continue; fi
+            if [ "$choice_del" -lt 1 ] || [ "$choice_del" -gt ${#deletable_users[@]} ]; then
+                log_error "无效选项！"
+                press_any_key
+                continue
+            fi
+
+            local user_to_delete=${deletable_users[$((choice_del - 1))]}
+
+            if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "$user_to_delete" ]; then
+                log_error "为了系统安全，不能删除当前正在使用的 Sudo 用户 ('$SUDO_USER')！"
+                press_any_key
+                continue
+            fi
             if [ "$user_to_delete" == "root" ]; then log_error "不能删除 root 用户！"; press_any_key; continue; fi
-            if ! id "$user_to_delete" &>/dev/null; then log_error "用户 '$user_to_delete' 不存在！"; press_any_key; continue; fi
 
             read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录下的所有文件！确定吗？(y/N): " confirm_del
             if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
@@ -3358,8 +3562,6 @@ manage_users_menu() {
         esac
     done
 }
-
-
 # --- 自动更新 ---
 setup_auto_updates() {
     ensure_dependencies "unattended-upgrades" "apt-listchanges"
@@ -3645,58 +3847,6 @@ utility_tools_menu() {
 }
 
 
-sys_manage_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${GREEN}DNS 工具箱 (优化/备份/恢复)${NC}                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置系统时区                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. 修改 SSH 端口                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) show_system_info ;;
-        2) clean_system ;;
-        3) change_hostname ;;
-        4) dns_toolbox_menu ;;
-        5) network_priority_menu ;;
-        6) manage_root_login ;;
-        7) set_timezone ;;
-        8) change_ssh_port ;;
-        9) manage_bbr ;;
-        10) install_warp ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
 
 singbox_main_menu() {
     while true; do
@@ -3997,8 +4147,6 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 证书管理 & 网站反代                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${GREEN}实用工具 (增强)${NC}                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
@@ -4015,7 +4163,6 @@ main_menu() {
         4) nezha_main_menu ;;
         5) docker_apps_menu ;;
         6) certificate_management_menu ;;
-        7) utility_tools_menu ;;
         9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
