@@ -153,8 +153,32 @@ ensure_dependencies() {
 # =================================================
 #                系统管理 (sys_manage_menu)
 # =================================================
+# 新增: 系统信息与诊断的子菜单
+system_info_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 系统信息与诊断                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 显示详细系统信息                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}网络优先级设置 (智能测试)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-show_system_info() {
+        read -p "请输入选项: " choice
+        case $choice in
+        1) display_system_info ;; # 注意这里调用的是重命名后的函数
+        2) network_priority_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+display_system_info() {
     ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
     clear
     log_info "正在查询系统信息，请稍候..."
@@ -650,32 +674,152 @@ optimize_dns() {
 
     apply_dns_config "$servers_to_apply"
 }
-set_network_priority() {
+# 新增: 自动测试并推荐优先级的函数
+test_and_recommend_priority() {
     clear
-    echo -e "请选择网络优先级设置:\n"
-    echo -e "1. IPv6 优先\n"
-    echo -e "2. IPv4 优先\n"
-    echo -e "0. 返回\n"
-    read -p "请输入选择: " choice
-    case $choice in
-    1)
-        log_info "正在设置 IPv6 优先..."
-        sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
-        log_info "✅ IPv6 优先已设置。"
-        ;;
-    2)
-        log_info "正在设置 IPv4 优先..."
-        if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-            echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+    log_info "开始进行 IPv4 与 IPv6 网络质量测试..."
+
+    # 检查服务器是否同时拥有 v4 和 v6 地址
+    local ipv4_addr
+    ipv4_addr=$(get_public_ip v4)
+    local ipv6_addr
+    ipv6_addr=$(get_public_ip v6)
+
+    if [ -z "$ipv4_addr" ] || [ -z "$ipv6_addr" ]; then
+        log_error "您的服务器不是一个标准的双栈网络环境，无法进行有意义的比较。"
+        press_any_key
+        return
+    fi
+
+    local test_url="http://cachefly.cachefly.net/100kb.test"
+    log_info "将通过两种协议分别连接测试点: $test_url"
+
+    local time_v4 time_v6
+
+    log_info "正在测试 IPv4 连接速度..."
+    # 使用 timeout 防止命令卡死
+    time_v4=$(timeout 10 curl -4 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    log_info "正在测试 IPv6 连接速度..."
+    time_v6=$(timeout 10 curl -6 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
+
+    echo
+    log_info "测试结果:"
+
+    local recommendation=""
+
+    # 检查IPv4测试结果
+    if [ -n "$time_v4" ] && [ "$(echo "$time_v4 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv4 连接耗时: $time_v4 秒$NC"
+    else
+        time_v4="999" # 标记为失败
+        echo -e "$RED  IPv4 连接失败或超时$NC"
+    fi
+
+    # 检查IPv6测试结果
+    if [ -n "$time_v6" ] && [ "$(echo "$time_v6 > 0" | bc)" -eq 1 ]; then
+        echo -e "$GREEN  IPv6 连接耗时: $time_v6 秒$NC"
+    else
+        time_v6="999" # 标记为失败
+        echo -e "$RED  IPv6 连接失败或超时$NC"
+    fi
+
+    echo
+    # 分析结果并给出建议
+    if [ "$time_v6" == "999" ] && [ "$time_v4" != "999" ]; then
+        recommendation="IPv4"
+        log_warn "测试发现 IPv6 连接存在问题，强烈建议您设置为【IPv4 优先】以保证网络稳定性。"
+    elif [ "$time_v4" == "999" ] && [ "$time_v6" != "999" ]; then
+        recommendation="IPv6"
+        log_info "测试发现 IPv4 连接存在问题，您的网络环境可能更适合【IPv6 优先】。"
+    elif [ "$time_v4" != "999" ] && [ "$time_v6" != "999" ]; then
+        # 如果IPv6比IPv4慢超过30%，则推荐用IPv4，否则默认推荐IPv6
+        if (( $(echo "$time_v6 > $time_v4 * 1.3" | bc -l) )); then
+            recommendation="IPv4"
+            log_info "测试结果表明，您的 IPv4 连接速度明显优于 IPv6，推荐设置为【IPv4 优先】。"
+        else
+            recommendation="IPv6"
+            log_info "测试结果表明，您的 IPv6 连接质量良好，推荐设置为【IPv6 优先】以使用现代网络。"
         fi
-        log_info "✅ IPv4 优先已设置。"
-        ;;
-    0) return 0 ;;
-    *) log_error "无效选择。" ;;
-    esac
+    else
+        log_error "两种协议均连接失败，无法给出建议。请检查您的服务器网络配置。"
+        press_any_key
+        return
+    fi
+
+    echo
+    read -p "是否要采纳此建议并应用设置? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        if [ "$recommendation" == "IPv6" ]; then
+            log_info "正在设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+        elif [ "$recommendation" == "IPv4" ]; then
+            log_info "正在设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+        fi
+    else
+        log_info "操作已取消。"
+    fi
     press_any_key
 }
 
+# 新增: 网络优先级设置的子菜单
+network_priority_menu() {
+    while true; do
+        clear
+        local current_setting="未知"
+        if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+             current_setting="${GREEN}IPv6 优先${NC}"
+        else
+             current_setting="${YELLOW}IPv4 优先${NC}"
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                      $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            test_and_recommend_priority
+            ;;
+        2)
+            log_info "正在手动设置为 [IPv6 优先]..."
+            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            log_info "✅ 已成功设置为 IPv6 优先。"
+            press_any_key
+            ;;
+        3)
+            log_info "正在手动设置为 [IPv4 优先]..."
+            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
+                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
+            fi
+            log_info "✅ 已成功设置为 IPv4 优先。"
+            press_any_key
+            ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -3387,7 +3531,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 系统信息查询/管理                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
