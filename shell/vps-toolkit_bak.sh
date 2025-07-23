@@ -2,8 +2,8 @@
 # =================================================================
 #               全功能 VPS & 应用管理脚本
 #
-#   Author: Jcole
-#   Version: 4.0 (Added Security, Benchmark & Backup Tools)
+#   Author: Jcole & 编码助手
+#   Version: 5.0 (Added Portability, Docker Mgmt, More Tools & Refactoring)
 #   Created: 2024
 #
 # =================================================================
@@ -30,6 +30,40 @@ FLAG_FILE="/root/.vps_toolkit.initialized"
 # --- 全局 IP 缓存变量 ---
 GLOBAL_IPV4=""
 GLOBAL_IPV6=""
+
+# --- 全局系统环境检测变量 ---
+PKG_MANAGER=""
+OS_ID=""
+OS_VERSION_CODENAME=""
+
+
+# =================================================
+#           错误处理 & 脚本退出清理
+# =================================================
+# 定义一个数组来追踪所有临时文件
+TEMP_FILES=()
+
+cleanup_on_exit() {
+    # 只有当 TEMP_FILES 数组不为空时才执行
+    if [ ${#TEMP_FILES[@]} -gt 0 ]; then
+        log_info "脚本退出，正在清理临时文件..."
+        for temp_file in "${TEMP_FILES[@]}"; do
+            if [ -f "$temp_file" ]; then
+                rm -f "$temp_file"
+            fi
+        done
+    fi
+}
+
+# 注册 trap，无论脚本如何退出（正常退出、Ctrl+C、错误），都会执行 cleanup_on_exit 函数
+trap cleanup_on_exit EXIT INT TERM
+
+# 创建临时文件时，使用此函数来注册它们以便自动清理
+# 用法: register_temp_file "/path/to/temp/file"
+register_temp_file() {
+    TEMP_FILES+=("$1")
+}
+
 
 # =================================================
 #                核心 & 辅助函数
@@ -60,7 +94,6 @@ check_port() {
     return 0
 }
 
-# 获取公网 IP 并缓存在全局变量中，避免重复请求
 get_public_ip() {
     local type=$1
     if [[ "$type" == "v4" ]]; then
@@ -110,43 +143,103 @@ _is_domain_valid() {
     fi
 }
 
-# 确保依赖包已安装
+# --- 新增：可移植性相关的函数 ---
+
+detect_os_and_package_manager() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID=$ID
+        OS_VERSION_CODENAME=$VERSION_CODENAME
+    else
+        log_error "无法检测到操作系统类型。"
+        exit 1
+    fi
+
+    if command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt"
+    elif command -v yum &>/dev/null; then
+        PKG_MANAGER="yum"
+    elif command -v dnf &>/dev/null; then
+        PKG_MANAGER="dnf"
+    else
+        log_error "无法检测到支持的包管理器 (apt, yum, dnf)。"
+        exit 1
+    fi
+    # log_info "检测到系统: $OS_ID, 包管理器: $PKG_MANAGER"
+}
+
+# 统一的包安装函数
+install_packages() {
+    local packages_to_install=("$@")
+    if [ ${#packages_to_install[@]} -eq 0 ]; then
+        return 0
+    fi
+    log_info "正在安装包: ${packages_to_install[*]}"
+    case "$PKG_MANAGER" in
+        apt)
+            apt-get install -y "${packages_to_install[@]}"
+            ;;
+        yum|dnf)
+            "$PKG_MANAGER" install -y "${packages_to_install[@]}"
+            ;;
+        *)
+            log_error "未知的包管理器: $PKG_MANAGER"
+            return 1
+            ;;
+    esac
+}
+
+# 确保依赖包已安装（已适配多发行版）
 ensure_dependencies() {
     local dependencies=("$@")
     local missing_dependencies=()
     if [ ${#dependencies[@]} -eq 0 ]; then
         return 0
     fi
+
     for pkg in "${dependencies[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-            missing_dependencies+=("$pkg")
+        local is_installed=false
+        case "$PKG_MANAGER" in
+            apt)
+                if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+                    is_installed=true
+                fi
+                ;;
+            yum|dnf)
+                if rpm -q "$pkg" &>/dev/null; then
+                    is_installed=true
+                fi
+                # 特殊处理 policycoreutils-python-utils 在 CentOS/RHEL 上的包名
+                if [ "$pkg" == "policycoreutils-python-utils" ] && [ "$PKG_MANAGER" == "dnf" ]; then
+                     if rpm -q "policycoreutils-python-utils" &>/dev/null || rpm -q "python3-policycoreutils" &>/dev/null; then
+                        is_installed=true
+                     fi
+                fi
+                ;;
+        esac
+        if ! $is_installed; then
+             missing_dependencies+=("$pkg")
         fi
     done
+
     if [ ${#missing_dependencies[@]} -gt 0 ]; then
         log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
-        log_info "正在更新软件包列表..."
-        if ! apt-get update -y; then
-            log_error "软件包列表更新失败，请检查网络或源配置！"
-            return 1
-        fi
-        local install_fail=0
-        for pkg in "${missing_dependencies[@]}"; do
-            log_info "正在安装依赖包: $pkg ..."
-            if ! apt-get install -y "$pkg"; then
-                log_error "依赖包 $pkg 安装失败！"
-                install_fail=1
+        if [ "$PKG_MANAGER" == "apt" ]; then
+            log_info "正在更新软件包列表 (apt)..."
+            if ! apt-get update -y; then
+                log_error "软件包列表更新失败，请检查网络或源配置！"
+                return 1
             fi
-        done
-        if [ "$install_fail" -eq 0 ]; then
-            return 0
-        else
+        fi
+
+        if ! install_packages "${missing_dependencies[@]}"; then
             log_error "部分依赖包安装失败，请手动检查。"
             return 1
         fi
     else
         log_info "所需依赖均已安装。"
-        return 0
     fi
+    return 0
 }
 
 
@@ -208,8 +301,15 @@ sys_manage_menu() {
         esac
     done
 }
+
 show_system_info() {
-    ensure_dependencies "util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools"
+    # 适配多发行版的依赖包名
+    local deps=("util-linux" "procps" "vnstat" "jq" "lsb-release" "curl" "net-tools")
+    if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+        deps=("util-linux" "procps-ng" "vnstat" "jq" "redhat-lsb-core" "curl" "net-tools")
+    fi
+    ensure_dependencies "${deps[@]}"
+
     clear
     log_info "正在查询系统信息，请稍候..."
     if ! command -v lsb_release &>/dev/null || ! command -v lscpu &>/dev/null; then
@@ -219,8 +319,6 @@ show_system_info() {
     fi
     log_info "正在获取网络信息..."
 
-    # --- 修改开始 ---
-    # 智能检测网络环境，为纯IPv6环境下的curl准备参数
     local curl_flag=""
     local ipv4_addr
     ipv4_addr=$(get_public_ip v4)
@@ -231,7 +329,6 @@ show_system_info() {
         log_warn "检测到纯IPv6环境，部分网络查询将强制使用IPv6。"
         curl_flag="-6"
     fi
-    # --- 修改结束 ---
 
     if [ -z "$ipv4_addr" ]; then ipv4_addr="无或获取失败"; fi
     if [ -z "$ipv6_addr" ]; then ipv6_addr="无或获取失败"; fi
@@ -263,13 +360,10 @@ show_system_info() {
     local net_info_tx
     net_info_tx=$(vnstat --oneline | awk -F';' '{print $5}')
 
-    # --- 修改开始 ---
-    # 检查IPv4参数文件是否存在，避免在纯IPv6环境下报错
     local net_algo="N/A (纯IPv6环境)"
     if [ -f "/proc/sys/net/ipv4/tcp_congestion_control" ]; then
         net_algo=$(sysctl -n net.ipv4.tcp_congestion_control)
     fi
-    # --- 修改结束 ---
 
     local ip_info
     ip_info=$(curl -s $curl_flag http://ip-api.com/json | jq -r '.org')
@@ -320,8 +414,16 @@ show_system_info() {
 clean_system() {
     log_info "正在清理无用的软件包和缓存..."
     set -e
-    apt autoremove -y
-    apt clean
+    case "$PKG_MANAGER" in
+        apt)
+            apt autoremove -y
+            apt clean
+            ;;
+        yum|dnf)
+            "$PKG_MANAGER" autoremove -y
+            "$PKG_MANAGER" clean all
+            ;;
+    esac
     set +e
     log_info "系统清理完毕。"
     press_any_key
@@ -345,7 +447,8 @@ change_hostname() {
     set -e
     hostnamectl set-hostname "$new_hostname"
     echo "$new_hostname" >/etc/hostname
-    sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
+    # 使用 .bak 后缀自动备份
+    sed -i.bak "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
     set +e
     log_info "✅ 主机名修改成功！新的主机名是：$new_hostname"
     log_info "当前主机名是：$(hostname)"
@@ -354,7 +457,6 @@ change_hostname() {
 # =================================================
 #                 DNS 工具箱
 # =================================================
-# 可复用的DNS配置应用函数
 apply_dns_config() {
     local dns_string="$1"
 
@@ -367,7 +469,8 @@ apply_dns_config() {
     if systemctl is-active --quiet systemd-resolved; then
         log_info "检测到 systemd-resolved 服务，将通过标准方式配置..."
 
-        sed -i -e "s/^#\?DNS=.*/DNS=$dns_string/" \
+        # 自动备份
+        sed -i.bak -e "s/^#\?DNS=.*/DNS=$dns_string/" \
                -e "s/^#\?Domains=.*/Domains=~./" /etc/systemd/resolved.conf
         if ! grep -q "DNS=" /etc/systemd/resolved.conf; then echo "DNS=$dns_string" >> /etc/systemd/resolved.conf; fi
         if ! grep -q "Domains=" /etc/systemd/resolved.conf; then echo "Domains=~." >> /etc/systemd/resolved.conf; fi
@@ -382,6 +485,8 @@ apply_dns_config() {
         for server in $dns_string; do
             resolv_content+="nameserver $server\n"
         done
+        # 自动备份
+        cp /etc/resolv.conf /etc/resolv.conf.bak
         echo -e "$resolv_content" > /etc/resolv.conf
         log_info "✅ /etc/resolv.conf 文件已更新！"
     fi
@@ -393,41 +498,43 @@ apply_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-# 替换: 自动测试并推荐最佳DNS的函数
+
 recommend_best_dns() {
     clear
     log_info "开始自动测试延迟以寻找最佳 DNS..."
 
-    # 新增: 确保 ping 命令已安装
-    ensure_dependencies "iputils-ping"
+    local ping_pkg="iputils-ping"
+    if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+        ping_pkg="iputils"
+    fi
+    ensure_dependencies "$ping_pkg"
 
-    # 修改: 使用我们已有的包含v4和v6地址的数组
     declare -A dns_providers
     dns_providers["Cloudflare"]="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001"
     dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
     dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
     dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
 
-    # 新增: 检测服务器的网络能力
     local ping_cmd="ping"
     local ip_type="v4"
     if ! get_public_ip v4 >/dev/null 2>&1 || [ -z "$(get_public_ip v4)" ]; then
         log_warn "未检测到IPv4网络，将切换到IPv6模式进行测试。"
-        ping_cmd="ping6" # 在多数系统中是ping6, 有些是 ping -6
+        ping_cmd="ping"
         ip_type="v6"
     fi
 
     declare -A results
-    declare -A ip_to_provider_map # 用于最后显示名字
+    declare -A ip_to_provider_map
     echo
     for provider in "${!dns_providers[@]}"; do
         local all_ips=${dns_providers[$provider]}
         local ip_to_test=""
 
-        # 修改: 根据网络能力选择要测试的IP地址
         if [ "$ip_type" == "v6" ]; then
+            ping_cmd="ping -6"
             ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i ~ /:/) {print $i; exit}}')
         else
+            ping_cmd="ping -4"
             ip_to_test=$(echo "$all_ips" | awk '{for(i=1;i<=NF;i++) if($i !~ /:/) {print $i; exit}}')
         fi
 
@@ -439,7 +546,6 @@ recommend_best_dns() {
         ip_to_provider_map[$ip_to_test]=$provider
         echo -ne "$CYAN  正在测试: $provider ($ip_to_test)...$NC"
         local avg_latency
-        # 修改: 使用正确的ping命令
         avg_latency=$($ping_cmd -c 4 -W 1 "$ip_to_test" | tail -1 | awk -F '/' '{print $5}')
 
         if [ -n "$avg_latency" ]; then
@@ -451,7 +557,6 @@ recommend_best_dns() {
         fi
     done
 
-    # 排序并输出结果
     echo
     log_info "测试结果（按延迟从低到高排序）:"
     local sorted_results
@@ -460,14 +565,12 @@ recommend_best_dns() {
     done | sort -n)
 
     echo -e "$WHITE"
-    # 修改: 同时显示提供商名称
     echo "$sorted_results" | while read -r latency ip; do
         provider_name=${ip_to_provider_map[$ip]}
         printf "  %-12s (%-15s) -> %s ms\n" "$provider_name" "$ip" "$latency"
     done | sed 's/9999/超时/'
     echo -e "$NC"
 
-    # 提取最佳和备用DNS
     local best_ip
     best_ip=$(echo "$sorted_results" | head -n 1 | awk '{print $2}')
     local backup_ip
@@ -479,7 +582,6 @@ recommend_best_dns() {
         return
     fi
 
-    # 获取完整的DNS服务器列表（包括v4和v6）
     local best_dns_provider_name=${ip_to_provider_map[$best_ip]}
     local best_dns_full_list=${dns_providers[$best_dns_provider_name]}
     local final_dns_to_apply="$best_dns_full_list"
@@ -507,7 +609,7 @@ recommend_best_dns() {
         press_any_key
     fi
 }
-# DNS 功能的子菜单
+
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     while true; do
@@ -516,7 +618,6 @@ dns_toolbox_menu() {
         echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-        # --- 新增和修改的部分 ---
         if command -v resolvectl &>/dev/null; then
             local status_output
             status_output=$(resolvectl status)
@@ -531,7 +632,6 @@ dns_toolbox_menu() {
                  echo -e "$CYAN║$NC  当前DNS: ${RED}读取失败$NC                               $CYAN║$NC"
             fi
         fi
-        # --- 修改结束 ---
 
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -566,7 +666,7 @@ dns_toolbox_menu() {
         esac
     done
 }
-# 备份DNS配置的函数
+
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     log_info "开始备份当前 DNS 配置..."
@@ -581,26 +681,21 @@ backup_dns_config() {
         fi
     fi
 
-    # 判断当前是何种DNS管理模式
     if systemctl is-active --quiet systemd-resolved; then
-        # 备份 systemd-resolved 的配置
         cp /etc/systemd/resolved.conf "$backup_file.systemd"
         echo "systemd-resolved" > "$backup_file.mode"
         log_info "已将 systemd-resolved 配置文件备份到 $backup_file.systemd"
     else
-        # 备份传统的 resolv.conf 文件
         cp /etc/resolv.conf "$backup_file.resolv"
         echo "resolvconf" > "$backup_file.mode"
         log_info "已将 /etc/resolv.conf 文件备份到 $backup_file.resolv"
     fi
 
-    # 为了方便，我们统一创建一个标记文件
     touch "$backup_file"
     log_info "✅ DNS 备份完成！"
     press_any_key
 }
 
-# 恢复DNS配置的函数
 restore_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     if [ ! -f "$backup_file" ]; then
@@ -635,7 +730,6 @@ restore_dns_config() {
         return
     fi
 
-    # 删除标记文件，因为备份已经被消耗（移动）了
     rm -f "$backup_file" "$backup_file.mode"
     log_info "当前的DNS配置如下："
     echo -e "$WHITE"
@@ -643,7 +737,7 @@ restore_dns_config() {
     echo -e "$NC"
     press_any_key
 }
-# optimize_dns 函数 (现在它只负责手动选择的逻辑)
+
 optimize_dns() {
     clear
     log_info "正在检测您当前的 DNS 配置..."
@@ -666,11 +760,8 @@ optimize_dns() {
     dns_providers["Google"]="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844"
     dns_providers["OpenDNS"]="208.67.222.222 208.67.220.220 2620:119:35::35 2620:119:53::53"
     dns_providers["Quad9"]="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9"
-    local options=()
-    # 修改: 确保菜单顺序一致
-    options=("Cloudflare" "Google" "OpenDNS" "Quad9" "返回")
+    local options=("Cloudflare" "Google" "OpenDNS" "Quad9" "返回")
 
-    # --- 菜单显示逻辑修改开始 ---
     echo -e "$CYAN--- 请选择一个或多个 DNS 提供商 (可多选，用空格隔开) ---$NC\n"
     for i in "${!options[@]}"; do
         local option_name=${options[$i]}
@@ -678,12 +769,10 @@ optimize_dns() {
             echo -e "$((i + 1)). $option_name\n"
         else
             local ips=${dns_providers[$option_name]}
-            # 使用 printf 精确控制格式
             printf " %2d. %-12s\n" "$((i + 1))" "$option_name"
             printf "      ${YELLOW}%s${NC}\n\n" "$ips"
         fi
     done
-    # --- 菜单显示逻辑修改结束 ---
 
     local choices
     read -p "请输入选项: " -a choices
@@ -707,12 +796,12 @@ optimize_dns() {
 
     apply_dns_config "$servers_to_apply"
 }
-# 新增: 自动测试并推荐优先级的函数
+
 test_and_recommend_priority() {
     clear
     log_info "开始进行 IPv4 与 IPv6 网络质量测试..."
+    ensure_dependencies "bc"
 
-    # 检查服务器是否同时拥有 v4 和 v6 地址
     local ipv4_addr
     ipv4_addr=$(get_public_ip v4)
     local ipv6_addr
@@ -730,7 +819,6 @@ test_and_recommend_priority() {
     local time_v4 time_v6
 
     log_info "正在测试 IPv4 连接速度..."
-    # 使用 timeout 防止命令卡死
     time_v4=$(timeout 10 curl -4 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
 
     log_info "正在测试 IPv6 连接速度..."
@@ -741,7 +829,6 @@ test_and_recommend_priority() {
 
     local recommendation=""
 
-    # 检查IPv4测试结果
     if [ -n "$time_v4" ] && [ "$(echo "$time_v4 > 0" | bc)" -eq 1 ]; then
         echo -e "$GREEN  IPv4 连接耗时: $time_v4 秒$NC"
     else
@@ -749,7 +836,6 @@ test_and_recommend_priority() {
         echo -e "$RED  IPv4 连接失败或超时$NC"
     fi
 
-    # 检查IPv6测试结果
     if [ -n "$time_v6" ] && [ "$(echo "$time_v6 > 0" | bc)" -eq 1 ]; then
         echo -e "$GREEN  IPv6 连接耗时: $time_v6 秒$NC"
     else
@@ -758,7 +844,6 @@ test_and_recommend_priority() {
     fi
 
     echo
-    # 分析结果并给出建议
     if [ "$time_v6" == "999" ] && [ "$time_v4" != "999" ]; then
         recommendation="IPv4"
         log_warn "测试发现 IPv6 连接存在问题，强烈建议您设置为【IPv4 优先】以保证网络稳定性。"
@@ -766,7 +851,6 @@ test_and_recommend_priority() {
         recommendation="IPv6"
         log_info "测试发现 IPv4 连接存在问题，您的网络环境可能更适合【IPv6 优先】。"
     elif [ "$time_v4" != "999" ] && [ "$time_v6" != "999" ]; then
-        # 如果IPv6比IPv4慢超过30%，则推荐用IPv4，否则默认推荐IPv6
         if (( $(echo "$time_v6 > $time_v4 * 1.3" | bc -l) )); then
             recommendation="IPv4"
             log_info "测试结果表明，您的 IPv4 连接速度明显优于 IPv6，推荐设置为【IPv4 优先】。"
@@ -783,15 +867,17 @@ test_and_recommend_priority() {
     echo
     read -p "是否要采纳此建议并应用设置? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # 确保 /etc/gai.conf 存在
+        touch /etc/gai.conf
         if [ "$recommendation" == "IPv6" ]; then
             log_info "正在设置为 [IPv6 优先]..."
-            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            sed -i.bak '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
             log_info "✅ 已成功设置为 IPv6 优先。"
         elif [ "$recommendation" == "IPv4" ]; then
             log_info "正在设置为 [IPv4 优先]..."
-            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
-            fi
+            # 先删除可能存在的被注释的行，再添加新的行，避免重复
+            sed -i.bak '/^#\?precedence ::ffff:0:0\/96/d' /etc/gai.conf
+            echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
             log_info "✅ 已成功设置为 IPv4 优先。"
         fi
     else
@@ -800,7 +886,6 @@ test_and_recommend_priority() {
     press_any_key
 }
 
-# 新增: 网络优先级设置的子菜单
 network_priority_menu() {
     while true; do
         clear
@@ -836,15 +921,16 @@ network_priority_menu() {
             ;;
         2)
             log_info "正在手动设置为 [IPv6 优先]..."
-            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
+            touch /etc/gai.conf
+            sed -i.bak '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
             log_info "✅ 已成功设置为 IPv6 优先。"
             press_any_key
             ;;
         3)
             log_info "正在手动设置为 [IPv4 优先]..."
-            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
-            fi
+            touch /etc/gai.conf
+            sed -i.bak '/^#\?precedence ::ffff:0:0\/96/d' /etc/gai.conf
+            echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
             log_info "✅ 已成功设置为 IPv4 优先。"
             press_any_key
             ;;
@@ -853,6 +939,7 @@ network_priority_menu() {
         esac
     done
 }
+
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -880,12 +967,11 @@ setup_ssh_key() {
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" =~ ^[Yy]$ ]]; then
         log_info "正在修改 SSH 配置以禁用密码登录..."
-        # 【修复】同时修改两个参数，确保 root 只能通过密钥登录
-        sed -i -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
+        # 使用 .bak 后缀自动备份
+        sed -i.bak -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
                -e 's/^#?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
         log_info "正在重启 SSH 服务..."
-        # 【优化】兼容不同的 SSH 服务名
         if systemctl restart sshd || systemctl restart ssh; then
              log_info "✅ SSH 服务已重启，密码登录已禁用。"
         else
@@ -895,6 +981,7 @@ setup_ssh_key() {
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
 }
+
 manage_root_login() {
     while true; do
         clear
@@ -932,6 +1019,7 @@ manage_root_login() {
         esac
     done
 }
+
 set_root_password() {
     log_info "开始设置 root 密码..."
     read -s -p "请输入新的 root 密码: " new_password
@@ -961,13 +1049,12 @@ set_root_password() {
 
     log_info "正在修改 SSH 配置文件以允许 root 用户通过密码登录..."
 
-    # 关键修复：使用 sed 同时修改 PasswordAuthentication 和 PermitRootLogin
-    # 无论它们当前是 yes/no 还是被注释掉，都会被强制修改为我们期望的值。
-    sed -i -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' \
+    # 自动备份
+    sed -i.bak -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' \
            -e 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 
     log_info "配置修改完成，正在重启 SSH 服务以应用更改..."
-    if systemctl restart sshd; then
+    if systemctl restart sshd || systemctl restart ssh; then
         log_info "✅ SSH 服务已重启。root 密码登录功能已成功设置！"
     else
         log_error "SSH 服务重启失败！请手动执行 'sudo systemctl status sshd' 进行检查。"
@@ -982,10 +1069,7 @@ set_timezone() {
     log_info "当前系统时区是: $current_timezone"
     log_info "请选择新的时区：\n"
     options=("Asia/Shanghai" "Asia/Taipei" "Asia/Hong_Kong" "Asia/Tokyo" "Europe/London" "America/New_York" "UTC" "返回上一级菜单")
-    for i in "${!options[@]}"; do
-        echo -e "$((i + 1))) ${options[$i]}\n"
-    done
-    PS3="请输入选项 (1-8): "
+    PS3="请输入选项: "
     select opt in "${options[@]}"; do
         if [[ "$opt" == "返回上一级菜单" ]]; then
             log_info "操作已取消。"
@@ -1044,8 +1128,12 @@ change_ssh_port() {
     # 步骤2: 处理 SELinux (针对 CentOS/RHEL 等系统)
     if command -v sestatus &>/dev/null && sestatus | grep -q "SELinux status:\s*enabled"; then
         log_info "检测到 SELinux 已启用，正在更新端口策略..."
-        # 确保 semanage 命令存在
-        ensure_dependencies "policycoreutils-python-utils"
+        # 适配多发行版
+        local semanage_dep="policycoreutils-python-utils"
+        if [ "$PKG_MANAGER" == "dnf" ]; then
+            semanage_dep="python3-policycoreutils"
+        fi
+        ensure_dependencies "$semanage_dep"
         if command -v semanage &>/dev/null; then
             semanage port -a -t ssh_port_t -p tcp "$new_port"
             log_info "SELinux 策略已更新。"
@@ -1056,8 +1144,8 @@ change_ssh_port() {
 
     # 步骤3：修改 SSH 配置文件
     log_info "正在修改 /etc/ssh/sshd_config 文件..."
-    # 使用 -E 开启扩展正则，使其更健壮
-    sed -i -E "s/^#?Port\s+[0-9]+/Port $new_port/" /etc/ssh/sshd_config
+    # 自动备份
+    sed -i.bak -E "s/^#?Port\s+[0-9]+/Port $new_port/" /etc/ssh/sshd_config
 
     # 步骤4：重启 SSH 服务
     log_info "正在重启 SSH 服务以应用新端口..."
@@ -1074,7 +1162,7 @@ change_ssh_port() {
     else
         log_error "SSH 服务重启失败！配置可能存在问题。"
         log_error "正在尝试回滚 SSH 端口配置..."
-        sed -i -E "s/^Port\s+$new_port/Port $current_port/" /etc/ssh/sshd_config
+        mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
         systemctl restart sshd || systemctl restart ssh
         log_info "配置已回滚到端口 $current_port。请检查 sshd 服务日志。"
     fi
@@ -1086,11 +1174,17 @@ manage_bbr() {
     log_info "开始检查并管理 BBR..."
     local kernel_version
     kernel_version=$(uname -r | cut -d- -f1)
-    if ! dpkg --compare-versions "$kernel_version" "ge" "4.9"; then
+
+    if [[ "$OS_ID" == "centos" || "$OS_ID" == "rhel" ]]; then
+         log_warn "在 CentOS/RHEL 系统上，推荐使用 ELRepo 的最新主线内核以获得最佳 BBR 支持。"
+    fi
+
+    if [ "$(printf '%s\n' "4.9" "$kernel_version" | sort -V | head -n1)" != "4.9" ]; then
         log_error "您的内核版本 ($kernel_version) 过低，无法开启 BBR。请升级内核至 4.9 或更高版本。"
         press_any_key
         return
     fi
+
     log_info "内核版本 $kernel_version 符合要求。"
     local current_congestion_control
     current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
@@ -1101,21 +1195,23 @@ manage_bbr() {
 
     echo -e "\n请选择要执行的操作:"
     echo -e "\n1. 启用 BBR (原始版本)"
-    echo -e "\n${GREEN}2. 启用 BBR + FQ${NC}"
+    echo -e "\n${GREEN}2. 启用 BBR + FQ${NC} (推荐)"
     echo -e "\n0. 返回\n"
     read -p "请输入选项: " choice
-    local sysctl_conf="/etc/sysctl.conf"
-    sed -i '/net.core.default_qdisc/d' "$sysctl_conf"
-    sed -i '/net.ipv4.tcp_congestion_control/d' "$sysctl_conf"
+
+    local sysctl_conf="/etc/sysctl.d/99-bbr.conf"
+    rm -f "$sysctl_conf"
+    touch "$sysctl_conf"
+
     case $choice in
     1)
         log_info "正在启用 BBR..."
-        echo -e "\n net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
         ;;
     2)
         log_info "正在启用 BBR + FQ..."
-        echo -e "\n net.core.default_qdisc = fq" >>"$sysctl_conf"
-        echo -e "\n net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        echo "net.core.default_qdisc = fq" >>"$sysctl_conf"
+        echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
         ;;
     0)
         log_info "操作已取消。"
@@ -1128,7 +1224,7 @@ manage_bbr() {
         ;;
     esac
     log_info "正在应用配置..."
-    sysctl -p
+    sysctl -p "$sysctl_conf"
     log_info "✅ 配置已应用！请检查上面的新算法是否已生效。"
     press_any_key
 }
@@ -1143,7 +1239,583 @@ install_warp() {
     log_info "WARP 脚本执行完毕。按任意键返回主菜单。"
     press_any_key
 }
+# =================================================
+#           实用工具 (增强) - 新增及优化
+# =================================================
 
+fail2ban_menu() {
+    ensure_dependencies "fail2ban"
+    if ! command -v fail2ban-client &>/dev/null; then
+        log_error "Fail2Ban 未能成功安装，请检查依赖。"
+        press_any_key
+        return
+    fi
+
+    if [ ! -f /etc/fail2ban/jail.local ]; then
+        log_info "未检测到 jail.local, 正在创建并启用 sshd 防护..."
+        cat > /etc/fail2ban/jail.local <<-'EOF'
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+EOF
+        systemctl restart fail2ban
+    fi
+
+
+    while true; do
+        clear
+        if ! systemctl is-active --quiet fail2ban; then
+            echo -e "$RED Fail2Ban 服务未运行！$NC"
+            read -p "服务未运行，是否立即启动? (Y/n): " start_f2b
+            if [[ ! "$start_f2b" =~ ^[Nn]$ ]]; then
+                systemctl start fail2ban
+                sleep 1
+            else
+                press_any_key
+                return
+            fi
+        fi
+
+        local status
+        status=$(fail2ban-client status)
+        local jail_count
+        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
+        local sshd_status
+        sshd_status=$(fail2ban-client status sshd 2>/dev/null) # 2>/dev/null 避免在 jail 不存在时报错
+        local banned_count="0"
+        local total_banned="0"
+        if [ -n "$sshd_status" ]; then
+            banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
+            total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+        fi
+
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            clear
+            log_info "Fail2Ban 总体状态:"
+            fail2ban-client status
+            echo -e "\n$CYAN----------------------------------------------------$NC"
+            log_info "SSHD 防护详情:"
+            fail2ban-client status sshd
+            press_any_key
+            ;;
+        2)
+            clear
+            log_info "显示最近 50 条 Fail2Ban 日志:"
+            tail -50 /var/log/fail2ban.log
+            press_any_key
+            ;;
+        3)
+            read -p "请输入要解封的 IP 地址: " ip_to_unban
+            if [ -n "$ip_to_unban" ]; then
+                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
+                fail2ban-client set sshd unbanip "$ip_to_unban"
+            else
+                log_error "IP 地址不能为空！"
+            fi
+            press_any_key
+            ;;
+        4)
+            log_info "正在重启 Fail2Ban..."
+            systemctl restart fail2ban
+            sleep 1
+            log_info "服务已重启。"
+            ;;
+        5)
+            read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                log_info "正在停止并卸载 Fail2Ban..."
+                systemctl stop fail2ban
+                if [ "$PKG_MANAGER" == "apt" ]; then
+                    apt-get remove --purge -y fail2ban
+                else
+                    "$PKG_MANAGER" remove -y fail2ban
+                fi
+                rm -rf /etc/fail2ban
+                log_info "✅ Fail2Ban 已卸载。"
+                press_any_key
+                return
+            fi
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+list_normal_users() {
+    clear
+    log_info "正在列出所有普通用户 (UID >= 1000)..."
+
+    local user_list
+    user_list=$(awk -F: '$3 >= 1000 && $3 != 65534 {
+        printf "  - 用户名: \033[1;37m%-15s\033[0m UID: %-5s Shell: %s\n", $1, $3, $7
+        printf "    主目录: %s\n\n", $6
+    }' /etc/passwd)
+
+    if [ -n "$user_list" ]; then
+        echo -e "$CYAN--------------------------------------------------------------------$NC"
+        echo -e "$user_list"
+        echo -e "$CYAN--------------------------------------------------------------------$NC"
+    else
+        log_warn "未找到任何普通用户。"
+    fi
+
+    press_any_key
+}
+
+manage_users_menu() {
+    ensure_dependencies "sudo" "shadow" # shadow provides useradd/usermod on some systems
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 列出所有普通用户                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 创建一个新的 Sudo 用户                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            list_normal_users
+            ;;
+        2)
+            clear
+            echo -e "请为新用户选择主要的登录方式:\n"
+            echo -e "  1. ${YELLOW}密码登录$NC (创建一个带密码的新用户)"
+            echo -e "  2. ${GREEN}密钥登录$NC (创建用户, 并从现有用户复制公钥)"
+            echo -e "\n  0. 返回\n"
+            read -p "请输入选项: " login_choice
+
+            if [[ "$login_choice" != "1" && "$login_choice" != "2" ]]; then
+                continue
+            fi
+
+            read -p "请输入新用户名 (必须以小写字母开头): " username
+            if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
+            if ! [[ "$username" =~ ^[a-z][a-z0-9_-]*$ ]]; then log_error "用户名格式不正确！"; press_any_key; continue; fi
+            if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
+
+            useradd -m -s /bin/bash "$username"
+            if [ $? -ne 0 ]; then
+                log_error "创建用户 '$username' 失败！"
+                press_any_key
+                continue
+            fi
+
+            local sudo_group="sudo"
+            if [ "$OS_ID" == "centos" ] || [ "$OS_ID" == "rhel" ] || [ "$OS_ID" == "fedora" ]; then
+                sudo_group="wheel"
+            fi
+            usermod -aG "$sudo_group" "$username"
+            log_info "✅ 用户 '$username' 已创建并添加到 $sudo_group 组。"
+
+            if [ "$login_choice" == "1" ]; then
+                log_info "请为用户 '$username' 设置密码。"
+                passwd "$username"
+                if [ $? -eq 0 ]; then
+                    log_info "✅ 密码设置成功！"
+
+                    local ssh_config_file="/etc/ssh/sshd_config"
+                    if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file" || grep -q -E "^\s*AuthenticationMethods"; then
+                        echo
+                        log_warn "检测到服务器当前可能禁止或限制密码登录。"
+                        read -p "是否要自动修改SSH配置以确保密码登录可用? (Y/n): " allow_pwd
+                        if [[ ! "$allow_pwd" =~ ^[Nn]$ ]]; then
+                            sed -i.bak -E 's/^\s*#?\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/' "$ssh_config_file"
+                            if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file"; then
+                                echo "" >> "$ssh_config_file"; echo "PasswordAuthentication yes" >> "$ssh_config_file"
+                            fi
+                            sed -i.bak -E 's/^(\s*AuthenticationMethods\s+.*)/#\1/' "$ssh_config_file"
+
+                            log_info "正在重启SSH服务以应用更改..."
+                            if systemctl restart ssh || systemctl restart sshd; then
+                                log_info "✅ SSH服务已重启, 密码登录应该已开启。"
+                            else
+                                log_error "SSH服务重启失败！请手动检查。"
+                            fi
+                        else
+                            log_warn "您选择了不修改配置，新用户 '$username' 可能无法通过SSH登录。"
+                        fi
+                    fi
+                else
+                    log_error "密码设置失败或被取消！"
+                fi
+                press_any_key
+
+            elif [ "$login_choice" == "2" ]; then
+                log_info "正在为用户 '$username' 配置密钥登录..."
+                passwd -l "$username" >/dev/null
+
+                local source_user=""
+                local source_key_file=""
+                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ] && [ -f "/home/$SUDO_USER/.ssh/authorized_keys" ]; then
+                    source_user="$SUDO_USER"
+                    source_key_file="/home/$source_user/.ssh/authorized_keys"
+                else
+                    local potential_users=()
+                    while IFS= read -r user; do potential_users+=("$user"); done < <(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
+                    potential_users+=("root")
+
+                    for user in "${potential_users[@]}"; do
+                        local key_path
+                        if [ "$user" == "root" ]; then key_path="/root/.ssh/authorized_keys"; else key_path="/home/$user/.ssh/authorized_keys"; fi
+
+                        if [ -s "$key_path" ]; then
+                            source_user="$user"
+                            source_key_file="$key_path"
+                            break
+                        fi
+                    done
+                fi
+
+                if [ -n "$source_user" ]; then
+                    log_info "检测到来自用户 '$source_user' 的可用公钥。"
+                    mkdir -p "/home/$username/.ssh"
+                    cp "$source_key_file" "/home/$username/.ssh/authorized_keys"
+                    chown -R "$username:$username" "/home/$username/.ssh"
+                    chmod 700 "/home/$username/.ssh"
+                    chmod 600 "/home/$username/.ssh/authorized_keys"
+                    log_info "✅ SSH 公钥已成功复制。"
+
+                    echo
+                    read -p "是否要配置sudo使其无需密码? (推荐 Y/n): " sudo_nopasswd
+                    if [[ ! "$sudo_nopasswd" =~ ^[Nn]$ ]]; then
+                        local sudo_config_file="/etc/sudoers.d/90-$username-nopasswd"
+                        echo "$username ALL=(ALL) NOPASSWD: ALL" > "$sudo_config_file"
+                        chmod 440 "$sudo_config_file"
+                        log_info "✅ Sudo 已配置为免密。下次 '$username' 登录后可直接使用 sudo。"
+                    fi
+                    log_warn "现在, 你应该可以使用与 '$source_user' 相同的密钥直接登录 '$username' 用户了。"
+                else
+                    log_error "未在系统中找到任何可用的 SSH 公钥文件进行复制！"
+                    log_warn "用户 '$username' 已创建但未配置密钥，且密码已被锁定。"
+                fi
+                press_any_key
+            fi
+            ;;
+        3)
+            clear
+            log_info "正在获取可删除的普通用户列表..."
+
+            local deletable_users=()
+            mapfile -t deletable_users < <(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
+
+            if [ ${#deletable_users[@]} -eq 0 ]; then
+                log_warn "未找到任何可删除的普通用户。"
+                press_any_key
+                continue
+            fi
+
+            log_info "请选择要删除的用户:\n"
+            for i in "${!deletable_users[@]}"; do
+                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "${deletable_users[$i]}" ]; then
+                     echo -e "   $((i + 1)). ${deletable_users[$i]} ${RED}(当前Sudo用户, 不可删除)${NC}"
+                else
+                     echo -e "   $((i + 1)). ${deletable_users[$i]}"
+                fi
+            done
+            echo -e "\n   0. 返回\n"
+
+            read -p "请输入选项: " choice_del
+            if ! [[ "$choice_del" =~ ^[0-9]+$ ]]; then log_error "无效输入。"; press_any_key; continue; fi
+            if [ "$choice_del" -eq 0 ]; then continue; fi
+            if [ "$choice_del" -lt 1 ] || [ "$choice_del" -gt ${#deletable_users[@]} ]; then
+                log_error "无效选项！"
+                press_any_key
+                continue
+            fi
+
+            local user_to_delete=${deletable_users[$((choice_del - 1))]}
+
+            if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "$user_to_delete" ]; then
+                log_error "为了系统安全，不能删除当前正在使用的 Sudo 用户 ('$SUDO_USER')！"
+                press_any_key
+                continue
+            fi
+            if [ "$user_to_delete" == "root" ]; then log_error "不能删除 root 用户！"; press_any_key; continue; fi
+
+            read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录下的所有文件！确定吗？(y/N): " confirm_del
+            if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
+                deluser --remove-home "$user_to_delete"
+                rm -f "/etc/sudoers.d/90-$user_to_delete-nopasswd"
+                log_info "✅ 用户 '$user_to_delete' 已被删除。"
+            else
+                log_info "操作已取消。"
+            fi
+            press_any_key
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+setup_auto_updates() {
+    if [ "$PKG_MANAGER" != "apt" ]; then
+        log_error "此功能目前仅支持基于 APT 的系统 (Debian/Ubuntu)。"
+        press_any_key
+        return
+    fi
+
+    ensure_dependencies "unattended-upgrades" "apt-listchanges"
+    if [ ! -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
+        log_error "unattended-upgrades 配置文件不存在，配置失败。"
+        press_any_key
+        return
+    fi
+    log_info "正在为您配置自动安全更新..."
+    dpkg-reconfigure --priority=low -f noninteractive unattended-upgrades
+    log_info "✅ unattended-upgrades 已配置并启用。"
+    log_warn "系统现在会自动安装重要的安全更新。"
+    press_any_key
+}
+
+performance_test_menu() {
+     while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 VPS 性能测试                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. ${CYAN}流媒体解锁测试${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            log_info "正在执行 bench.sh 脚本..."
+            ensure_dependencies "curl"
+            curl -Lso- bench.sh | bash
+            press_any_key
+            ;;
+        2)
+            log_info "正在执行 speedtest-cli..."
+            ensure_dependencies "speedtest-cli"
+            speedtest-cli
+            press_any_key
+            ;;
+        3)
+            log_info "正在启动 btop..."
+            local btop_dep="btop"
+            if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+                log_warn "在 CentOS/RHEL 上, btop 通常位于 EPEL 仓库。"
+                log_warn "如果安装失败，请先手动安装 epel-release 包。"
+            fi
+            ensure_dependencies "$btop_dep"
+            btop
+            ;;
+        4)
+            log_info "正在执行流媒体解锁测试脚本 (by lmc999)..."
+            ensure_dependencies "bash" "curl" "jq"
+            bash <(curl -L -s https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/check.sh)
+            press_any_key
+            ;;
+        0) return ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+backup_directory() {
+    clear
+    log_info "开始手动备份指定目录..."
+
+    local source_dir
+    read -e -p "请输入需要备份的目录的绝对路径 (例如 /var/www): " source_dir
+    if [ ! -d "$source_dir" ]; then
+        log_error "目录 '$source_dir' 不存在或不是一个目录！"
+        press_any_key
+        return
+    fi
+
+    local backup_dest
+    read -e -p "请输入备份文件存放的目标目录 [默认: /root]: " backup_dest
+    backup_dest=${backup_dest:-"/root"}
+    if [ ! -d "$backup_dest" ]; then
+        log_warn "目标目录 '$backup_dest' 不存在，将尝试创建它..."
+        mkdir -p "$backup_dest"
+        if [ $? -ne 0 ]; then
+            log_error "创建目标目录失败！"
+            press_any_key
+            return
+        fi
+    fi
+
+    local dir_name
+    dir_name=$(basename "$source_dir")
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
+    local full_backup_path="$backup_dest/$backup_filename"
+
+    log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
+    if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
+        log_info "✅ 备份成功！文件大小: $(du -sh "$full_backup_path" | awk '{print $1}')"
+    else
+        log_error "备份过程中发生错误！"
+        rm -f "$full_backup_path"
+    fi
+
+    press_any_key
+}
+
+start_temp_web_server() {
+    ensure_dependencies "python3"
+    clear
+    read -e -p "请输入要分享的目录 [默认: /root]: " dir
+    dir=${dir:-"/root"}
+    if [ ! -d "$dir" ]; then log_error "目录不存在！"; press_any_key; return; fi
+
+    read -p "请输入要监听的端口 [默认: 8000]: " port
+    port=${port:-8000}
+    if ! check_port "$port"; then press_any_key; return; fi
+
+    local ipv4_addr
+    ipv4_addr=$(get_public_ip v4)
+    log_info "Web 服务器即将启动..."
+    log_info "您可以通过以下地址访问:"
+    log_info "http://$ipv4_addr:$port"
+    log_warn "在当前目录下按 Ctrl+C 即可停止服务。"
+    press_any_key
+
+    (cd "$dir" && python3 -m http.server "$port")
+}
+
+upload_file_to_transfer() {
+    ensure_dependencies "curl"
+    clear
+    read -e -p "请输入要上传的文件的完整路径: " file_path
+    if [ ! -f "$file_path" ]; then
+        log_error "文件 '$file_path' 不存在！"
+        press_any_key
+        return
+    fi
+    log_info "正在上传文件，请稍候..."
+
+    local upload_url
+    upload_url=$(curl --progress-bar --upload-file "$file_path" "https://transfer.sh/$(basename "$file_path")")
+
+    echo ""
+    if [[ "$upload_url" == https* ]]; then
+        log_info "✅ 文件上传完成，下载链接如下:"
+        echo -e "\n$YELLOW$upload_url$NC\n"
+    else
+        log_error "文件上传失败。服务器返回: $upload_url"
+    fi
+    press_any_key
+}
+
+file_sharing_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  简易文件分享                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 启动临时 Web 服务器 (分享目录)              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 上传单个文件 (获取分享链接)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) start_temp_web_server ;;
+        2) upload_file_to_transfer ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+utility_tools_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟───────────────── $WHITE性能 & 分享 & 备份$CYAN ─────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 简易文件分享                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) fail2ban_menu ;;
+        2) manage_users_menu ;;
+        3) setup_auto_updates ;;
+        4) performance_test_menu ;;
+        5) backup_directory ;;
+        6) file_sharing_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 # =================================================
 #               Sing-Box 管理 (singbox_main_menu)
 # =================================================
@@ -1173,8 +1845,8 @@ singbox_do_install() {
     service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+')
     if [ -n "$service_file_path" ] && [ -f "$service_file_path" ]; then
         log_info "找到服务文件位于: $service_file_path"
-        sed -i 's/User=sing-box/User=root/' "$service_file_path"
-        sed -i 's/Group=sing-box/Group=root/' "$service_file_path"
+        sed -i.bak 's/User=sing-box/User=root/' "$service_file_path"
+        sed -i.bak 's/Group=sing-box/Group=root/' "$service_file_path"
         systemctl daemon-reload
         log_info "服务权限修改完成。"
     else
@@ -1287,255 +1959,242 @@ _create_self_signed_cert() {
     fi
 }
 
-_get_unique_tag() {
-    local base_tag="$1"
-    local final_tag="$base_tag"
-    local counter=2
-    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" >/dev/null; do
-        final_tag="$base_tag-$counter"
-        ((counter++))
-    done
-    echo "$final_tag"
-}
-
-_add_protocol_inbound() {
-    local protocol=$1 config=$2 node_link=$3
-    log_info "正在为 [$protocol] 协议添加入站配置..."
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp"; then
-        log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"
-        rm -f "$SINGBOX_CONFIG_FILE.tmp"
-        return 1
-    fi
-    mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
-    echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
-    log_info "✅ [$protocol] 协议配置添加成功！"
-    return 0
-}
-
-singbox_add_node_orchestrator() {
-    ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
-    local cert_choice custom_id location connect_addr sni_domain final_node_link
-    local cert_path key_path
-    declare -A ports
-    local protocols_to_create=()
-    local protocols_with_self_signed=()
-    local is_one_click=false
+_singbox_prompt_for_protocols() {
+    local -n protocols_ref=$1
+    local -n is_one_click_ref=$2
 
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-    1) protocols_to_create=("VLESS") ;;
-    2) protocols_to_create=("VMess") ;;
-    3) protocols_to_create=("Trojan") ;;
-    4) protocols_to_create=("Hysteria2") ;;
-    5) protocols_to_create=("TUIC") ;;
+    1) protocols_ref=("VLESS") ;;
+    2) protocols_ref=("VMess") ;;
+    3) protocols_ref=("Trojan") ;;
+    4) protocols_ref=("Hysteria2") ;;
+    5) protocols_ref=("TUIC") ;;
     6)
-        protocols_to_create=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
-        is_one_click=true
+        protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+        is_one_click_ref=true
         ;;
-    0) return ;;
+    0) return 1 ;;
     *)
         log_error "无效选择，操作中止。"
         press_any_key
-        return
+        return 1
         ;;
     esac
+    return 0
+}
+
+_singbox_handle_certificate_setup() {
+    local -n cert_path_ref=$1
+    local -n key_path_ref=$2
+    local -n connect_addr_ref=$3
+    local -n sni_domain_ref=$4
+    local -n insecure_params_ref=$5
+
     clear
-    echo -e "$GREEN您选择了 [${protocols_to_create[*]}] 协议。$NC"
     echo -e "\n请选择证书类型：\n\n${GREEN}1. 使用 Let's Encrypt 域名证书 (推荐)$NC\n\n2. 使用自签名证书 (IP 直连)\n"
     read -p "请输入选项 (1-2): " cert_choice
 
-    local insecure_param=""
-    local vmess_insecure_json_part=""
-    local hy2_insecure_param=""
-    local tuic_insecure_param=""
-
-    # ================== 步骤 2: 证书处理 ==================
-    log_info "进入证书处理流程..."
     if [ "$cert_choice" == "1" ]; then
         echo ""
         while true; do
             read -p "请输入您已解析到本机的域名: " domain
-            if [[ -z "$domain" ]]; then
-                log_error "域名不能为空！"
-            elif ! _is_domain_valid "$domain"; then
-                log_error "域名格式不正确。"
-            else break; fi
+            if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
         done
-        if ! apply_ssl_certificate "$domain"; then
-            log_error "证书处理失败。"
-            press_any_key
-            return
-        fi
-        cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
-        key_path="/etc/letsencrypt/live/$domain/privkey.pem"
-        connect_addr="$domain"
-        sni_domain="$domain"
+        if ! apply_ssl_certificate "$domain"; then log_error "证书处理失败。"; return 1; fi
+        cert_path_ref="/etc/letsencrypt/live/$domain/fullchain.pem"
+        key_path_ref="/etc/letsencrypt/live/$domain/privkey.pem"
+        connect_addr_ref="$domain"
+        sni_domain_ref="$domain"
     elif [ "$cert_choice" == "2" ]; then
-        protocols_with_self_signed=("${protocols_to_create[@]}")
-        insecure_param="&allowInsecure=1"
-        vmess_insecure_json_part=", \"skip-cert-verify\": true"
-        hy2_insecure_param="&insecure=1"
-        tuic_insecure_param="&allow_insecure=1"
+        insecure_params_ref["ws"]="&allowInsecure=1"
+        insecure_params_ref["vmess"]=", \"skip-cert-verify\": true"
+        insecure_params_ref["hy2"]="&insecure=1"
+        insecure_params_ref["tuic"]="&allow_insecure=1"
 
-        local ipv4_addr
-        ipv4_addr=$(get_public_ip v4)
-        local ipv6_addr
-        ipv6_addr=$(get_public_ip v6)
+        local ipv4_addr=$(get_public_ip v4)
+        local ipv6_addr=$(get_public_ip v6)
         if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
             echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
             read -p "请输入选项 (1-2): " ip_choice
-            if [ "$ip_choice" == "2" ]; then connect_addr="[$ipv6_addr]"; else connect_addr="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then
-            log_info "将自动使用 IPv4 地址。"
-            connect_addr="$ipv4_addr"
-        elif [ -n "$ipv6_addr" ]; then
-            log_info "将自动使用 IPv6 地址。"
-            connect_addr="[$ipv6_addr]"
-        else
-            log_error "无法获取任何公网 IP 地址！"
-            press_any_key
-            return
-        fi
+            if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
+        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
+        elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
+        else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
         read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
-        sni_domain=${sni_input:-"www.bing.com"}
-        if ! _create_self_signed_cert "$sni_domain"; then
-            log_error "自签名证书处理失败。"
-            press_any_key
-            return
-        fi
-        cert_path="/etc/sing-box/certs/$sni_domain.cert.pem"
-        key_path="/etc/sing-box/certs/$sni_domain.key.pem"
+        sni_domain_ref=${sni_input:-"www.bing.com"}
+        if ! _create_self_signed_cert "$sni_domain_ref"; then log_error "自签名证书处理失败。"; return 1; fi
+        cert_path_ref="/etc/sing-box/certs/$sni_domain_ref.cert.pem"
+        key_path_ref="/etc/sing-box/certs/$sni_domain_ref.key.pem"
     else
-        log_error "无效证书选择。"
-        press_any_key
-        return
+        log_error "无效证书选择。"; return 1;
     fi
     log_info "证书处理完毕。"
-    # =======================================================
+    return 0
+}
 
-    local used_ports_for_this_run=()
+_singbox_prompt_for_ports() {
+    local -n protocols_ref=$1
+    local -n ports_ref=$2
+    local -n used_ports_this_run_ref=$3
+    local is_one_click=$4
+
     if $is_one_click; then
         log_info "您已选择一键模式，请为每个协议指定端口。"
-        for p in "${protocols_to_create[@]}"; do
+        for p in "${protocols_ref[@]}"; do
             while true; do
                 local port_prompt="请输入 [$p] 的端口 [回车则随机]: "
                 if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then port_prompt="请输入 [$p] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
                 read -p "$(echo -e "$port_prompt")" port_input
-                if [ -z "$port_input" ]; then
-                    port_input=$(generate_random_port)
-                    log_info "已为 [$p] 生成随机端口: $port_input"
-                fi
-                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                    log_error "端口号需为 1-65535。"
-                elif _is_port_available "$port_input" "used_ports_for_this_run"; then
-                    ports[$p]=$port_input
-                    used_ports_for_this_run+=("$port_input")
+                if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已为 [$p] 生成随机端口: $port_input"; fi
+                if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。";
+                elif _is_port_available "$port_input" "used_ports_this_run_ref"; then
+                    ports_ref[$p]=$port_input
+                    used_ports_this_run_ref+=("$port_input")
                     break
                 fi
             done
         done
     else
-        local protocol_name=${protocols_to_create[0]}
+        local protocol_name=${protocols_ref[0]}
         while true; do
             local port_prompt="请输入 [$protocol_name] 的端口 [回车则随机]: "
             if [[ "$protocol_name" == "Hysteria2" || "$protocol_name" == "TUIC" ]]; then port_prompt="请输入 [$protocol_name] 的 ${YELLOW}UDP$NC 端口 [回车则随机]: "; fi
-
             read -p "$(echo -e "$port_prompt")" port_input
-            if [ -z "$port_input" ]; then
-                port_input=$(generate_random_port)
-                log_info "已生成随机端口: $port_input"
-            fi
-            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then
-                log_error "端口号需为 1-65535。"
-            elif _is_port_available "$port_input" "used_ports_for_this_run"; then
-                ports[$protocol_name]=$port_input
-                used_ports_for_this_run+=("$port_input")
+            if [ -z "$port_input" ]; then port_input=$(generate_random_port); log_info "已生成随机端口: $port_input"; fi
+            if [[ ! "$port_input" =~ ^[0-9]+$ ]] || [ "$port_input" -lt 1 ] || [ "$port_input" -gt 65535 ]; then log_error "端口号需为 1-65535。";
+            elif _is_port_available "$port_input" "used_ports_this_run_ref"; then
+                ports_ref[$protocol_name]=$port_input
+                used_ports_this_run_ref+=("$port_input")
                 break
             fi
         done
     fi
+}
+
+_singbox_build_protocol_config_and_link() {
+    local protocol=$1
+    local -n args_ref=$2
+    local -n config_ref=$3
+    local -n link_ref=$4
+
+    local tag=${args_ref[tag]}
+    local current_port=${args_ref[port]}
+    local uuid=${args_ref[uuid]}
+    local password=${args_ref[password]}
+    local connect_addr=${args_ref[connect_addr]}
+    local sni_domain=${args_ref[sni_domain]}
+    local cert_path=${args_ref[cert_path]}
+    local key_path=${args_ref[key_path]}
+    local insecure_ws=${args_ref[insecure_ws]}
+    local insecure_vmess=${args_ref[insecure_vmess]}
+    local insecure_hy2=${args_ref[insecure_hy2]}
+    local insecure_tuic=${args_ref[insecure_tuic]}
+
+    local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
+    local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+
+    case $protocol in
+    "VLESS" | "VMess" | "Trojan")
+        config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
+            [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
+        then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+
+        if [[ "$protocol" == "VLESS" ]]; then
+            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_ws}#$tag"
+        elif [[ "$protocol" == "VMess" ]]; then
+            local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
+            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+        else
+            link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
+        fi
+        ;;
+    "Hysteria2")
+        config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
+        link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${insecure_hy2}#$tag"
+        ;;
+    "TUIC")
+        config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
+        link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${insecure_tuic}#$tag"
+        ;;
+    esac
+}
+
+singbox_add_node_orchestrator() {
+    ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
+
+    local protocols_to_create=()
+    local is_one_click=false
+    if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
+
+    local cert_path key_path connect_addr sni_domain
+    declare -A insecure_params
+    if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then press_any_key; return; fi
+
+    declare -A ports
+    local used_ports_for_this_run=()
+    _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
 
     read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
     custom_id=${custom_id:-"Jcole"}
-    local geo_info_json
-    geo_info_json=$(curl -s ip-api.com/json)
-    local country_code
-    country_code=$(echo "$geo_info_json" | jq -r '.countryCode')
-    local region_name
-    region_name=$(echo "$geo_info_json" | jq -r '.regionName' | sed 's/ //g')
-    if [ -z "$country_code" ]; then country_code="N/A"; fi
-    if [ -z "$region_name" ]; then region_name="N/A"; fi
+
+    local geo_info_json=$(curl -s ip-api.com/json)
+    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
+    local region_name=$(echo "$geo_info_json" | jq -r '.regionName // "N/A"' | sed 's/ //g')
+
     local success_count=0
+    local final_node_link=""
+    local protocols_with_self_signed=()
+    if [ ${#insecure_params[@]} -gt 0 ]; then
+        protocols_with_self_signed=("${protocols_to_create[@]}")
+    fi
+
     for protocol in "${protocols_to_create[@]}"; do
         local tag_base="$country_code-$region_name-$custom_id"
         local base_tag_for_protocol="$tag_base-$protocol"
-        local tag
-        tag=$(_get_unique_tag "$base_tag_for_protocol")
-        log_info "已为此节点分配唯一 Tag: $tag"
-        local uuid
-        uuid=$(uuidgen)
-        local password
-        password=$(generate_random_password)
-        local config=""
-        local node_link=""
-        local current_port=${ports[$protocol]}
-        local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-        local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-        case $protocol in
-        "VLESS" | "VMess" | "Trojan")
-            config="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
-                [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
-            then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-            if [[ "$protocol" == "VLESS" ]]; then
-                node_link="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_param}#$tag"
-            elif [[ "$protocol" == "VMess" ]]; then
-                local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${vmess_insecure_json_part}}"
-                node_link="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
-            else
-                node_link="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_param}#$tag"
-            fi
-            ;;
-        "Hysteria2")
-            config="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-            node_link="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${hy2_insecure_param}#$tag"
-            ;;
-        "TUIC")
-            config="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-            node_link="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${tuic_insecure_param}#$tag"
-            ;;
-        esac
+        local tag=$(_get_unique_tag "$base_tag_for_protocol")
+        log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
+
+        declare -A build_args
+        build_args[tag]="$tag"
+        build_args[port]=${ports[$protocol]}
+        build_args[uuid]=$(uuidgen)
+        build_args[password]=$(generate_random_password)
+        build_args[connect_addr]="$connect_addr"
+        build_args[sni_domain]="$sni_domain"
+        build_args[cert_path]="$cert_path"
+        build_args[key_path]="$key_path"
+        build_args[insecure_ws]=${insecure_params[ws]}
+        build_args[insecure_vmess]=${insecure_params[vmess]}
+        build_args[insecure_hy2]=${insecure_params[hy2]}
+        build_args[insecure_tuic]=${insecure_params[tuic]}
+
+        local config node_link
+        _singbox_build_protocol_config_and_link "$protocol" build_args config node_link
+
         if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
             ((success_count++))
             final_node_link="$node_link"
         fi
     done
+
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
         systemctl restart sing-box
@@ -1569,20 +2228,44 @@ singbox_add_node_orchestrator() {
                 echo -e "\n$YELLOW==============================================================$NC"
             fi
 
-            if [ "$success_count" -gt 1 ] || $is_one_click; then
-                view_node_info
-            else
-                press_any_key
-            fi
-
+            if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
             log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            log_warn "配置文件可能出错，旧的配置文件已备份为 $SINGBOX_CONFIG_FILE.tmp"
             press_any_key
         fi
     else
         log_error "没有任何节点被成功添加。"
         press_any_key
     fi
+}
+
+
+_get_unique_tag() {
+    local base_tag="$1"
+    local final_tag="$base_tag"
+    local counter=2
+    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" >/dev/null; do
+        final_tag="$base_tag-$counter"
+        ((counter++))
+    done
+    echo "$final_tag"
+}
+
+_add_protocol_inbound() {
+    local protocol=$1 config=$2 node_link=$3
+    log_info "正在为 [$protocol] 协议添加入站配置..."
+    local tmp_file="$SINGBOX_CONFIG_FILE.tmp"
+    register_temp_file "$tmp_file"
+
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$tmp_file"; then
+        log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"
+        return 1
+    fi
+    mv "$tmp_file" "$SINGBOX_CONFIG_FILE"
+    echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
+    log_info "✅ [$protocol] 协议配置添加成功！"
+    return 0
 }
 
 view_node_info() {
@@ -1670,7 +2353,9 @@ delete_nodes() {
             read -p "你确定要删除所有节点吗？(y/N): " confirm_delete
             if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
                 log_info "正在删除所有节点..."
-                jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" >"$SINGBOX_CONFIG_FILE.tmp" && mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+                local tmp_file="$SINGBOX_CONFIG_FILE.tmp"
+                register_temp_file "$tmp_file"
+                jq '.inbounds = []' "$SINGBOX_CONFIG_FILE" >"$tmp_file" && mv "$tmp_file" "$SINGBOX_CONFIG_FILE"
                 rm -f "$SINGBOX_NODE_LINKS_FILE"
                 log_info "✅ 所有节点已删除。"
             else
@@ -1701,11 +2386,18 @@ delete_nodes() {
                 continue
             fi
             log_info "正在从 config.json 中删除节点: ${tags_to_delete[*]}"
-            cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.tmp"
+
+            local tmp_file1="$SINGBOX_CONFIG_FILE.tmp"
+            local tmp_file2="$SINGBOX_CONFIG_FILE.tmp.2"
+            register_temp_file "$tmp_file1"
+            register_temp_file "$tmp_file2"
+            cp "$SINGBOX_CONFIG_FILE" "$tmp_file1"
+
             for tag in "${tags_to_delete[@]}"; do
-                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$SINGBOX_CONFIG_FILE.tmp" >"$SINGBOX_CONFIG_FILE.tmp.2" && mv "$SINGBOX_CONFIG_FILE.tmp.2" "$SINGBOX_CONFIG_FILE.tmp"
+                jq --arg t "$tag" 'del(.inbounds[] | select(.tag == $t))' "$tmp_file1" >"$tmp_file2" && mv "$tmp_file2" "$tmp_file1"
             done
-            mv "$SINGBOX_CONFIG_FILE.tmp" "$SINGBOX_CONFIG_FILE"
+            mv "$tmp_file1" "$SINGBOX_CONFIG_FILE"
+
             local remaining_lines=()
             for i in "${!node_lines[@]}"; do
                 local should_keep=true
@@ -1730,12 +2422,12 @@ delete_nodes() {
 
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
-    mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
-    if [ ${#all_node_lines[@]} -eq 0 ]; then
+    if [ ! -s "$SINGBOX_NODE_LINKS_FILE" ]; then
         log_warn "没有可推送的节点。"
         press_any_key
         return
     fi
+    mapfile -t all_node_lines < "$SINGBOX_NODE_LINKS_FILE"
 
     local selected_links=()
     echo ""
@@ -1764,10 +2456,7 @@ push_to_sub_store() {
         done
     else
         log_info "已选择推送所有 ${#all_node_lines[@]} 个节点。"
-        # 将所有节点赋值给 selected_links 数组
-        for line in "${all_node_lines[@]}"; do
-            selected_links+=("$line")
-        done
+        selected_links=("${all_node_lines[@]}")
     fi
 
     if [ ${#selected_links[@]} -eq 0 ]; then
@@ -1859,6 +2548,10 @@ generate_subscription_link() {
     local sub_filename
     sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     local sub_filepath="$sub_dir/$sub_filename"
+
+    # 注册临时文件以便自动删除
+    register_temp_file "$sub_filepath"
+
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str
     all_links_str=$(printf "%s\n" "${node_lines[@]}")
@@ -1868,13 +2561,11 @@ generate_subscription_link() {
     local sub_url="http://$host/$sub_filename"
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
-    log_warn "此链接将在您按键返回后被自动删除。"
+    log_warn "此链接将在您退出脚本后被自动删除。"
     echo -e "$CYAN--------------------------------------------------------------$NC"
     echo -e "\n$YELLOW$sub_url$NC\n"
     echo -e "$CYAN--------------------------------------------------------------$NC"
     press_any_key
-    rm -f "$sub_filepath"
-    log_info "临时订阅文件已删除。"
 }
 
 generate_tuic_client_config() {
@@ -1884,8 +2575,68 @@ generate_tuic_client_config() {
     press_any_key
 }
 
+singbox_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        local STATUS_COLOR
+        if is_singbox_installed; then
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+            read -p "请输入选项: " choice
+            case $choice in
+            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
+            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+            6) clear; journalctl -u sing-box -f --no-pager ;;
+            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+            read -p "请输入选项: " choice
+            case $choice in
+            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
 # =================================================
-#                Sub-Store 管理 (substore_main_menu)
+#                Sub-Store 管理
 # =================================================
 
 is_substore_installed() {
@@ -2118,9 +2869,9 @@ substore_setup_reverse_proxy() {
     if [ $? -eq 0 ]; then
         log_info "正在将域名保存到服务配置中以供显示..."
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-            sed -i "s|SUB_STORE_REVERSE_PROXY_DOMAIN=.*|SUB_STORE_REVERSE_PROXY_DOMAIN=$domain|" "$SUBSTORE_SERVICE_FILE"
+            sed -i.bak "s|SUB_STORE_REVERSE_PROXY_DOMAIN=.*|SUB_STORE_REVERSE_PROXY_DOMAIN=\"$domain\"|" "$SUBSTORE_SERVICE_FILE"
         else
-            sed -i "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
+            sed -i.bak "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
         fi
         systemctl daemon-reload
         log_info "✅ Sub-Store 反向代理设置完成！"
@@ -2152,8 +2903,8 @@ substore_reset_ports() {
         fi
     done
 
-    sed -i "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    sed -i "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    sed -i.bak "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
+    sed -i.bak "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
     systemctl daemon-reload
     systemctl restart "$SUBSTORE_SERVICE_NAME"
     log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"
@@ -2167,7 +2918,7 @@ substore_reset_api_key() {
     read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
     NEW_API_KEY=${user_api_key:-$(generate_random_password)}
 
-    sed -i "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
+    sed -i.bak "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
     systemctl daemon-reload
     systemctl restart "$SUBSTORE_SERVICE_NAME"
     log_info "✅ API 密钥已更新，服务已重启。"
@@ -2178,13 +2929,11 @@ substore_reset_api_key() {
 substore_manage_menu() {
     while true; do
         clear
-        # 动态获取菜单文本
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
             rp_menu_text="更换反代域名"
         fi
 
-        # 动态获取服务状态和颜色
         local STATUS_COLOR
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
             STATUS_COLOR="$GREEN● 活动$NC"
@@ -2192,7 +2941,6 @@ substore_manage_menu() {
             STATUS_COLOR="$RED● 不活动$NC"
         fi
 
-        # --- 开始绘制新菜单 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                  Sub-Store 管理                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
@@ -2236,7 +2984,48 @@ substore_manage_menu() {
     done
 }
 
-
+substore_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        local STATUS_COLOR
+        if is_substore_installed; then
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_manage_menu ;; 2) update_sub_store_app ;;
+            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        else
+            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            read -p "请输入选项: " choice
+            case $choice in
+            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            esac
+        fi
+    done
+}
 # =================================================
 #               哪吒监控 (nezha_main_menu)
 # =================================================
@@ -2290,7 +3079,6 @@ uninstall_nezha_agent_phoenix() {
     press_any_key
 }
 
-# 负责所有 Nezha Agent 的“下载-安装-改造”通用流程。
 install_and_adapt_nezha_agent() {
     local version_id="$1"
     local official_script_url="$2"
@@ -2314,6 +3102,7 @@ install_and_adapt_nezha_agent() {
     ensure_dependencies "curl" "wget" "unzip"
 
     local script_tmp_path="/tmp/nezha_install_${version_id}.sh"
+    register_temp_file "$script_tmp_path"
     log_info "正在下载官方安装脚本..."
     if ! curl -L "$official_script_url" -o "$script_tmp_path"; then
         log_error "下载官方脚本失败！"
@@ -2323,7 +3112,7 @@ install_and_adapt_nezha_agent() {
     chmod +x "$script_tmp_path"
 
     log_info "第1步：执行官方原版脚本进行标准安装..."
-    eval "$install_command" # 使用 eval 来执行包含环境变量的完整命令字符串
+    eval "$install_command"
     rm "$script_tmp_path"
 
     if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
@@ -2341,7 +3130,7 @@ install_and_adapt_nezha_agent() {
     mv /opt/nezha/agent "$install_dir"
 
     log_info "第3步：修改新的服务文件，使其指向正确的路径..."
-    sed -i "s|/opt/nezha/agent|$install_dir|g" "$service_file"
+    sed -i.bak "s|/opt/nezha/agent|$install_dir|g" "$service_file"
 
     log_info "第4步：重载并启动改造后的 '$service_name' 服务..."
     systemctl daemon-reload
@@ -2360,7 +3149,6 @@ install_and_adapt_nezha_agent() {
     press_any_key
 }
 
-# 封装了所有 V1 风格探针的通用安装逻辑。
 _nezha_v1_style_installer() {
     local version_id="$1"
     local friendly_name="$2"
@@ -2507,36 +3295,388 @@ nezha_dashboard_menu() {
     done
 }
 
+nezha_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+#           新增：Docker 通用管理 (V2.0 增强版)
+# =================================================
+
+# 通用的辅助函数，用于选择一个项目（容器或镜像）并对其执行操作
+_docker_select_and_perform_action() {
+    local item_type="$1"       # "容器" 或 "镜像"
+    local list_command="$2"    # 'docker ps -a' 或 'docker images'
+    local action_command="$3"  # 'docker start', 'docker stop', 'docker rm' 等
+    local prompt_message="$4"  # "请输入要启动的容器..."
+    local confirmation_needed=$5 # "true" 或 "false"
+    local confirmation_message="$6" # "确定要强制删除吗？"
+
+    clear
+    log_info "当前所有${item_type}列表:"
+    eval "$list_command"
+    echo ""
+
+    local target_id
+    read -p "$prompt_message" target_id
+    if [ -z "$target_id" ]; then
+        log_error "${item_type}名称或ID不能为空！"
+        press_any_key
+        return
+    fi
+
+    if [ "$confirmation_needed" = "true" ]; then
+        read -p "$confirmation_message (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            log_info "操作已取消。"
+            press_any_key
+            return
+        fi
+    fi
+
+    log_info "正在对 ${item_type} [$target_id] 执行操作..."
+    if eval "$action_command '$target_id'"; then
+        log_info "✅ 操作成功！"
+    else
+        log_error "操作失败！请检查 ${item_type} 名称/ID 是否正确，或查看 Docker 的错误提示。"
+    fi
+    press_any_key
+}
+
+# --- 容器管理函数 ---
+docker_list_containers() {
+    clear
+    log_info "列出所有 Docker 容器 (包括已停止的):"
+    docker ps -a
+    press_any_key
+}
+
+docker_start_container() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker start" "请输入要启动的容器名称或ID: "
+}
+
+docker_stop_container() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker stop" "请输入要停止的容器名称或ID: "
+}
+
+docker_restart_container() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker restart" "请输入要重启的容器名称或ID: "
+}
+
+docker_view_logs() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker logs -f" "请输入要查看日志的容器名称或ID: "
+}
+
+docker_remove_stopped_container() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker rm" \
+    "请输入要删除的【已停止】容器名称或ID: " "true" \
+    "警告：此操作将永久删除容器，但保留其命名数据卷。确定吗？"
+}
+
+docker_force_remove_container() {
+    _docker_select_and_perform_action "容器" "docker ps -a" "docker rm -fv" \
+    "请输入要【强制】删除的容器名称或ID: " "true" \
+    "警告：此操作将强制停止并永久删除容器，并会删除其关联的【匿名】数据卷！确定吗？"
+}
+
+# --- 镜像管理函数 ---
+docker_list_images() {
+    clear
+    log_info "列出所有 Docker 镜像:"
+    docker images
+    press_any_key
+}
+
+docker_remove_image() {
+    _docker_select_and_perform_action "镜像" "docker images" "docker rmi" \
+    "请输入要删除的镜像名称或ID: " "true" \
+    "警告：如果该镜像正被容器使用，删除会失败。确定要删除吗？"
+}
+
+docker_prune_images() {
+    clear
+    log_warn "此操作将删除所有未被任何容器使用的“悬空”镜像 (dangling images)。"
+    read -p "这是一个安全的清理操作，确定要继续吗? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "正在执行清理..."
+        docker image prune -af
+        log_info "✅ 未使用镜像清理完成。"
+    else
+        log_info "操作已取消。"
+    fi
+    press_any_key
+}
+
+# --- 系统级管理函数 ---
+docker_prune_system() {
+    clear
+    log_warn "此操作将删除所有已停止的容器、未被任何容器使用的网络、"
+    log_warn "所有悬空镜像 (dangling images) 以及所有悬空构建缓存。"
+    read -p "这是一个全面的清理操作，确定要继续吗? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "正在执行清理..."
+        docker system prune -af
+        log_info "✅ 系统清理完成。"
+    else
+        log_info "操作已取消。"
+    fi
+    press_any_key
+}
+
+install_portainer() {
+    if ! _install_docker_and_compose; then press_any_key; return; fi
+    clear
+    log_info "正在准备安装 Portainer-CE (Docker 管理面板)..."
+
+    local https_port http_port
+    while true; do
+        read -p "请输入 Portainer 的 HTTPS 访问端口 (默认: 9443): " https_port
+        https_port=${https_port:-"9443"}
+        if check_port "$https_port"; then break; fi
+    done
+    while true; do
+        read -p "请输入 Portainer 的 HTTP 端口 (默认: 8000): " http_port
+        http_port=${http_port:-"8000"}
+        if [[ "$http_port" == "$https_port" ]]; then
+            log_error "HTTP 端口不能与 HTTPS 端口相同！"
+        elif check_port "$http_port"; then
+            break
+        fi
+    done
+
+    log_info "正在安装 Portainer..."
+    docker volume create portainer_data
+    docker run -d \
+        -p "$http_port:8000" \
+        -p "$https_port:9443" \
+        --name portainer \
+        --restart=always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:latest
+
+    sleep 5
+    if docker ps | grep -q "portainer"; then
+        log_info "✅ Portainer 已成功启动！"
+
+        read -p "安装已完成，是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
+        if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
+            local domain
+            while true; do
+                read -p "请输入您为 Portainer 准备的域名: " domain
+                if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
+            done
+
+            if setup_auto_reverse_proxy "$domain" "$https_port"; then
+                log_info "✅ Portainer 反向代理设置完成！"
+                log_info "请通过以下地址访问 (Caddy 会自动处理证书，Nginx 会使用 Let's Encrypt):"
+                log_info "https://$domain"
+            else
+                log_error "反向代理设置失败，请检查之前的错误信息。"
+            fi
+        else
+            local public_ip=$(get_public_ip v4)
+            log_info "好的，您选择不设置反向代理。请通过 IP 地址访问进行初始化设置:"
+            log_info "https://$public_ip:$https_port"
+            log_warn "首次访问浏览器可能会提示证书不安全，请选择“继续前往”。"
+        fi
+    else
+        log_error "Portainer 启动失败，请检查 Docker 日志。"
+    fi
+    press_any_key
+}
+
+
+# --- 子菜单定义 ---
+
+docker_container_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                     容器管理                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 列出所有容器                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 启动一个容器                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 停止一个容器                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 重启一个容器                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 查看容器实时日志                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. ${YELLOW}删除已停止的容器$NC                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. ${RED}强制删除容器 (并清理数据)${NC}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) docker_list_containers ;;
+        2) docker_start_container ;;
+        3) docker_stop_container ;;
+        4) docker_restart_container ;;
+        5) docker_view_logs ;;
+        6) docker_remove_stopped_container ;;
+        7) docker_force_remove_container ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+docker_image_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                     镜像管理                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 列出所有镜像                                $CYAN║$NC"
+       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${YELLOW}删除一个指定镜像$NC                            $CYAN║$NC"
+       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}清理所有未使用的镜像${NC}                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) docker_list_images ;;
+        2) docker_remove_image ;;
+        3) docker_prune_images ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+
+# --- 主管理菜单 (V2.0) ---
+docker_manage_menu() {
+    if ! command -v docker &>/dev/null; then
+        _install_docker_and_compose
+        if ! command -v docker &>/dev/null; then
+             log_error "Docker 安装失败，无法进入管理菜单。"
+             press_any_key
+             return
+        fi
+    fi
+
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) docker_container_menu ;;
+        2) docker_image_menu ;;
+        3) docker_prune_system ;;
+        4) install_portainer ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
 # =================================================
 #           Docker 应用 & 面板 (docker_apps_menu)
 # =================================================
 
-# --- 通用 Docker 应用管理 ---
 _install_docker_and_compose() {
     if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "Docker 和 Docker Compose V2 已安装。"
         return 0
     fi
     log_warn "未检测到完整的 Docker 环境，开始执行官方标准安装流程..."
-    ensure_dependencies "ca-certificates" "curl" "gnupg"
-    log_info "正在添加 Docker 官方 GPG 密钥..."
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    log_info "正在添加 Docker 软件仓库..."
-    local os_id
-    os_id=$(. /etc/os-release && echo "$ID")
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$os_id \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    log_info "正在更新软件包列表以识别新的 Docker 仓库..."
-    set -e
-    apt-get update -y
-    log_info "正在安装 Docker Engine, CLI, Containerd, 和 Docker Compose 插件..."
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    case "$PKG_MANAGER" in
+        apt)
+            ensure_dependencies "ca-certificates" "curl" "gnupg"
+            log_info "正在添加 Docker 官方 GPG 密钥..."
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+            chmod a+r /etc/apt/keyrings/docker.asc
+            log_info "正在添加 Docker 软件仓库..."
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$OS_ID $OS_VERSION_CODENAME stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+            set -e
+            apt-get update -y
+            log_info "正在安装 Docker Engine, CLI, Containerd, 和 Docker Compose 插件..."
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        yum|dnf)
+            ensure_dependencies "curl"
+            if [ "$PKG_MANAGER" == "yum" ]; then ensure_dependencies "yum-utils"; fi
+            log_info "正在添加 Docker 软件仓库..."
+            local repo_url="https://download.docker.com/linux/centos/docker-ce.repo"
+            if [ "$OS_ID" == "fedora" ]; then repo_url="https://download.docker.com/linux/fedora/docker-ce.repo"; fi
+
+            if command -v dnf &>/dev/null; then
+                dnf config-manager --add-repo "$repo_url"
+            elif command -v yum-config-manager &>/dev/null; then
+                 yum-config-manager --add-repo "$repo_url"
+            else
+                log_error "缺少 config-manager, 无法自动添加仓库。"
+                return 1
+            fi
+
+            set -e
+            log_info "正在安装 Docker Engine, CLI, Containerd, 和 Docker Compose 插件..."
+            "$PKG_MANAGER" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+    esac
+
     set +e
     if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         log_info "✅ Docker 和 Docker Compose V2 已成功安装！"
+        systemctl start docker
+        systemctl enable docker
         return 0
     else
         log_error "Docker 环境安装失败！请检查上面的日志输出。"
@@ -2549,7 +3689,7 @@ uninstall_docker_compose_project() {
     local default_dir=$2
     local project_dir
 
-    read -p "请输入要卸载的 $app_name 的安装目录 [默认: $default_dir]: " project_dir
+    read -e -p "请输入要卸载的 $app_name 的安装目录 [默认: $default_dir]: " project_dir
     project_dir=${project_dir:-$default_dir}
 
     if [ ! -f "$project_dir/docker-compose.yml" ]; then
@@ -2583,7 +3723,6 @@ uninstall_docker_compose_project() {
     press_any_key
 }
 
-# --- UI 面板 ---
 install_sui() {
     ensure_dependencies "curl"
     log_info "正在准备安装 S-ui..."
@@ -2600,7 +3739,6 @@ install_3xui() {
     press_any_key
 }
 
-# --- WordPress ---
 install_wordpress() {
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
@@ -2612,14 +3750,13 @@ install_wordpress() {
 
     local project_dir
     while true; do
-        read -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
+        read -e -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
         project_dir=${project_dir:-"/root/wordpress"}
         if [ -f "$project_dir/docker-compose.yml" ]; then
             log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
             read -p "是否要先卸载它？(y/N): " uninstall_choice
             if [[ "$uninstall_choice" =~ ^[Yy]$ ]]; then
                 uninstall_wordpress
-                # 卸载后再次检查，如果目录还存在（用户选择不删除），则继续循环
                 if [ -d "$project_dir" ]; then continue; else break; fi
             else
                 log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
@@ -2644,7 +3781,7 @@ install_wordpress() {
     local db_password
     read -s -p "请输入新的数据库 root 和用户密码 [默认随机生成]: " db_password
     db_password=${db_password:-$(generate_random_password)}
-    echo "" # 换行
+    echo ""
     log_info "数据库密码已设置为: $db_password"
 
     local wp_port
@@ -2744,7 +3881,6 @@ uninstall_wordpress() {
     uninstall_docker_compose_project "WordPress" "/root/wordpress"
 }
 
-# --- 苹果CMS ---
 get_latest_maccms_tag() {
     local repo_api="https://api.github.com/repos/magicblack/maccms10/tags"
     local latest_tag
@@ -2779,7 +3915,7 @@ install_maccms() {
     ensure_dependencies "unzip" "file"
 
     local project_dir
-    read -p "请输入安装目录 [默认: /root/maccms]: " project_dir
+    read -e -p "请输入安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
 
     if [ -f "$project_dir/docker-compose.yml" ]; then
@@ -2947,11 +4083,137 @@ uninstall_maccms() {
     uninstall_docker_compose_project "苹果CMS" "/root/maccms"
 }
 
+install_uptime_kuma() {
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 Uptime Kuma。"
+        press_any_key; return;
+    fi
+    clear
+    log_info "开始使用 Docker Compose 搭建 Uptime Kuma..."
+
+    local project_dir="/root/uptime-kuma"
+    mkdir -p "$project_dir"
+    cd "$project_dir" || return 1
+
+    local web_port
+    while true; do
+        read -p "请输入 Uptime Kuma 的外部访问端口 [默认: 3001]: " web_port
+        web_port=${web_port:-"3001"}
+        if check_port "$web_port"; then break; fi
+    done
+
+    cat > docker-compose.yml <<EOF
+version: '3.8'
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: always
+    ports:
+      - "$web_port:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+
+volumes:
+  uptime_kuma_data:
+EOF
+
+    log_info "正在启动 Uptime Kuma 服务..."
+    docker compose up -d
+
+    log_info "检查服务状态..."
+    sleep 5
+    docker compose ps
+
+    local public_ip=$(get_public_ip v4)
+    log_info "✅ Uptime Kuma 安装完成！"
+    log_info "请通过 http://$public_ip:$web_port 访问。"
+    press_any_key
+}
+
+uninstall_uptime_kuma() {
+    uninstall_docker_compose_project "Uptime Kuma" "/root/uptime-kuma"
+}
+
+docker_apps_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟────────────────── $WHITE WordPress $CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 搭建 WordPress                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}卸载 WordPress$NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟─────────────────── $WHITE苹果CMS$CYAN ──────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 搭建苹果CMS影视站                           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${RED}卸载苹果CMS$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────── $WHITEUptime Kuma$CYAN ────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. ${GREEN}安装 Uptime Kuma 监控面板${NC}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. ${RED}卸载 Uptime Kuma${NC}                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) ui_panels_menu ;;
+        2) install_wordpress ;;
+        3) uninstall_wordpress ;;
+        4) install_maccms ;;
+        5) uninstall_maccms ;;
+        6) install_uptime_kuma ;;
+        7) uninstall_uptime_kuma ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
+ui_panels_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        read -p "请输入选项: " choice
+        case $choice in
+            1) install_sui; break ;;
+            2) install_3xui; break ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+
 # =================================================
 #           证书 & 反代 (certificate_management_menu)
 # =================================================
 
-# --- 证书管理 ---
 list_certificates() {
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法管理证书。"
@@ -3052,7 +4314,6 @@ renew_certificates() {
     press_any_key
 }
 
-# --- 反向代理 ---
 _handle_caddy_cert() {
     log_error "脚本的自动证书功能与 Caddy 冲突。请手动配置 Caddyfile。"
     return 1
@@ -3109,12 +4370,24 @@ apply_ssl_certificate() {
         return 0
     fi
     log_info "证书不存在，开始智能检测环境并为 $domain_name 申请新证书..."
-    ensure_dependencies "certbot"
+
+    local certbot_dep="certbot"
+    if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+        # On RHEL/CentOS, it's better to install from EPEL
+        log_warn "在 RHEL/CentOS 上, Certbot 通常位于 EPEL 仓库。"
+        log_warn "如果安装失败，请先手动安装 epel-release 包。"
+    fi
+    ensure_dependencies "$certbot_dep"
+
     if command -v caddy &>/dev/null; then
         _handle_caddy_cert
     else
         log_info "未检测到 Caddy，将默认使用 Nginx 模式。"
-        ensure_dependencies "nginx" "python3-certbot-nginx"
+        local nginx_certbot_dep="python3-certbot-nginx"
+        if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+            nginx_certbot_dep="python3-certbot-nginx"
+        fi
+        ensure_dependencies "nginx" "$nginx_certbot_dep"
         _handle_nginx_cert "$domain_name"
     fi
     return $?
@@ -3186,6 +4459,7 @@ _configure_caddy_proxy() {
         log_info "请手动检查您的 Caddyfile 文件。"
         return 0
     fi
+    # 【修正】将这里的非标准空格替换为标准空格
     echo -e "\n# Auto-generated by vps-toolkit for $domain\n$domain {\n    reverse_proxy 127.0.0.1:$port\n}" >>"$caddyfile"
     log_info "正在重载 Caddy 服务..."
     if ! caddy fmt --overwrite "$caddyfile"; then
@@ -3236,7 +4510,7 @@ setup_auto_reverse_proxy() {
         fi
     else
         log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
-        ensure_dependencies "nginx" "python3-certbot-nginx" "certbot"
+        ensure_dependencies "nginx"
         if command -v nginx &>/dev/null; then
             setup_auto_reverse_proxy "$domain_input" "$local_port"
             status=$?
@@ -3246,803 +4520,10 @@ setup_auto_reverse_proxy() {
         fi
     fi
 
-    # 如果不是由其他函数调用 (即没有传入参数)，则暂停
     if [ -z "$1" ]; then
         press_any_key
     fi
     return $status
-}
-# =================================================
-#           实用工具 (增强)
-# =================================================
-
-# --- Fail2Ban ---
-fail2ban_menu() {
-    ensure_dependencies "fail2ban"
-    if ! command -v fail2ban-client &>/dev/null; then
-        log_error "Fail2Ban 未能成功安装，请检查依赖。"
-        press_any_key
-        return
-    fi
-
-    while true; do
-        clear
-        local status
-        status=$(fail2ban-client status)
-        local jail_count
-        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
-        local sshd_status
-        sshd_status=$(fail2ban-client status sshd)
-        local banned_count
-        banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
-        local total_banned
-        total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
-
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1)
-            clear
-            log_info "Fail2Ban 总体状态:"
-            fail2ban-client status
-            echo -e "\n$CYAN----------------------------------------------------$NC"
-            log_info "SSHD 防护详情:"
-            fail2ban-client status sshd
-            press_any_key
-            ;;
-        2)
-            clear
-            log_info "显示最近 50 条 Fail2Ban 日志:"
-            tail -50 /var/log/fail2ban.log
-            press_any_key
-            ;;
-        3)
-            read -p "请输入要解封的 IP 地址: " ip_to_unban
-            if [ -n "$ip_to_unban" ]; then
-                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
-                fail2ban-client set sshd unbanip "$ip_to_unban"
-            else
-                log_error "IP 地址不能为空！"
-            fi
-            press_any_key
-            ;;
-        4)
-            log_info "正在重启 Fail2Ban..."
-            systemctl restart fail2ban
-            sleep 1
-            log_info "服务已重启。"
-            ;;
-        5)
-            read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
-            if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                log_info "正在停止并卸载 Fail2Ban..."
-                systemctl stop fail2ban
-                apt-get remove --purge -y fail2ban
-                log_info "✅ Fail2Ban 已卸载。"
-                press_any_key
-                return
-            fi
-            ;;
-        0) return ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-# 新增: 列出所有普通用户的函数
-list_normal_users() {
-    clear
-    log_info "正在列出所有普通用户 (UID >= 1000)..."
-
-    # 使用 awk 解析 /etc/passwd 文件，格式化输出
-    local user_list
-    user_list=$(awk -F: '$3 >= 1000 && $3 != 65534 {
-        printf "  - 用户名: \033[1;37m%-15s\033[0m UID: %-5s Shell: %s\n", $1, $3, $7
-        printf "    主目录: %s\n\n", $6
-    }' /etc/passwd)
-
-    if [ -n "$user_list" ]; then
-        echo -e "$CYAN--------------------------------------------------------------------$NC"
-        echo -e "$user_list"
-        echo -e "$CYAN--------------------------------------------------------------------$NC"
-    else
-        log_warn "未找到任何普通用户。"
-    fi
-
-    press_any_key
-}
-# 最终修复版: manage_users_menu 函数
-manage_users_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有普通用户                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 创建一个新的 Sudo 用户                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1)
-            list_normal_users
-            ;;
-        2)
-            clear
-            echo -e "请为新用户选择主要的登录方式:\n"
-            echo -e "  1. ${YELLOW}密码登录$NC (创建一个带密码的新用户)"
-            echo -e "  2. ${GREEN}密钥登录$NC (创建用户, 并从现有用户复制公钥)"
-            echo -e "\n  0. 返回\n"
-            read -p "请输入选项: " login_choice
-
-            if [[ "$login_choice" != "1" && "$login_choice" != "2" ]]; then
-                continue
-            fi
-
-            read -p "请输入新用户名 (必须以小写字母开头): " username
-            if [ -z "$username" ]; then log_error "用户名不能为空！"; press_any_key; continue; fi
-            if ! [[ "$username" =~ ^[a-z][a-z0-9_-]*$ ]]; then log_error "用户名格式不正确！"; press_any_key; continue; fi
-            if id "$username" &>/dev/null; then log_error "用户 '$username' 已存在！"; press_any_key; continue; fi
-
-            useradd -m -s /bin/bash "$username"
-            if [ $? -ne 0 ]; then
-                log_error "创建用户 '$username' 失败！"
-                press_any_key
-                continue
-            fi
-            usermod -aG sudo "$username"
-            log_info "✅ 用户 '$username' 已创建并添加到 sudo 组。"
-
-            if [ "$login_choice" == "1" ]; then
-                log_info "请为用户 '$username' 设置密码。"
-                passwd "$username"
-                if [ $? -eq 0 ]; then
-                    log_info "✅ 密码设置成功！"
-
-                    local ssh_config_file="/etc/ssh/sshd_config"
-                    if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file" || grep -q -E "^\s*AuthenticationMethods"; then
-                        echo
-                        log_warn "检测到服务器当前可能禁止或限制密码登录。"
-                        read -p "是否要自动修改SSH配置以确保密码登录可用? (Y/n): " allow_pwd
-                        if [[ ! "$allow_pwd" =~ ^[Nn]$ ]]; then
-                            sed -i -E 's/^\s*#?\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/' "$ssh_config_file"
-                            if ! grep -q -E "^\s*PasswordAuthentication\s+yes" "$ssh_config_file"; then
-                                echo "" >> "$ssh_config_file"; echo "PasswordAuthentication yes" >> "$ssh_config_file"
-                            fi
-                            sed -i -E 's/^(\s*AuthenticationMethods\s+.*)/#\1/' "$ssh_config_file"
-
-                            log_info "正在重启SSH服务以应用更改..."
-                            if systemctl restart ssh || systemctl restart sshd; then # 修正: 优先尝试 ssh
-                                log_info "✅ SSH服务已重启, 密码登录应该已开启。"
-                            else
-                                log_error "SSH服务重启失败！请手动检查。"
-                            fi
-                        else
-                            log_warn "您选择了不修改配置，新用户 '$username' 可能无法通过SSH登录。"
-                        fi
-                    fi
-                else
-                    log_error "密码设置失败或被取消！"
-                fi
-                press_any_key
-
-            elif [ "$login_choice" == "2" ]; then
-                # ... 密钥登录的代码 ...
-                log_info "正在为用户 '$username' 配置密钥登录..."
-                passwd -l "$username" >/dev/null # 锁定密码
-
-                local source_user=""
-                local source_key_file=""
-                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ] && [ -f "/home/$SUDO_USER/.ssh/authorized_keys" ]; then
-                    source_user="$SUDO_USER"
-                    source_key_file="/home/$source_user/.ssh/authorized_keys"
-                else
-                    local normal_users=$(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
-                    for user in $normal_users; do
-                        if [ -f "/home/$user/.ssh/authorized_keys" ]; then
-                            source_user="$user"
-                            source_key_file="/home/$user/.ssh/authorized_keys"
-                            break
-                        fi
-                    done
-                fi
-                if [ -z "$source_user" ] && [ -f "/root/.ssh/authorized_keys" ]; then
-                    source_user="root"
-                    source_key_file="/root/.ssh/authorized_keys"
-                fi
-
-                if [ -n "$source_user" ]; then
-                    log_info "检测到来自用户 '$source_user' 的可用公钥。"
-                    mkdir -p "/home/$username/.ssh"
-                    cp "$source_key_file" "/home/$username/.ssh/authorized_keys"
-                    chown -R "$username:$username" "/home/$username/.ssh"
-                    chmod 700 "/home/$username/.ssh"
-                    chmod 600 "/home/$username/.ssh/authorized_keys"
-                    log_info "✅ SSH 公钥已成功复制。"
-
-                    echo
-                    read -p "是否要配置sudo使其无需密码? (推荐 Y/n): " sudo_nopasswd
-                    if [[ ! "$sudo_nopasswd" =~ ^[Nn]$ ]]; then
-                        local sudo_config_file="/etc/sudoers.d/90-nopasswd-sudo"
-                        echo "Defaults timestamp_timeout=-1" > "$sudo_config_file"
-                        echo "%sudo ALL=(ALL) NOPASSWD: ALL" >> "$sudo_config_file"
-                        chmod 440 "$sudo_config_file"
-                        log_info "✅ Sudo 已配置为免密。下次 '$username' 登录后可直接使用 sudo -i。"
-                    fi
-                    log_warn "现在, 你应该可以使用与 '$source_user' 相同的密钥直接登录 '$username' 用户了。"
-                else
-                    log_error "未在系统中找到任何可用的 SSH 公钥文件进行复制！"
-                    log_warn "用户 '$username' 已创建但未配置密钥，且密码已被锁定。"
-                fi
-                press_any_key
-            fi
-            ;;
-        3)
-            # ... 删除用户的代码 ...
-            clear
-            log_info "正在获取可删除的普通用户列表..."
-
-            local deletable_users=()
-            mapfile -t deletable_users < <(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd)
-
-            if [ ${#deletable_users[@]} -eq 0 ]; then
-                log_warn "未找到任何可删除的普通用户。"
-                press_any_key
-                continue
-            fi
-
-            log_info "请选择要删除的用户:\n"
-            for i in "${!deletable_users[@]}"; do
-                if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "${deletable_users[$i]}" ]; then
-                     echo -e "   $((i + 1)). ${deletable_users[$i]} ${RED}(当前Sudo用户, 不可删除)${NC}"
-                else
-                     echo -e "   $((i + 1)). ${deletable_users[$i]}"
-                fi
-            done
-            echo -e "\n   0. 返回\n"
-
-            read -p "请输入选项: " choice_del
-            if ! [[ "$choice_del" =~ ^[0-9]+$ ]]; then log_error "无效输入。"; press_any_key; continue; fi
-            if [ "$choice_del" -eq 0 ]; then continue; fi
-            if [ "$choice_del" -lt 1 ] || [ "$choice_del" -gt ${#deletable_users[@]} ]; then
-                log_error "无效选项！"
-                press_any_key
-                continue
-            fi
-
-            local user_to_delete=${deletable_users[$((choice_del - 1))]}
-
-            if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" == "$user_to_delete" ]; then
-                log_error "为了系统安全，不能删除当前正在使用的 Sudo 用户 ('$SUDO_USER')！"
-                press_any_key
-                continue
-            fi
-            if [ "$user_to_delete" == "root" ]; then log_error "不能删除 root 用户！"; press_any_key; continue; fi
-
-            read -p "警告：这将永久删除用户 '$user_to_delete' 及其主目录下的所有文件！确定吗？(y/N): " confirm_del
-            if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
-                deluser --remove-home "$user_to_delete"
-                log_info "✅ 用户 '$user_to_delete' 已被删除。"
-            else
-                log_info "操作已取消。"
-            fi
-            press_any_key
-            ;;
-        0) return ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-# --- 自动更新 ---
-setup_auto_updates() {
-    ensure_dependencies "unattended-upgrades" "apt-listchanges"
-    if [ ! -f /etc/apt/apt.conf.d/50unattended-upgrades ]; then
-        log_error "unattended-upgrades 配置文件不存在，配置失败。"
-        press_any_key
-        return
-    fi
-    log_info "正在为您配置自动安全更新..."
-    dpkg-reconfigure --priority=low -f noninteractive unattended-upgrades
-    log_info "✅ unattended-upgrades 已配置并启用。"
-    log_warn "系统现在会自动安装重要的安全更新。"
-    press_any_key
-}
-
-# --- 性能测试 ---
-performance_test_menu() {
-     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 VPS 性能测试                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1)
-            log_info "正在执行 bench.sh 脚本..."
-            ensure_dependencies "curl"
-            curl -Lso- bench.sh | bash
-            press_any_key
-            ;;
-        2)
-            log_info "正在执行 speedtest-cli..."
-            ensure_dependencies "speedtest-cli"
-            speedtest-cli
-            press_any_key
-            ;;
-        3)
-            log_info "正在启动 btop..."
-            ensure_dependencies "btop"
-            btop
-            ;;
-        0) return ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-
-# --- 文件备份 ---
-backup_directory() {
-    clear
-    log_info "开始手动备份指定目录..."
-
-    local source_dir
-    read -p "请输入需要备份的目录的绝对路径 (例如 /var/www): " source_dir
-    if [ ! -d "$source_dir" ]; then
-        log_error "目录 '$source_dir' 不存在或不是一个目录！"
-        press_any_key
-        return
-    fi
-
-    local backup_dest
-    read -p "请输入备份文件存放的目标目录 [默认: /root]: " backup_dest
-    backup_dest=${backup_dest:-"/root"}
-    if [ ! -d "$backup_dest" ]; then
-        log_warn "目标目录 '$backup_dest' 不存在，将尝试创建它..."
-        mkdir -p "$backup_dest"
-        if [ $? -ne 0 ]; then
-            log_error "创建目标目录失败！"
-            press_any_key
-            return
-        fi
-    fi
-
-    local dir_name
-    dir_name=$(basename "$source_dir")
-    local timestamp
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
-    local full_backup_path="$backup_dest/$backup_filename"
-
-    log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
-    if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
-        log_info "✅ 备份成功！文件大小: $(du -sh "$full_backup_path" | awk '{print $1}')"
-    else
-        log_error "备份过程中发生错误！"
-        rm -f "$full_backup_path"
-    fi
-
-    press_any_key
-}
-# 新增: 自动测试并推荐优先级的函数
-test_and_recommend_priority() {
-    clear
-    log_info "开始进行 IPv4 与 IPv6 网络质量测试..."
-
-    # 检查服务器是否同时拥有 v4 和 v6 地址
-    local ipv4_addr
-    ipv4_addr=$(get_public_ip v4)
-    local ipv6_addr
-    ipv6_addr=$(get_public_ip v6)
-
-    if [ -z "$ipv4_addr" ] || [ -z "$ipv6_addr" ]; then
-        log_error "您的服务器不是一个标准的双栈网络环境，无法进行有意义的比较。"
-        press_any_key
-        return
-    fi
-
-    local test_url="http://cachefly.cachefly.net/100kb.test"
-    log_info "将通过两种协议分别连接测试点: $test_url"
-
-    local time_v4 time_v6
-
-    log_info "正在测试 IPv4 连接速度..."
-    # 使用 timeout 防止命令卡死
-    time_v4=$(timeout 10 curl -4 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
-
-    log_info "正在测试 IPv6 连接速度..."
-    time_v6=$(timeout 10 curl -6 -s -w '%{time_total}' -o /dev/null "$test_url" 2>/dev/null)
-
-    echo
-    log_info "测试结果:"
-
-    local recommendation=""
-
-    # 检查IPv4测试结果
-    if [ -n "$time_v4" ] && [ "$(echo "$time_v4 > 0" | bc)" -eq 1 ]; then
-        echo -e "$GREEN  IPv4 连接耗时: $time_v4 秒$NC"
-    else
-        time_v4="999" # 标记为失败
-        echo -e "$RED  IPv4 连接失败或超时$NC"
-    fi
-
-    # 检查IPv6测试结果
-    if [ -n "$time_v6" ] && [ "$(echo "$time_v6 > 0" | bc)" -eq 1 ]; then
-        echo -e "$GREEN  IPv6 连接耗时: $time_v6 秒$NC"
-    else
-        time_v6="999" # 标记为失败
-        echo -e "$RED  IPv6 连接失败或超时$NC"
-    fi
-
-    echo
-    # 分析结果并给出建议
-    if [ "$time_v6" == "999" ] && [ "$time_v4" != "999" ]; then
-        recommendation="IPv4"
-        log_warn "测试发现 IPv6 连接存在问题，强烈建议您设置为【IPv4 优先】以保证网络稳定性。"
-    elif [ "$time_v4" == "999" ] && [ "$time_v6" != "999" ]; then
-        recommendation="IPv6"
-        log_info "测试发现 IPv4 连接存在问题，您的网络环境可能更适合【IPv6 优先】。"
-    elif [ "$time_v4" != "999" ] && [ "$time_v6" != "999" ]; then
-        # 如果IPv6比IPv4慢超过30%，则推荐用IPv4，否则默认推荐IPv6
-        if (( $(echo "$time_v6 > $time_v4 * 1.3" | bc -l) )); then
-            recommendation="IPv4"
-            log_info "测试结果表明，您的 IPv4 连接速度明显优于 IPv6，推荐设置为【IPv4 优先】。"
-        else
-            recommendation="IPv6"
-            log_info "测试结果表明，您的 IPv6 连接质量良好，推荐设置为【IPv6 优先】以使用现代网络。"
-        fi
-    else
-        log_error "两种协议均连接失败，无法给出建议。请检查您的服务器网络配置。"
-        press_any_key
-        return
-    fi
-
-    echo
-    read -p "是否要采纳此建议并应用设置? (y/N): " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        if [ "$recommendation" == "IPv6" ]; then
-            log_info "正在设置为 [IPv6 优先]..."
-            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
-            log_info "✅ 已成功设置为 IPv6 优先。"
-        elif [ "$recommendation" == "IPv4" ]; then
-            log_info "正在设置为 [IPv4 优先]..."
-            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
-            fi
-            log_info "✅ 已成功设置为 IPv4 优先。"
-        fi
-    else
-        log_info "操作已取消。"
-    fi
-    press_any_key
-}
-
-# 新增: 网络优先级设置的子菜单
-network_priority_menu() {
-    while true; do
-        clear
-        local current_setting="未知"
-        if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-             current_setting="${GREEN}IPv6 优先${NC}"
-        else
-             current_setting="${YELLOW}IPv4 优先${NC}"
-        fi
-
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1)
-            test_and_recommend_priority
-            ;;
-        2)
-            log_info "正在手动设置为 [IPv6 优先]..."
-            sed -i '/^precedence ::ffff:0:0\/96/s/^/#/' /etc/gai.conf
-            log_info "✅ 已成功设置为 IPv6 优先。"
-            press_any_key
-            ;;
-        3)
-            log_info "正在手动设置为 [IPv4 优先]..."
-            if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
-                echo "precedence ::ffff:0:0/96  100" >>/etc/gai.conf
-            fi
-            log_info "✅ 已成功设置为 IPv4 优先。"
-            press_any_key
-            ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-# 实用工具主菜单
-utility_tools_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE性能与备份$CYAN ───────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) fail2ban_menu ;;
-        2) manage_users_menu ;;
-        3) setup_auto_updates ;;
-        4) performance_test_menu ;;
-        5) backup_directory ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-
-
-
-singbox_main_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-            read -p "请输入选项: " choice
-            case $choice in
-            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
-            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-            6) clear; journalctl -u sing-box -f --no-pager ;;
-            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
-            esac
-        else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-            read -p "请输入选项: " choice
-            case $choice in
-            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
-            esac
-        fi
-    done
-}
-
-substore_main_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
-            case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
-            esac
-        else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
-            case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
-            esac
-        fi
-    done
-}
-
-nezha_main_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) nezha_agent_menu ;;
-        2) nezha_dashboard_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-
-docker_apps_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟────────────────── $WHITE WordPress $CYAN ───────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 搭建 WordPress (Docker)                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}卸载 WordPress$NC                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE苹果CMS$CYAN ──────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 搭建苹果CMS影视站 (Docker)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载苹果CMS$NC                                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) ui_panels_menu ;;
-        2) install_wordpress ;;
-        3) uninstall_wordpress ;;
-        4) install_maccms ;;
-        5) uninstall_maccms ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-
-ui_panels_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        read -p "请输入选项: " choice
-        case $choice in
-            1) install_sui; break ;;
-            2) install_3xui; break ;;
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
 }
 
 certificate_management_menu() {
@@ -4079,12 +4560,14 @@ certificate_management_menu() {
 }
 
 # =================================================
-#               脚本初始化 & 主入口
+#           脚本初始化 & 主入口
 # =================================================
 
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
     local temp_script="/tmp/vps_tool_new.sh"
+    register_temp_file "$temp_script"
+
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
         log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
         press_any_key
@@ -4143,9 +4626,11 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. Docker 应用 & 面板安装                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. Docker 应用 & 面板安装                      $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -4161,8 +4646,9 @@ main_menu() {
         2) singbox_main_menu ;;
         3) substore_main_menu ;;
         4) nezha_main_menu ;;
-        5) docker_apps_menu ;;
-        6) certificate_management_menu ;;
+        5) docker_manage_menu ;;
+        6) docker_apps_menu ;;
+        7) certificate_management_menu ;;
         9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
@@ -4173,6 +4659,6 @@ main_menu() {
 
 # --- 脚本执行入口 ---
 check_root
-# 首次运行时不检查，因为可能会立即安装依赖导致冲突
+detect_os_and_package_manager
 initial_setup_check
 main_menu
