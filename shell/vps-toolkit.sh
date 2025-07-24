@@ -2068,12 +2068,11 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#           函数：处理 REALITY 特定设置 (集成自动时间校准)
+#           函数：处理 REALITY 特定设置 (增强版)
 # =================================================
 _singbox_handle_reality_setup() {
-    # --- 新增：在所有操作开始前，先确保时间是准确的 ---
+    # --- 确保时间准确 (此函数调用保持不变) ---
     _ensure_time_accuracy
-    # --- 结束 ---
 
     # 声明-n类型的变量，以引用的方式修改外部变量的值
     local -n private_key_ref=$1
@@ -2115,9 +2114,24 @@ _singbox_handle_reality_setup() {
     elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # 获取伪装域名 (serverName)
-    read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
-    server_name_ref=${server_name_input:-"www.bing.com"}
+    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
+    while true; do
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.bing.com"}
+
+        log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
+        # 使用curl测试HTTPS连接，-m 5设置5秒超时
+        # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
+        if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
+            log_info "✅ 连通性测试通过。"
+            break
+        else
+            log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
+            log_warn "请检查域名拼写，或更换一个可从本机访问的域名 (如 www.apple.com, www.microsoft.com)。"
+            echo ""
+        fi
+    done
+    # --- **修改结束** ---
 
     # 自动生成并验证 short_id
     while true; do
@@ -2285,6 +2299,9 @@ _singbox_build_protocol_config_and_link() {
         ;;
     esac
 }
+# =================================================
+#           函数: 节点添加总指挥 (增强版)
+# =================================================
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
@@ -2297,7 +2314,7 @@ singbox_add_node_orchestrator() {
     local reality_private_key reality_public_key reality_short_id
 
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        _ensure_time_accuracy
+        # 注意：这里我们调用的是上面修改过的 _singbox_handle_reality_setup 函数
         if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
             press_any_key
             return
@@ -2318,17 +2335,14 @@ singbox_add_node_orchestrator() {
     geo_info_json=$(curl -s ip-api.com/json)
 
     local city operator_name
-    # 注意：这里我们保留 country_code 的获取，以备将来可能需要，但在tag中不再使用
     local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
-
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
     local custom_id
     echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
     read custom_id
     custom_id=${custom_id:-$operator_name}
-
 
     local success_count=0
     local final_node_link=""
@@ -2338,10 +2352,7 @@ singbox_add_node_orchestrator() {
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
-        # --- 核心修改：在组装 tag_base 时，移除了 $country_code ---
         local tag_base="$city-$custom_id"
-        # --- 修改结束 ---
-
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
@@ -2392,6 +2403,15 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
+            # --- **修改核心**：增加 REALITY 和其他协议的最终提醒 ---
+            if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
+                echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
+                log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
+                log_warn "已经放行了此节点使用的 TCP 和 UDP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
+                log_warn "否则，客户端将无法连接！"
+                echo -e "$YELLOW==============================================================$NC"
+            fi
+
             if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
                 echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
                 for p in "${protocols_with_self_signed[@]}"; do
@@ -2408,6 +2428,7 @@ singbox_add_node_orchestrator() {
                 done
                 echo -e "\n$YELLOW==============================================================$NC"
             fi
+            # --- **修改结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
