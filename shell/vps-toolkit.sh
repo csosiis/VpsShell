@@ -1995,6 +1995,8 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   7. VLESS + Vision + REALITY                    $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2315,18 +2317,16 @@ singbox_add_node_orchestrator() {
     local geo_info_json
     geo_info_json=$(curl -s ip-api.com/json)
 
-    local country_code city operator_name
-    country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
+    local city operator_name
+    # 注意：这里我们保留 country_code 的获取，以备将来可能需要，但在tag中不再使用
+    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
 
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
     local custom_id
-    # --- 从这里开始是针对显示错误的修复 ---
-    # 使用 echo -e 独立打印带颜色的提示，避免 read -p 的解析问题
     echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
     read custom_id
-    # --- 修复结束 ---
     custom_id=${custom_id:-$operator_name}
 
 
@@ -2338,7 +2338,10 @@ singbox_add_node_orchestrator() {
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
-        local tag_base="$country_code-$city-$custom_id"
+        # --- 核心修改：在组装 tag_base 时，移除了 $country_code ---
+        local tag_base="$city-$custom_id"
+        # --- 修改结束 ---
+
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
