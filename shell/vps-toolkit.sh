@@ -1987,13 +1987,13 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. VLESS + Vision + REALITY                    $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   7. VLESS + Vision + REALITY                    $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2007,11 +2007,11 @@ _singbox_prompt_for_protocols() {
     3) protocols_ref=("Trojan") ;;
     4) protocols_ref=("Hysteria2") ;;
     5) protocols_ref=("TUIC") ;;
-    6) protocols_ref=("VLESS-REALITY") ;;
-    7)
+    6)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
+    7) protocols_ref=("VLESS-REALITY") ;;
     0) return 1 ;;
     *)
         log_error "无效选择，操作中止。"
@@ -2283,7 +2283,6 @@ _singbox_build_protocol_config_and_link() {
         ;;
     esac
 }
-
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
@@ -2291,22 +2290,17 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
     if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
 
-    # 为不同流程声明变量
     local cert_path key_path connect_addr sni_domain
     declare -A insecure_params
-
-    # REALITY 特定变量
     local reality_private_key reality_public_key reality_short_id
 
-    # 根据协议选择不同的设置流程
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        # 如果是 REALITY，调用专用的设置函数
+        _ensure_time_accuracy
         if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
             press_any_key
             return
         fi
     else
-        # 否则，走原来的证书设置流程
         if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
             press_any_key
             return
@@ -2317,12 +2311,28 @@ singbox_add_node_orchestrator() {
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
 
-    read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
-    custom_id=${custom_id:-"Jcole"}
+    # --- 从这里开始是核心修改 ---
 
-    local geo_info_json=$(curl -s ip-api.com/json)
-    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
-    local region_name=$(echo "$geo_info_json" | jq -r '.regionName // "N/A"' | sed 's/ //g')
+    # 1. 一次性获取所有需要的地理和网络信息
+    log_info "正在获取地理及运营商信息..."
+    local geo_info_json
+    geo_info_json=$(curl -s ip-api.com/json)
+
+    # 2. 提取国家代码、城市和运营商
+    local country_code city operator_name
+    country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
+    city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g') # 提取城市并移除空格
+
+    # 提取并清理运营商名称，使其更适合用作标签
+    operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
+
+    # 3. 在提示用户输入时，将清理后的运营商名称作为默认值
+    local custom_id
+    read -p "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: " custom_id
+    custom_id=${custom_id:-$operator_name}
+
+    # --- 到这里修改结束 ---
+
 
     local success_count=0
     local final_node_link=""
@@ -2332,7 +2342,8 @@ singbox_add_node_orchestrator() {
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
-        local tag_base="$country_code-$region_name-$custom_id"
+        # 使用新的变量来组成 tag
+        local tag_base="$country_code-$city-$custom_id"
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
@@ -2345,7 +2356,6 @@ singbox_add_node_orchestrator() {
         build_args[connect_addr]="$connect_addr"
         build_args[sni_domain]="$sni_domain"
 
-        # 根据协议，将不同的参数打包传递
         if [ "$protocol" == "VLESS-REALITY" ]; then
             build_args[private_key]="$reality_private_key"
             build_args[public_key]="$reality_public_key"
