@@ -4073,8 +4073,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
-
-# (这是被修改的函数, 新增了和WordPress类似的反向代理设置流程)
+# (这是被修改的函数, 优化了Nginx配置以提高兼容性和稳定性)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4106,7 +4105,6 @@ install_maccms() {
     local db_user="maccms_user"
     local db_port="3306"
     local web_port
-    # 修改了这里的提示文本，使其更清晰
     read -p "请输入一个内部代理端口 (例如 8880，用于反代): " web_port
     web_port=${web_port:-"8880"}
     if ! check_port "$web_port"; then press_any_key; return; fi
@@ -4148,28 +4146,27 @@ EOF
     mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
     rm -rf "$dir"
 
+    # --- 核心改动: 使用更标准和稳定的Nginx配置 ---
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
     listen 80;
     server_name localhost;
     root /var/www/html;
     index index.php index.html index.htm;
+
+    # 使用更现代和标准的 try_files 指令来处理路由
     location / {
-        if (!-e $request_filename) {
-            rewrite ^/index.php(.*)$ /index.php?s=$1 last;
-            rewrite ^/admin.php(.*)$ /admin.php?s=$1 last;
-            rewrite ^/api.php(.*)$ /api.php?s=$1 last;
-            rewrite ^(.*)$ /index.php?s=$1 last;
-            break;
-        }
+        try_files $uri $uri/ /index.php?$query_string;
     }
+
+    # 标准的PHP-FPM处理配置
     location ~ \.php$ {
-        try_files $uri =404;
-        fastcgi_pass   php:9000;
-        fastcgi_index  index.php;
-        fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include        fastcgi_params;
+        include fastcgi_params;
+        fastcgi_pass php:9000;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
+
+    # 拒绝访问 .htaccess 文件
     location ~ /\.ht {
         deny all;
     }
@@ -4242,7 +4239,6 @@ EOF
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
-    # --- 新增的反向代理设置流程 ---
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
     if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
         local domain
@@ -4251,7 +4247,6 @@ EOF
             if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
         done
         if setup_auto_reverse_proxy "$domain" "$web_port"; then
-            # 成功后，将域名信息写入文件，方便卸载时清理
             echo "$domain" > "$project_dir/.proxy_domain"
             log_info "✅ 反向代理设置完成！"
             echo "--------------------------------------------"
@@ -4544,7 +4539,7 @@ docker_apps_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                     应用 & 面板安装              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 搭建 WordPress                              $CYAN║$NC"
@@ -5029,7 +5024,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. Docker 应用 & 面板安装                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
