@@ -4073,7 +4073,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
-# (这是最终修复版函数, 修正了权限设置和状态检查的逻辑顺序)
+# (这是最终修复版函数, 引入Supervisor守护进程以保证PHP容器的绝对稳定性)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4112,32 +4112,57 @@ install_maccms() {
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    log_info "正在为 PHP 创建自定义配置文件 (Dockerfile)..."
+    # --- 核心改动 1: 创建 Supervisor 配置文件 ---
+    log_info "正在创建 Supervisor 守护进程配置文件..."
+    cat > "$project_dir/php/supervisord.conf" <<'EOF'
+[supervisord]
+nodaemon=true
+user=root
+
+[program:php-fpm]
+command=/usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/www.conf
+autostart=true
+autorestart=true
+priority=5
+user=root
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+    # --- 核心改动 2: 重写 Dockerfile 以集成 Supervisor ---
+    log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
+
+# 安装 Supervisor 和其他依赖
 RUN apt-get update && apt-get install -y \
+    supervisor \
     libfreetype6-dev \
     libjpeg62-turbo-dev \
     libpng-dev \
     libzip-dev \
     unzip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's/^\(user\s*=\s*\)www-data/\1root/' /usr/local/etc/php-fpm.d/www.conf
+
+# 安装PHP扩展
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
+
+# 复制 Supervisor 配置文件到镜像中
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# 设置容器启动时执行的命令为 Supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 EOF
 
     local maccms_version
     maccms_version=$(get_latest_maccms_tag)
-    if [ -z "$maccms_version" ]; then
-        log_error "从 GitHub 获取 maccms 最新版本标签失败！"
-        press_any_key
-        return 1
-    fi
+    if [ -z "$maccms_version" ]; then log_error "获取 maccms 最新版本标签失败！"; press_any_key; return 1; fi
     log_info "获取到最新版标签: $maccms_version"
-    if ! download_maccms_source "$maccms_version"; then
-        press_any_key
-        return 1
-    fi
+    if ! download_maccms_source "$maccms_version"; then press_any_key; return 1; fi
     unzip -q source.zip || { log_error "解压失败"; return 1; }
     rm -f source.zip
     local dir="maccms10-${maccms_version#v}"
@@ -4165,7 +4190,6 @@ server {
 }
 EOF
 
-    # 移除了废弃的 version 顶层属性
     cat >"$project_dir/docker-compose.yml" <<EOF
 services:
   db:
@@ -4214,29 +4238,21 @@ networks:
   maccms_net:
 EOF
 
-    log_info "正在构建自定义PHP镜像并启动所有服务..."
+    log_info "正在构建集成Supervisor的PHP镜像并启动所有服务..."
     log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
     docker compose up -d --build
 
     log_info "等待容器初始化 (8秒)..."
     sleep 8
 
-    # --- 核心修正：将权限修复操作移动到状态检查之前 ---
-    log_info "正在修复容器内文件权限 (这是确保PHP正常运行的关键步骤)..."
-    if docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html && \
-       docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime; then
-        log_info "✅ 容器内权限设置成功。"
-    else
-        log_error "在容器内设置权限失败！这很可能是导致启动失败的原因。"
-        log_info "请查看容器日志: cd $project_dir && docker compose logs php"
-        press_any_key
-        return 1
-    fi
+    # 权限修复依然保留，作为双重保险
+    log_info "正在修复容器内文件权限..."
+    docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
+    docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
     log_info "正在检查服务最终状态..."
-    # 修复权限后，现在再来检查容器是否能稳定运行
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "修复权限后，PHP 容器仍未能保持运行状态！"
+        log_error "引入Supervisor后，PHP 容器仍未能启动！问题可能非常复杂。"
         log_info "请使用以下命令查看容器的完整日志以诊断问题:"
         echo -e "\n  cd $project_dir && docker compose logs php\n"
         press_any_key
