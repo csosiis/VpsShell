@@ -4074,7 +4074,7 @@ download_maccms_source() {
     return 0
 }
 
-# (这是被修改的函数, 修复了502错误并优化了安装流程)
+# (这是被修改的函数, 新增了和WordPress类似的反向代理设置流程)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4106,20 +4106,18 @@ install_maccms() {
     local db_user="maccms_user"
     local db_port="3306"
     local web_port
-    read -p "请输入外部访问端口 [默认: 8880]: " web_port
+    # 修改了这里的提示文本，使其更清晰
+    read -p "请输入一个内部代理端口 (例如 8880，用于反代): " web_port
     web_port=${web_port:-"8880"}
+    if ! check_port "$web_port"; then press_any_key; return; fi
 
-    # 一次性创建所有需要的目录
+
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # --- 核心改动 1: 自动为PHP创建自定义环境配置文件 ---
     log_info "正在为 PHP 创建自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
-# 使用官方 PHP 7.4 FPM 镜像作为基础
 FROM php:7.4-fpm
-
-# 更新包列表并安装编译扩展所需的依赖
 RUN apt-get update && apt-get install -y \
     libfreetype6-dev \
     libjpeg62-turbo-dev \
@@ -4127,8 +4125,6 @@ RUN apt-get update && apt-get install -y \
     libzip-dev \
     unzip \
     && rm -rf /var/lib/apt/lists/*
-
-# 配置并安装Maccms必需的PHP扩展
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
 EOF
@@ -4141,12 +4137,10 @@ EOF
         return 1
     fi
     log_info "获取到最新版标签: $maccms_version"
-
     if ! download_maccms_source "$maccms_version"; then
         press_any_key
         return 1
     fi
-
     unzip -q source.zip || { log_error "解压失败"; return 1; }
     rm -f source.zip
     local dir="maccms10-${maccms_version#v}"
@@ -4154,7 +4148,6 @@ EOF
     mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
     rm -rf "$dir"
 
-    # 创建Nginx配置文件
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
     listen 80;
@@ -4183,8 +4176,6 @@ server {
 }
 EOF
 
-    # --- 核心改动 2: 生成新的 docker-compose.yml, 让php服务使用build方式 ---
-    log_info "正在生成 docker-compose.yml..."
     cat >"$project_dir/docker-compose.yml" <<EOF
 version: '3.8'
 
@@ -4204,7 +4195,6 @@ services:
       - maccms_net
 
   php:
-    # 不再直接使用镜像，而是通过build指令使用我们创建的Dockerfile
     build: ./php
     container_name: ${project_dir##*/}_php
     volumes:
@@ -4238,31 +4228,48 @@ EOF
 
     log_info "正在构建自定义PHP镜像并启动所有服务..."
     log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
-    # 使用 --build 参数来强制构建新镜像
     docker compose up -d --build
-
     log_info "正在检查服务状态..."
     sleep 5
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "PHP 容器未能成功启动！这是导致 502 错误的根本原因。"
+        log_error "PHP 容器未能成功启动！"
         log_info "请使用以下命令查看容器的构建和运行日志以诊断问题:"
         echo -e "\n  cd $project_dir && docker compose logs php\n"
         press_any_key
         return 1
     fi
     docker compose ps
-
-    log_info "正在修复容器内文件权限..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
-    log_info "安装完成！请访问 http://<你的服务器IP>:$web_port/install.php 来进行最后的安装步骤。"
-    log_warn "在安装向导的数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
-    local public_ip
-    public_ip=$(get_public_ip v4)
-    echo "--------------------------------------------"
-    echo "网站安装地址: http://$public_ip:$web_port/install.php"
-    echo "--------------------------------------------"
+    # --- 新增的反向代理设置流程 ---
+    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
+    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
+        local domain
+        while true; do
+            read -p "请输入您的网站访问域名 (例如 maccms.example.com): " domain
+            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+        done
+        if setup_auto_reverse_proxy "$domain" "$web_port"; then
+            # 成功后，将域名信息写入文件，方便卸载时清理
+            echo "$domain" > "$project_dir/.proxy_domain"
+            log_info "✅ 反向代理设置完成！"
+            echo "--------------------------------------------"
+            log_info "请访问以下地址完成安装向导："
+            log_info "https://$domain/install.php"
+            echo "--------------------------------------------"
+        else
+             log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
+        fi
+    else
+        local public_ip
+        public_ip=$(get_public_ip v4)
+        log_info "好的，您选择不设置反向代理。"
+        log_warn "在安装向导的数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
+        echo "--------------------------------------------"
+        echo "网站安装地址: http://$public_ip:$web_port/install.php"
+        echo "--------------------------------------------"
+    fi
     press_any_key
 }
 
