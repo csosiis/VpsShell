@@ -4073,7 +4073,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
-# (这是被修改的函数, 优化了Nginx配置以提高兼容性和稳定性)
+# (这是最终修复版函数, 修正了权限设置和状态检查的逻辑顺序)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4108,7 +4108,6 @@ install_maccms() {
     read -p "请输入一个内部代理端口 (例如 8880，用于反代): " web_port
     web_port=${web_port:-"8880"}
     if ! check_port "$web_port"; then press_any_key; return; fi
-
 
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
@@ -4146,36 +4145,28 @@ EOF
     mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
     rm -rf "$dir"
 
-    # --- 核心改动: 使用更标准和稳定的Nginx配置 ---
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
     listen 80;
     server_name localhost;
     root /var/www/html;
     index index.php index.html index.htm;
-
-    # 使用更现代和标准的 try_files 指令来处理路由
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
-
-    # 标准的PHP-FPM处理配置
     location ~ \.php$ {
         include fastcgi_params;
         fastcgi_pass php:9000;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
-
-    # 拒绝访问 .htaccess 文件
     location ~ /\.ht {
         deny all;
     }
 }
 EOF
 
+    # 移除了废弃的 version 顶层属性
     cat >"$project_dir/docker-compose.yml" <<EOF
-version: '3.8'
-
 services:
   db:
     image: mariadb:10.6
@@ -4226,18 +4217,34 @@ EOF
     log_info "正在构建自定义PHP镜像并启动所有服务..."
     log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
     docker compose up -d --build
-    log_info "正在检查服务状态..."
-    sleep 5
+
+    log_info "等待容器初始化 (8秒)..."
+    sleep 8
+
+    # --- 核心修正：将权限修复操作移动到状态检查之前 ---
+    log_info "正在修复容器内文件权限 (这是确保PHP正常运行的关键步骤)..."
+    if docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html && \
+       docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime; then
+        log_info "✅ 容器内权限设置成功。"
+    else
+        log_error "在容器内设置权限失败！这很可能是导致启动失败的原因。"
+        log_info "请查看容器日志: cd $project_dir && docker compose logs php"
+        press_any_key
+        return 1
+    fi
+
+    log_info "正在检查服务最终状态..."
+    # 修复权限后，现在再来检查容器是否能稳定运行
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "PHP 容器未能成功启动！"
-        log_info "请使用以下命令查看容器的构建和运行日志以诊断问题:"
+        log_error "修复权限后，PHP 容器仍未能保持运行状态！"
+        log_info "请使用以下命令查看容器的完整日志以诊断问题:"
         echo -e "\n  cd $project_dir && docker compose logs php\n"
         press_any_key
         return 1
     fi
+
+    log_info "✅ 所有服务均已成功启动！"
     docker compose ps
-    docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
-    docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
     if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
