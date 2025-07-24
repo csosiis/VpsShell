@@ -1834,75 +1834,79 @@ is_singbox_installed() {
 }
 
 singbox_do_install() {
-    ensure_dependencies "curl"
+    ensure_dependencies "curl" "openssl"
     if is_singbox_installed; then
-        log_info "Sing-Box 已经安装，跳过安装过程。"
+        log_warn "Sing-Box 已经安装，建议先卸载再使用此方法安装特定内核。"
         press_any_key
         return
     fi
-    log_info "正在安装Sing-Box ..."
-    set -e
-    # 使用官方脚本进行标准安装
-    bash <(curl -fsSL https://sing-box.app/deb-install.sh)
-    set +e
-    if ! is_singbox_installed; then
-        log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
-        exit 1
+    log_info "正在安装特定版本的 Sing-Box 内核..."
+
+    # --- **修正核心之三**：采用与成功脚本相同的内核下载和安装方式 ---
+    local ARCH_RAW=$(uname -m)
+    local ARCH
+    case "${ARCH_RAW}" in
+        'x86_64') ARCH='amd64' ;;
+        'aarch64' | 'arm64') ARCH='arm64' ;;
+        *) log_error "不支持的架构: ${ARCH_RAW}, 无法安装特定内核。"; press_any_key; return 1 ;;
+    esac
+
+    log_info "正在从特定源下载 sing-box 内核 for $ARCH..."
+    mkdir -p "$SUBSTORE_INSTALL_DIR" # 使用一个已定义的目录变量
+    if ! curl -sLo "/usr/local/bin/sing-box" "https://$ARCH.ssss.nyc.mn/sbx"; then
+        log_error "特定内核下载失败！"
+        press_any_key
+        return 1
     fi
-    log_info "✅ Sing-Box 标准安装成功！"
+    chmod +x "/usr/local/bin/sing-box"
 
-    # --- **修正核心** ---
-    # 对于REALITY协议，我们不再需要以root身份运行来读取TLS证书。
-    # 保持官方默认的 'sing-box' 用户运行，是兼容性最好的方式。
-    # 因此，我们移除掉修改服务运行权限的代码。
-    log_info "保持官方默认用户权限，以获得最佳兼容性。"
+    # 手动创建 systemd 服务文件
+    log_info "正在创建 systemd 服务文件..."
+    cat > /etc/systemd/system/sing-box.service << EOF
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org
+After=network.target nss-lookup.target
 
-    local config_dir="/etc/sing-box"
-    mkdir -p "$config_dir"
-    # 如果配置文件不存在，则创建一个基础的兼容性配置
+[Service]
+User=root
+WorkingDirectory=/etc/sing-box
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # 创建基础配置文件
+    mkdir -p /etc/sing-box
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
-        log_info "正在创建兼容性更强的 Sing-Box 默认配置文件..."
+        log_info "正在创建兼容的默认配置文件..."
         cat >"$SINGBOX_CONFIG_FILE" <<EOL
 {
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
-  "dns": {},
+  "log": { "level": "info", "timestamp": true },
   "inbounds": [],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    },
-    {
-      "type": "dns",
-      "tag": "dns-out"
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "protocol": "dns",
-        "outbound": "dns-out"
-      }
-    ]
-  }
+  "outbounds": [ { "type": "direct", "tag": "direct" } ]
 }
 EOL
-        # 修正：确保配置文件的权限对于sing-box用户是可读的
-        chown sing-box:sing-box "$SINGBOX_CONFIG_FILE"
     fi
 
-    log_info "正在启用并重启 Sing-Box 服务..."
+    log_info "正在重载、启用并启动 Sing-Box 服务..."
     systemctl daemon-reload
     systemctl enable sing-box.service
-    systemctl restart sing-box
-    log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
+    systemctl start sing-box
+
+    sleep 2
+    if systemctl is-active --quiet sing-box; then
+        log_info "✅ 特定版本 Sing-Box 安装并启动成功！"
+    else
+        log_error "Sing-Box 服务启动失败！请使用 'journalctl -u sing-box -f' 查看日志。"
+    fi
     press_any_key
 }
 
@@ -2262,7 +2266,7 @@ _singbox_build_protocol_config_and_link() {
     # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
-    local short_id=${args_ref[short_id]}
+    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
 
 
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
@@ -2278,17 +2282,17 @@ _singbox_build_protocol_config_and_link() {
             link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_ws}#$tag"
         elif [[ "$protocol" == "VMess" ]]; then
             local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
-            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         else
             link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
         ;;
     "VLESS-REALITY")
-        # 构建 REALITY 的 inbound 配置
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":\"$short_id\"}}}"
+        # --- **修正核心之一**：修改服务器配置，让 short_id 接受任意值 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"\"]}}}"
 
-        # 构建 REALITY 的分享链接
-        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key&shortId=$short_id#$tag"
+        # --- **修正核心之二**：生成的分享链接中，完全移除 shortId 参数 ---
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
