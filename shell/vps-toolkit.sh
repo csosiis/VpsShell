@@ -3711,54 +3711,81 @@ docker_image_menu() {
         esac
     done
 }
-
-
 # --- 主管理菜单 (V2.0) ---
 docker_manage_menu() {
-    if ! command -v docker &>/dev/null; then
-        _install_docker_and_compose
-        if ! command -v docker &>/dev/null; then
-             log_error "Docker 安装失败，无法进入管理菜单。"
-             press_any_key
-             return
-        fi
-    fi
-
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 核心逻辑：首先检查 'docker' 命令是否存在
+        if ! command -v docker &>/dev/null; then
+            # --- Docker 未安装时显示的菜单 ---
+            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-        read -p "请输入选项: " choice
-        case $choice in
-        1) docker_container_menu ;;
-        2) docker_image_menu ;;
-        3) docker_prune_system ;;
-        4) install_portainer ;;
-        5) uninstall_docker ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
+            read -p "请输入选项: " choice
+            case $choice in
+            1)
+                # 调用脚本中已有的安装函数
+                _install_docker_and_compose
+                press_any_key
+                # 不跳出循环，安装后会自动刷新菜单
+                ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            # --- Docker 已安装时显示的菜单 ---
+            local DOCKER_STATUS_COLOR
+            # 检测 Docker 服务是否正在运行
+            if systemctl is-active --quiet docker; then
+                DOCKER_STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                DOCKER_STATUS_COLOR="$RED● 不活动$NC"
+            fi
+
+            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC  当前状态: $DOCKER_STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+            read -p "请输入选项: " choice
+            case $choice in
+            1) docker_container_menu ;;
+            2) docker_image_menu ;;
+            3) docker_prune_system ;;
+            4) install_portainer ;;
+            5) uninstall_docker ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
     done
 }
-
 # =================================================
 #           Docker 应用 & 面板 (docker_apps_menu)
 # =================================================
