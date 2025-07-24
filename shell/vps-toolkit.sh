@@ -1987,9 +1987,11 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. VLESS + Vision + REALITY                    $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2005,7 +2007,8 @@ _singbox_prompt_for_protocols() {
     3) protocols_ref=("Trojan") ;;
     4) protocols_ref=("Hysteria2") ;;
     5) protocols_ref=("TUIC") ;;
-    6)
+    6) protocols_ref=("VLESS-REALITY") ;;
+    7)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
@@ -2018,7 +2021,60 @@ _singbox_prompt_for_protocols() {
     esac
     return 0
 }
+# =================================================
+#           函数：处理 REALITY 特定设置
+# =================================================
+_singbox_handle_reality_setup() {
+    # 声明-n类型的变量，以引用的方式修改外部变量的值
+    local -n private_key_ref=$1
+    local -n public_key_ref=$2
+    local -n connect_addr_ref=$3
+    local -n server_name_ref=$4
+    local -n short_id_ref=$5
 
+    clear
+    log_info "正在配置 VLESS + REALITY..."
+    if ! command -v sing-box &>/dev/null; then
+        log_error "未找到 sing-box 命令，无法生成 REALITY 密钥对。"
+        return 1
+    fi
+
+    log_info "正在生成 REALITY 密钥对..."
+    local key_pair
+    key_pair=$(sing-box generate reality-keypair)
+    private_key_ref=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}')
+    public_key_ref=$(echo "$key_pair" | awk '/PublicKey/ {print $2}')
+
+    if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
+        log_error "REALITY 密钥对生成失败！"
+        return 1
+    fi
+    log_info "✅ 密钥对生成成功！"
+    echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
+    echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
+    echo ""
+
+    # 选择连接地址 (IP)
+    local ipv4_addr=$(get_public_ip v4)
+    local ipv6_addr=$(get_public_ip v6)
+    if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+        echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
+        read -p "请输入选项 (1-2): " ip_choice
+        if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
+    elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
+    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="$ipv6_addr";
+    else log_error "无法获取任何公网 IP 地址！"; return 1; fi
+
+    # 获取伪装域名 (serverName) 和 shortId
+    read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
+    server_name_ref=${server_name_input:-"www.bing.com"}
+
+    read -p "请输入 short_id (可留空，最多16个十六进制字符): " short_id_input
+    short_id_ref=${short_id_input}
+
+    log_info "REALITY 配置信息收集完毕。"
+    return 0
+}
 _singbox_handle_certificate_setup() {
     local -n cert_path_ref=$1
     local -n key_path_ref=$2
@@ -2127,6 +2183,12 @@ _singbox_build_protocol_config_and_link() {
     local insecure_hy2=${args_ref[insecure_hy2]}
     local insecure_tuic=${args_ref[insecure_tuic]}
 
+    # REALITY 专属参数
+    local private_key=${args_ref[private_key]}
+    local public_key=${args_ref[public_key]}
+    local short_id=${args_ref[short_id]}
+
+
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
@@ -2144,6 +2206,13 @@ _singbox_build_protocol_config_and_link() {
         else
             link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
+        ;;
+    "VLESS-REALITY")
+        # 构建 REALITY 的 inbound 配置
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":\"$short_id\"}}}"
+
+        # 构建 REALITY 的分享链接
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key&shortId=$short_id#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
@@ -2163,9 +2232,27 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
     if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
 
+    # 为不同流程声明变量
     local cert_path key_path connect_addr sni_domain
     declare -A insecure_params
-    if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then press_any_key; return; fi
+
+    # REALITY 特定变量
+    local reality_private_key reality_public_key reality_short_id
+
+    # 根据协议选择不同的设置流程
+    if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
+        # 如果是 REALITY，调用专用的设置函数
+        if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
+            press_any_key
+            return
+        fi
+    else
+        # 否则，走原来的证书设置流程
+        if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
+            press_any_key
+            return
+        fi
+    fi
 
     declare -A ports
     local used_ports_for_this_run=()
@@ -2198,12 +2285,20 @@ singbox_add_node_orchestrator() {
         build_args[password]=$(generate_random_password)
         build_args[connect_addr]="$connect_addr"
         build_args[sni_domain]="$sni_domain"
-        build_args[cert_path]="$cert_path"
-        build_args[key_path]="$key_path"
-        build_args[insecure_ws]=${insecure_params[ws]}
-        build_args[insecure_vmess]=${insecure_params[vmess]}
-        build_args[insecure_hy2]=${insecure_params[hy2]}
-        build_args[insecure_tuic]=${insecure_params[tuic]}
+
+        # 根据协议，将不同的参数打包传递
+        if [ "$protocol" == "VLESS-REALITY" ]; then
+            build_args[private_key]="$reality_private_key"
+            build_args[public_key]="$reality_public_key"
+            build_args[short_id]="$reality_short_id"
+        else
+            build_args[cert_path]="$cert_path"
+            build_args[key_path]="$key_path"
+            build_args[insecure_ws]=${insecure_params[ws]}
+            build_args[insecure_vmess]=${insecure_params[vmess]}
+            build_args[insecure_hy2]=${insecure_params[hy2]}
+            build_args[insecure_tuic]=${insecure_params[tuic]}
+        fi
 
         local config node_link
         _singbox_build_protocol_config_and_link "$protocol" build_args config node_link
@@ -2258,8 +2353,6 @@ singbox_add_node_orchestrator() {
         press_any_key
     fi
 }
-
-
 _get_unique_tag() {
     local base_tag="$1"
     local final_tag="$base_tag"
