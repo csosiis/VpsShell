@@ -1842,27 +1842,24 @@ singbox_do_install() {
     fi
     log_info "正在安装Sing-Box ..."
     set -e
+    # 使用官方脚本进行标准安装
     bash <(curl -fsSL https://sing-box.app/deb-install.sh)
     set +e
     if ! is_singbox_installed; then
         log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
         exit 1
     fi
-    log_info "✅ Sing-Box 安装成功！"
-    log_info "正在自动定位服务文件并修改运行权限..."
-    local service_file_path
-    service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+')
-    if [ -n "$service_file_path" ] && [ -f "$service_file_path" ]; then
-        log_info "找到服务文件位于: $service_file_path"
-        sed -i.bak 's/User=sing-box/User=root/' "$service_file_path"
-        sed -i.bak 's/Group=sing-box/Group=root/' "$service_file_path"
-        systemctl daemon-reload
-        log_info "服务权限修改完成。"
-    else
-        log_error "无法自动定位 sing-box.service 文件！跳过权限修改。可能会导致证书读取失败。"
-    fi
+    log_info "✅ Sing-Box 标准安装成功！"
+
+    # --- **修正核心** ---
+    # 对于REALITY协议，我们不再需要以root身份运行来读取TLS证书。
+    # 保持官方默认的 'sing-box' 用户运行，是兼容性最好的方式。
+    # 因此，我们移除掉修改服务运行权限的代码。
+    log_info "保持官方默认用户权限，以获得最佳兼容性。"
+
     local config_dir="/etc/sing-box"
     mkdir -p "$config_dir"
+    # 如果配置文件不存在，则创建一个基础的兼容性配置
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
         log_info "正在创建兼容性更强的 Sing-Box 默认配置文件..."
         cat >"$SINGBOX_CONFIG_FILE" <<EOL
@@ -1897,8 +1894,12 @@ singbox_do_install() {
   }
 }
 EOL
+        # 修正：确保配置文件的权限对于sing-box用户是可读的
+        chown sing-box:sing-box "$SINGBOX_CONFIG_FILE"
     fi
+
     log_info "正在启用并重启 Sing-Box 服务..."
+    systemctl daemon-reload
     systemctl enable sing-box.service
     systemctl restart sing-box
     log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
