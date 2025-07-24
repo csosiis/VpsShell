@@ -1242,7 +1242,7 @@ install_warp() {
 # =================================================
 #           实用工具 (增强) - 新增及优化
 # =================================================
-
+# (这是被修改的函数, 修复了状态显示逻辑)
 fail2ban_menu() {
     ensure_dependencies "fail2ban"
     if ! command -v fail2ban-client &>/dev/null; then
@@ -1262,43 +1262,51 @@ maxretry = 5
 [sshd]
 enabled = true
 EOF
+        systemctl enable fail2ban >/dev/null 2>&1
         systemctl restart fail2ban
     fi
 
 
     while true; do
         clear
-        if ! systemctl is-active --quiet fail2ban; then
-            echo -e "$RED Fail2Ban 服务未运行！$NC"
-            read -p "服务未运行，是否立即启动? (Y/n): " start_f2b
-            if [[ ! "$start_f2b" =~ ^[Nn]$ ]]; then
-                systemctl start fail2ban
-                sleep 1
-            else
-                press_any_key
-                return
-            fi
-        fi
 
-        local status
-        status=$(fail2ban-client status)
-        local jail_count
-        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
-        local sshd_status
-        sshd_status=$(fail2ban-client status sshd 2>/dev/null) # 2>/dev/null 避免在 jail 不存在时报错
-        local banned_count="0"
-        local total_banned="0"
-        if [ -n "$sshd_status" ]; then
-            banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
-            total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+        # --- 全新的、更健壮的状态检测逻辑 ---
+        local f2b_status_text
+        local jail_count="N/A"
+        local banned_count="N/A"
+        local total_banned="N/A"
+
+        # 每次循环都重新检查服务的真实状态
+        if systemctl is-active --quiet fail2ban; then
+            f2b_status_text="${GREEN}● 活动$NC"
+
+            # 仅在服务活动时才获取统计信息，并隐藏可能的错误输出
+            local status
+            status=$(fail2ban-client status 2>/dev/null)
+            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | xargs)
+
+            local sshd_status
+            sshd_status=$(fail2ban-client status sshd 2>/dev/null)
+            if [ -n "$sshd_status" ]; then
+                banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
+                total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+            else
+                banned_count="0"
+                total_banned="0"
+            fi
+        else
+            f2b_status_text="${RED}● 不活动$NC"
+            # 当服务不活动时，统计信息保持为 N/A
         fi
+        # --- 状态检测逻辑结束 ---
 
 
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                   $CYAN║$NC"
+        # 使用变量动态显示状态和数据
+        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1356,6 +1364,7 @@ EOF
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 log_info "正在停止并卸载 Fail2Ban..."
                 systemctl stop fail2ban
+                systemctl disable fail2ban
                 if [ "$PKG_MANAGER" == "apt" ]; then
                     apt-get remove --purge -y fail2ban
                 else
@@ -1967,15 +1976,25 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     read -p "请输入选项: " protocol_choice
@@ -4472,7 +4491,7 @@ uninstall_panels_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
         for i in "${!installed_items[@]}"; do
-            printf "$CYAN║$NC %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
+            printf "$CYAN║$NC  %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
         done
 
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
