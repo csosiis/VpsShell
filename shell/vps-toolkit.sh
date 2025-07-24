@@ -2022,7 +2022,7 @@ _singbox_prompt_for_protocols() {
     return 0
 }
 # =================================================
-#           函数：处理 REALITY 特定设置
+#           函数：处理 REALITY 特定设置 (最终自动生成版)
 # =================================================
 _singbox_handle_reality_setup() {
     # 声明-n类型的变量，以引用的方式修改外部变量的值
@@ -2062,15 +2062,33 @@ _singbox_handle_reality_setup() {
         read -p "请输入选项 (1-2): " ip_choice
         if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
     elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
-    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="$ipv6_addr";
+    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # 获取伪装域名 (serverName) 和 shortId
+    # 获取伪装域名 (serverName)
     read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
     server_name_ref=${server_name_input:-"www.bing.com"}
 
-    read -p "请输入 short_id (可留空，最多16个十六进制字符): " short_id_input
-    short_id_ref=${short_id_input}
+    # --- 核心修改：自动生成并验证 short_id ---
+    while true; do
+        # 1. 自动生成一个8位的随机十六进制字符串作为 short_id
+        local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
+
+        # 2. 在提示中将随机生成的 short_id 作为默认值
+        read -p "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: " short_id_input
+
+        # 3. 如果用户直接回车，则使用我们生成的随机值；否则使用用户输入的值
+        short_id_input=${short_id_input:-$random_short_id}
+
+        # 4. 验证最终的值是否为有效的十六进制 (防止用户手动输入错误)
+        if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
+            short_id_ref=${short_id_input}
+            break # 输入有效，跳出循环
+        else
+            log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
+        fi
+    done
+    # --- 修改结束 ---
 
     log_info "REALITY 配置信息收集完毕。"
     return 0
@@ -2695,7 +2713,7 @@ singbox_main_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         local STATUS_COLOR
         if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
             echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
