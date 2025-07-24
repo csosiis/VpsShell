@@ -2311,27 +2311,23 @@ singbox_add_node_orchestrator() {
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
 
-    # --- 从这里开始是核心修改 ---
-
-    # 1. 一次性获取所有需要的地理和网络信息
     log_info "正在获取地理及运营商信息..."
     local geo_info_json
     geo_info_json=$(curl -s ip-api.com/json)
 
-    # 2. 提取国家代码、城市和运营商
     local country_code city operator_name
     country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
-    city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g') # 提取城市并移除空格
+    city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
 
-    # 提取并清理运营商名称，使其更适合用作标签
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
-    # 3. 在提示用户输入时，将清理后的运营商名称作为默认值
     local custom_id
-    read -p "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: " custom_id
+    # --- 从这里开始是针对显示错误的修复 ---
+    # 使用 echo -e 独立打印带颜色的提示，避免 read -p 的解析问题
+    echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
+    read custom_id
+    # --- 修复结束 ---
     custom_id=${custom_id:-$operator_name}
-
-    # --- 到这里修改结束 ---
 
 
     local success_count=0
@@ -2342,7 +2338,6 @@ singbox_add_node_orchestrator() {
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
-        # 使用新的变量来组成 tag
         local tag_base="$country_code-$city-$custom_id"
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag=$(_get_unique_tag "$base_tag_for_protocol")
