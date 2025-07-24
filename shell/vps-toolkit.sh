@@ -3734,16 +3734,16 @@ docker_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
         read -p "请输入选项: " choice
@@ -3752,7 +3752,7 @@ docker_manage_menu() {
         2) docker_image_menu ;;
         3) docker_prune_system ;;
         4) install_portainer ;;
-        4) uninstall_docker ;;
+        5) uninstall_docker ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
