@@ -3724,7 +3724,7 @@ docker_manage_menu() {
             echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装$NC                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}               $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}                $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3845,6 +3845,7 @@ _install_docker_and_compose() {
     fi
 }
 
+# (这是被修改的函数, 用来卸载所有基于 Docker Compose 的项目)
 uninstall_docker_compose_project() {
     local app_name=$1
     local default_dir=$2
@@ -3853,11 +3854,23 @@ uninstall_docker_compose_project() {
     read -e -p "请输入要卸载的 $app_name 的安装目录 [默认: $default_dir]: " project_dir
     project_dir=${project_dir:-$default_dir}
 
-    if [ ! -f "$project_dir/docker-compose.yml" ]; then
+    if [ ! -d "$project_dir" ] || [ ! -f "$project_dir/docker-compose.yml" ]; then
         log_error "目录 $project_dir 下未找到 docker-compose.yml 文件，请确认路径。"
         press_any_key
         return
     fi
+
+    # --- 新增的反代清理逻辑 ---
+    local proxy_domain_file="$project_dir/.proxy_domain"
+    if [ -f "$proxy_domain_file" ]; then
+        local domain=$(cat "$proxy_domain_file")
+        log_warn "检测到此应用关联了反向代理域名: $domain"
+        read -p "是否要在卸载应用的同时，删除其反代配置和SSL证书? (y/N): " confirm_delete_proxy
+        if [[ "$confirm_delete_proxy" =~ ^[Yy]$ ]]; then
+            _cleanup_reverse_proxy_config "$domain"
+        fi
+    fi
+    # --- 结束 ---
 
     log_info "准备卸载位于 $project_dir 的 $app_name..."
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; press_any_key; return 1; }
@@ -3881,7 +3894,6 @@ uninstall_docker_compose_project() {
     fi
 
     log_info "✅ $app_name 卸载完成。"
-    press_any_key
 }
 
 install_sui() {
@@ -3900,6 +3912,7 @@ install_3xui() {
     press_any_key
 }
 
+# (这是被修改的函数)
 install_wordpress() {
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
@@ -3915,28 +3928,14 @@ install_wordpress() {
         project_dir=${project_dir:-"/root/wordpress"}
         if [ -f "$project_dir/docker-compose.yml" ]; then
             log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
-            read -p "是否要先卸载它？(y/N): " uninstall_choice
-            if [[ "$uninstall_choice" =~ ^[Yy]$ ]]; then
-                uninstall_wordpress
-                if [ -d "$project_dir" ]; then continue; else break; fi
-            else
-                log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
-                continue
-            fi
+            log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
+            continue
         else
             break
         fi
     done
-    mkdir -p "$project_dir" || {
-        log_error "无法创建目录 $project_dir！"
-        press_any_key
-        return 1
-    }
-    cd "$project_dir" || {
-        log_error "无法进入目录 $project_dir！"
-        press_any_key
-        return 1
-    }
+    mkdir -p "$project_dir" || { log_error "无法创建目录 $project_dir！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir！"; press_any_key; return 1; }
     log_info "新的 WordPress 将被安装在: $(pwd)"
 
     local db_password
@@ -3947,7 +3946,7 @@ install_wordpress() {
 
     local wp_port
     while true; do
-        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
+        read -p "请输入 WordPress 的内部代理端口 (例如 8080，外部无法直接访问): " wp_port
         if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
             log_error "端口号必须是 1-65535 之间的数字。"
         elif ! check_port "$wp_port"; then
@@ -3957,10 +3956,11 @@ install_wordpress() {
 
     local domain
     while true; do
-        read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
+        read -p "请输入您的网站访问域名 (例如 blog.example.com)，必须提前解析: " domain
         if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
     done
     local site_url="https://$domain"
+
     log_info "正在生成 docker-compose.yml 文件..."
     cat >docker-compose.yml <<EOF
 version: '3.8'
@@ -4007,33 +4007,22 @@ volumes:
 networks:
   wordpress_net:
 EOF
-    if [ ! -f "docker-compose.yml" ]; then
-        log_error "docker-compose.yml 文件创建失败！"
-        press_any_key
-        return
-    fi
 
     log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
     log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
     docker compose up -d
-
     log_info "正在检查服务状态..."
     sleep 5
     docker compose ps
-
     log_info "✅ WordPress 容器已成功启动！"
 
-    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
-    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
-        setup_auto_reverse_proxy "$domain" "$wp_port"
+    log_info "正在为域名 $domain 设置反向代理..."
+    if setup_auto_reverse_proxy "$domain" "$wp_port"; then
+        # --- 新增：记录反代域名 ---
+        echo "$domain" > "$project_dir/.proxy_domain"
         log_info "WordPress 配置流程完毕！您现在应该可以通过 $site_url 访问您的网站了。"
     else
-        log_info "好的，您选择不设置反向代理。"
-        log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
-        local ipv4
-        ipv4=$(get_public_ip v4)
-        if [ -n "$ipv4" ]; then log_info "IPv4 地址: http://$ipv4:$wp_port"; fi
-        log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常。"
+         log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
     fi
     press_any_key
 }
@@ -4296,7 +4285,217 @@ EOF
 uninstall_uptime_kuma() {
     uninstall_docker_compose_project "Uptime Kuma" "/root/uptime-kuma"
 }
+# =================================================================
+#           以下是为新的 “Docker 应用 & 面板安装” 菜单新增的函数
+# =================================================================
 
+# --- 新增：面板安装函数 ---
+
+install_bt_panel() {
+    clear
+    log_warn "宝塔面板是一个功能强大但相对独立的服务器管理面板。"
+    log_warn "它会安装自己的Web服务器套件 (Nginx, Apache等)，可能会与您现有的环境冲突。"
+    log_warn "请确保您在一个纯净的系统上安装宝塔面板。"
+    read -p "您确定要继续安装吗? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "安装已取消。"
+        press_any_key
+        return
+    fi
+    log_info "正在根据您的操作系统选择合适的宝塔安装脚本..."
+    local install_script_url=""
+    case "$OS_ID" in
+        ubuntu)
+            install_script_url="http://download.bt.cn/install/install-ubuntu_6.0.sh"
+            ;;
+        debian)
+            install_script_url="http://download.bt.cn/install/install-debian_6.0.sh"
+            ;;
+        centos|rhel|fedora)
+             # 对于 Red Hat 系，使用通用安装脚本
+            install_script_url="http://download.bt.cn/install/install_6.0.sh"
+            ;;
+        *)
+            log_error "您的操作系统 ($OS_ID) 不在宝塔官方支持的自动安装列表内。"
+            log_error "请访问 http://www.bt.cn 手动获取安装方法。"
+            press_any_key
+            return
+            ;;
+    esac
+
+    log_info "即将执行宝塔官方安装脚本，请根据提示操作..."
+    wget -O install.sh "$install_script_url" && bash install.sh
+    log_info "宝塔面板安装脚本执行完毕。"
+    press_any_key
+}
+
+install_1panel() {
+    clear
+    log_warn "1Panel 是一个现代化的 Linux 服务器运维管理面板。"
+    log_info "即将执行 1Panel 官方一键安装脚本..."
+    read -p "您确定要继续安装吗? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "安装已取消。"
+        press_any_key
+        return
+    fi
+    curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && bash quick_start.sh
+    log_info "1Panel 安装脚本执行完毕。"
+    press_any_key
+}
+
+
+# --- 新增：面板卸载函数 ---
+
+_cleanup_reverse_proxy_config() {
+    local domain="$1"
+    if [ -z "$domain" ]; then return 1; fi
+
+    log_info "正在为域名 [$domain] 清理反向代理配置..."
+    local nginx_conf="/etc/nginx/sites-available/$domain.conf"
+    local nginx_enabled_conf="/etc/nginx/sites-enabled/$domain.conf"
+
+    if [ -f "$nginx_conf" ] || [ -L "$nginx_enabled_conf" ]; then
+        log_info "检测到 Nginx 配置，正在删除..."
+        rm -f "$nginx_enabled_conf"
+        rm -f "$nginx_conf"
+        # 测试 Nginx 配置并静默重载
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx
+            log_info "✅ Nginx 配置已清理并重载。"
+        else
+            log_warn "Nginx 配置文件测试失败，可能需要手动修复。"
+        fi
+    fi
+
+    if command -v certbot &>/dev/null && certbot certificates 2>/dev/null | grep -q -E "Certificate Name: $domain"; then
+        log_info "检测到 Certbot 证书，正在删除..."
+        certbot delete --cert-name "$domain" --non-interactive
+        log_info "✅ Certbot 证书已删除。"
+    fi
+    return 0
+}
+
+uninstall_3xui() {
+    log_info "3x-ui 的卸载功能集成在其安装脚本中。"
+    log_info "即将重新运行其安装脚本，请在脚本菜单中选择【卸载】选项。"
+    press_any_key
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    log_warn "请注意：此操作不会自动清理您可能为 3x-ui 手动配置的反向代理。"
+    press_any_key
+}
+
+uninstall_sui() {
+    log_info "S-ui 的卸载功能集成在其安装脚本中。"
+    log_info "即将重新运行其安装脚本，请在脚本菜单中选择【卸载】选项。"
+    press_any_key
+    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
+    log_warn "请注意：此操作不会自动清理您可能为 S-ui 手动配置的反向代理。"
+    press_any_key
+}
+
+uninstall_bt_panel() {
+    local uninstall_script="/www/server/panel/install/uninstall.sh"
+    if [ -f "$uninstall_script" ]; then
+        log_info "检测到宝塔卸载脚本，即将执行..."
+        bash "$uninstall_script"
+    else
+        log_error "未找到宝塔卸载脚本！可能已损坏或未正确安装。"
+    fi
+    press_any_key
+}
+
+uninstall_1panel() {
+    if command -v 1pctl &>/dev/null; then
+        log_info "检测到 1Panel 控制命令，即将执行卸载..."
+        1pctl uninstall
+    else
+        log_error "未找到 '1pctl' 命令！可能已损坏或未正确安装。"
+    fi
+    press_any_key
+}
+
+
+# --- 新增：智能卸载菜单 ---
+
+uninstall_panels_menu() {
+    while true; do
+        clear
+        log_info "正在检测已安装的应用和面板..."
+
+        local installed_items=()
+        local function_map=()
+
+        # 检测逻辑
+        if [ -f "/root/wordpress/docker-compose.yml" ]; then
+            installed_items+=("WordPress (位于 /root/wordpress)")
+            function_map+=("uninstall_wordpress")
+        fi
+        if [ -f "/root/maccms/docker-compose.yml" ]; then
+            installed_items+=("苹果CMS (位于 /root/maccms)")
+            function_map+=("uninstall_maccms")
+        fi
+        if [ -d "/usr/local/x-ui/" ]; then
+            installed_items+=("3x-ui 面板")
+            function_map+=("uninstall_3xui")
+        fi
+        if [ -d "/usr/local/s-ui/" ]; then
+            installed_items+=("S-ui 面板")
+            function_map+=("uninstall_sui")
+        fi
+         if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
+            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
+            function_map+=("uninstall_uptime_kuma")
+        fi
+        if [ -d "/www/server/panel" ]; then
+            installed_items+=("宝塔面板")
+            function_map+=("uninstall_bt_panel")
+        fi
+        if [ -d "/opt/1panel" ]; then
+            installed_items+=("1Panel")
+            function_map+=("uninstall_1panel")
+        fi
+        if [ -f "/root/portainer/docker-compose.yml" ] || docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+            installed_items+=("Portainer (通用Docker面板)")
+            function_map+=("uninstall_portainer") # 假设你有一个卸载它的函数
+        fi
+
+
+        if [ ${#installed_items[@]} -eq 0 ]; then
+            log_warn "未检测到任何通过本脚本安装的应用或面板。"
+            press_any_key
+            return
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 选择要卸载的面板                 $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        for i in "${!installed_items[@]}"; do
+            printf "$CYAN║$NC %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
+        done
+
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 0 ] && [ "$choice" -le ${#installed_items[@]} ]; then
+            if [ "$choice" -eq 0 ]; then
+                break
+            else
+                local index=$((choice-1))
+                # 调用对应的卸载函数
+                ${function_map[$index]}
+                # 卸载后暂停，以便用户可以再次进入此菜单查看结果
+                press_any_key
+            fi
+        else
+            log_error "无效选项！"; sleep 1
+        fi
+    done
+}
+# (这是被修改的函数, 全新的菜单结构)
 docker_apps_menu() {
     while true; do
         clear
@@ -4304,27 +4503,25 @@ docker_apps_menu() {
         echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 搭建 WordPress                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟────────────────── $WHITE WordPress $CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC   2. 搭建苹果CMS影视站                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 搭建 WordPress                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 安装 3x-ui (搭建节点-Xray)                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}卸载 WordPress$NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 安装 S-ui (搭建节点-SingBox)                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE苹果CMS$CYAN ──────────────────────╢$NC"
+        echo -e "$CYAN║$NC   5. 安装 Uptime Kuma 监控面板                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 搭建苹果CMS影视站                           $CYAN║$NC"
+        echo -e "$CYAN╟────────────────── $WHITE其他面板$CYAN ───────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载苹果CMS$NC                                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 安装宝塔面板 (BT Panel)                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────── $WHITEUptime Kuma$CYAN ────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}安装 Uptime Kuma 监控面板${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${RED}卸载 Uptime Kuma${NC}                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 安装 1Panel 面板                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. ${RED}卸载应用或面板${NC}                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -4332,13 +4529,14 @@ docker_apps_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) ui_panels_menu ;;
-        2) install_wordpress ;;
-        3) uninstall_wordpress ;;
-        4) install_maccms ;;
-        5) uninstall_maccms ;;
-        6) install_uptime_kuma ;;
-        7) uninstall_uptime_kuma ;;
+        1) install_wordpress ;;
+        2) install_maccms ;;
+        3) install_3xui ;;
+        4) install_sui ;;
+        5) install_uptime_kuma ;;
+        6) install_bt_panel ;;
+        7) install_1panel ;;
+        8) uninstall_panels_menu ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
