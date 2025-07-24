@@ -4074,7 +4074,7 @@ download_maccms_source() {
     return 0
 }
 
-# (这是最终修复版函数, 修正了PHP-FPM的用户权限问题，直接解决日志中的报错)
+# (这是最终修复版函数, 经过仔细检查确保完整无误)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4113,7 +4113,6 @@ install_maccms() {
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # --- 核心改动 1: Supervisor配置文件中，让php-fpm以www-data用户运行 ---
     log_info "正在创建 Supervisor 守护进程配置文件..."
     cat > "$project_dir/php/supervisord.conf" <<'EOF'
 [supervisord]
@@ -4132,7 +4131,6 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
 
-    # --- 核心改动 2: Dockerfile中，不再修改php-fpm的默认用户 ---
     log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
@@ -4147,7 +4145,13 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装PHP扩展 (保持不变)
+# 容器化改造：修改php-fpm配置，将日志输出到标准错误流，而不是文件
+RUN sed -i 's#^error_log = .*#error_log = /proc/self/fd/2#' /usr/local/etc/php-fpm.conf \
+    && sed -i 's#;catch_workers_output = yes#catch_workers_output = yes#' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's#^php_admin_value\[error_log\] = .*#php_admin_value[error_log] = /proc/self/fd/2#' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's#^php_admin_flag\[log_errors\] = .*#php_admin_flag[log_errors] = on#' /usr/local/etc/php-fpm.d/www.conf
+
+# 安装PHP扩展
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
 
