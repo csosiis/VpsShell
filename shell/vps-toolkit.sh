@@ -4074,17 +4074,18 @@ download_maccms_source() {
     return 0
 }
 
+# (这是被修改的函数, 修复了502错误并优化了安装流程)
 install_maccms() {
-    log_info "开始安装苹果CMS"
+    log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
         press_any_key
         return
     fi
-    ensure_dependencies "unzip" "file"
+    ensure_dependencies "unzip" "file" "curl"
 
     local project_dir
-    read -e -p "请输入安装目录 [默认: /root/maccms]: " project_dir
+    read -e -p "请输入苹果CMS的安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
 
     if [ -f "$project_dir/docker-compose.yml" ]; then
@@ -4108,13 +4109,34 @@ install_maccms() {
     read -p "请输入外部访问端口 [默认: 8880]: " web_port
     web_port=${web_port:-"8880"}
 
-    mkdir -p "$project_dir/nginx" "$project_dir/source"
+    # 一次性创建所有需要的目录
+    mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
+
+    # --- 核心改动 1: 自动为PHP创建自定义环境配置文件 ---
+    log_info "正在为 PHP 创建自定义配置文件 (Dockerfile)..."
+    cat > "$project_dir/php/Dockerfile" <<'EOF'
+# 使用官方 PHP 7.4 FPM 镜像作为基础
+FROM php:7.4-fpm
+
+# 更新包列表并安装编译扩展所需的依赖
+RUN apt-get update && apt-get install -y \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libzip-dev \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 配置并安装Maccms必需的PHP扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
+EOF
 
     local maccms_version
     maccms_version=$(get_latest_maccms_tag)
     if [ -z "$maccms_version" ]; then
-        log_error "获取 maccms 版本失败"
+        log_error "从 GitHub 获取 maccms 最新版本标签失败！"
         press_any_key
         return 1
     fi
@@ -4127,19 +4149,12 @@ install_maccms() {
 
     unzip -q source.zip || { log_error "解压失败"; return 1; }
     rm -f source.zip
-
     local dir="maccms10-${maccms_version#v}"
-    if [ ! -d "$dir" ]; then
-        log_error "解压后目录不存在"
-        return 1
-    fi
-
-    mv "$dir"/* "$project_dir/source/"
-    mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
+    if [ ! -d "$dir" ]; then log_error "解压后目录不存在"; return 1; fi
+    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
     rm -rf "$dir"
 
-    chown -R 82:82 "$project_dir/source"
-
+    # 创建Nginx配置文件
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
     listen 80;
@@ -4168,7 +4183,11 @@ server {
 }
 EOF
 
+    # --- 核心改动 2: 生成新的 docker-compose.yml, 让php服务使用build方式 ---
+    log_info "正在生成 docker-compose.yml..."
     cat >"$project_dir/docker-compose.yml" <<EOF
+version: '3.8'
+
 services:
   db:
     image: mariadb:10.6
@@ -4181,15 +4200,20 @@ services:
       MYSQL_PASSWORD: "$db_user_password"
     volumes:
       - db_data:/var/lib/mysql
+    networks:
+      - maccms_net
 
   php:
-    image: php:7.4-fpm
+    # 不再直接使用镜像，而是通过build指令使用我们创建的Dockerfile
+    build: ./php
     container_name: ${project_dir##*/}_php
     volumes:
       - ./source:/var/www/html
     restart: always
     depends_on:
       - db
+    networks:
+      - maccms_net
 
   nginx:
     image: nginx:1.21-alpine
@@ -4202,48 +4226,42 @@ services:
     restart: always
     depends_on:
       - php
+    networks:
+      - maccms_net
 
 volumes:
   db_data:
+
+networks:
+  maccms_net:
 EOF
 
-    log_info "正在启动服务..."
-    docker compose up -d
+    log_info "正在构建自定义PHP镜像并启动所有服务..."
+    log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
+    # 使用 --build 参数来强制构建新镜像
+    docker compose up -d --build
+
+    log_info "正在检查服务状态..."
     sleep 5
+    if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
+        log_error "PHP 容器未能成功启动！这是导致 502 错误的根本原因。"
+        log_info "请使用以下命令查看容器的构建和运行日志以诊断问题:"
+        echo -e "\n  cd $project_dir && docker compose logs php\n"
+        press_any_key
+        return 1
+    fi
     docker compose ps
 
-    log_info "正在修复文件权限..."
+    log_info "正在修复容器内文件权限..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
-    docker exec -i "${project_dir##*/}_php" chmod 666 /var/www/html/application/database.php || true
 
-    log_info "正在写入数据库配置文件..."
-    docker exec -i "${project_dir##*/}_php" bash -c "cat > /var/www/html/application/database.php <<EOF
-<?php
-return [
-    'type'     => 'mysql',
-    'hostname' => 'db',
-    'database' => '$db_name',
-    'username' => '$db_user',
-    'password' => '$db_user_password',
-    'hostport' => '$db_port',
-    'charset'  => 'utf8mb4',
-    'prefix'   => 'mac_',
-];
-EOF
-"
+    log_info "安装完成！请访问 http://<你的服务器IP>:$web_port/install.php 来进行最后的安装步骤。"
+    log_warn "在安装向导的数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
     local public_ip
     public_ip=$(get_public_ip v4)
-    log_info "✅ 安装完成，信息如下："
     echo "--------------------------------------------"
-    echo "网站地址: http://$public_ip:$web_port"
-    echo "数据库信息："
-    echo "  主机: db"
-    echo "  端口: $db_port"
-    echo "  数据库: $db_name"
-    echo "  用户: $db_user"
-    echo "  用户密码: $db_user_password"
-    echo "  Root密码: $db_root_password"
+    echo "网站安装地址: http://$public_ip:$web_port/install.php"
     echo "--------------------------------------------"
     press_any_key
 }
