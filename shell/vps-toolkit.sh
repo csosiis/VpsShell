@@ -2073,10 +2073,9 @@ _singbox_handle_reality_setup() {
     while true; do
         # 1. 自动生成一个8位的随机十六进制字符串作为 short_id
         local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
-
-        # 2. 在提示中将随机生成的 short_id 作为默认值
-        read -p "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: " short_id_input
-
+        # 2. 【修复】使用 echo -e 来打印带颜色的提示，然后用 read 读取输入
+        echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
+        read short_id_input
         # 3. 如果用户直接回车，则使用我们生成的随机值；否则使用用户输入的值
         short_id_input=${short_id_input:-$random_short_id}
 
@@ -2714,7 +2713,7 @@ singbox_main_menu() {
         local STATUS_COLOR
         if is_singbox_installed; then
             if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
