@@ -2022,9 +2022,57 @@ _singbox_prompt_for_protocols() {
     return 0
 }
 # =================================================
-#           函数：处理 REALITY 特定设置 (最终自动生成版)
+#           函数：确保服务器时间精准 (新增)
+# =================================================
+_ensure_time_accuracy() {
+    # 检查常见的几种时间同步服务是否正在运行
+    if systemctl is-active --quiet chronyd || systemctl is-active --quiet ntpd || systemctl is-active --quiet systemd-timesyncd; then
+        log_info "检测到时间同步服务正在运行，时间被认为是准确的。"
+        return 0
+    fi
+
+    log_warn "警告：未检测到有效的时间同步服务！"
+    log_warn "REALITY 协议对服务器时间的精准度要求极高，任何显著偏差都会导致连接失败。"
+    read -p "是否要让脚本为您自动安装并配置 chrony (推荐的时间同步服务)？(Y/n): " confirm_install_chrony
+
+    # 如果用户选择 'n' 或 'N'，则跳过
+    if [[ "$confirm_install_chrony" =~ ^[Nn]$ ]]; then
+        log_warn "您已选择跳过自动时间同步。如果后续连接失败，请务必手动校准时间！"
+        # 返回1表示一个警告状态，但脚本会继续
+        return 1
+    fi
+
+    log_info "正在为您安装 chrony..."
+    if ! ensure_dependencies "chrony"; then
+        log_error "chrony 安装失败，请手动安装或检查您的包管理器配置。"
+        return 1
+    fi
+
+    log_info "正在启动并设置 chrony 服务开机自启..."
+    systemctl enable chrony >/dev/null 2>&1
+    systemctl start chrony
+
+    log_info "正在强制立即同步时间，这可能需要几秒钟..."
+    # 等待服务就绪
+    sleep 3
+    # 强制进行一次大的时间步进调整，对首次安装非常有效
+    chronyc -a makestep
+
+    if [ $? -eq 0 ]; then
+        log_info "✅ 时间已成功同步！"
+    else
+        log_warn "时间同步命令执行可能失败，但 chrony 服务已在后台运行，通常它会稍后自动完成同步。"
+    fi
+    return 0
+}
+# =================================================
+#           函数：处理 REALITY 特定设置 (集成自动时间校准)
 # =================================================
 _singbox_handle_reality_setup() {
+    # --- 新增：在所有操作开始前，先确保时间是准确的 ---
+    _ensure_time_accuracy
+    # --- 结束 ---
+
     # 声明-n类型的变量，以引用的方式修改外部变量的值
     local -n private_key_ref=$1
     local -n public_key_ref=$2
@@ -2069,25 +2117,19 @@ _singbox_handle_reality_setup() {
     read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
     server_name_ref=${server_name_input:-"www.bing.com"}
 
-    # --- 核心修改：自动生成并验证 short_id ---
+    # 自动生成并验证 short_id
     while true; do
-        # 1. 自动生成一个8位的随机十六进制字符串作为 short_id
         local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
-        # 2. 【修复】使用 echo -e 来打印带颜色的提示，然后用 read 读取输入
         echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
         read short_id_input
-        # 3. 如果用户直接回车，则使用我们生成的随机值；否则使用用户输入的值
         short_id_input=${short_id_input:-$random_short_id}
-
-        # 4. 验证最终的值是否为有效的十六进制 (防止用户手动输入错误)
         if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
             short_id_ref=${short_id_input}
-            break # 输入有效，跳出循环
+            break
         else
             log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
         fi
     done
-    # --- 修改结束 ---
 
     log_info "REALITY 配置信息收集完毕。"
     return 0
