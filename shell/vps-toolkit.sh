@@ -4073,6 +4073,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
+
 # (这是最终修复版函数, 修正了PHP-FPM的用户权限问题，直接解决日志中的报错)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
