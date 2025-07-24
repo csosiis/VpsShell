@@ -1998,10 +1998,6 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. VLESS + Vision + REALITY                    $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
@@ -2018,7 +2014,6 @@ _singbox_prompt_for_protocols() {
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
-    7) protocols_ref=("VLESS-REALITY") ;;
     0) return 1 ;;
     *)
         log_error "无效选择，操作中止。"
@@ -2286,13 +2281,6 @@ _singbox_build_protocol_config_and_link() {
         else
             link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
-        ;;
-    "VLESS-REALITY")
-        # --- **修正核心之一**：修改服务器配置，让 short_id 接受任意值 ---
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"\"]}}}"
-
-        # --- **修正核心之二**：生成的分享链接中，完全移除 shortId 参数 ---
-        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
