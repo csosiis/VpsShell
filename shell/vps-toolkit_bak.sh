@@ -3450,61 +3450,88 @@ install_portainer() {
     clear
     log_info "正在准备安装 Portainer-CE (Docker 管理面板)..."
 
-    local https_port http_port
-    while true; do
-        read -p "请输入 Portainer 的 HTTPS 访问端口 (默认: 9443): " https_port
-        https_port=${https_port:-"9443"}
-        if check_port "$https_port"; then break; fi
-    done
-    while true; do
-        read -p "请输入 Portainer 的 HTTP 端口 (默认: 8000): " http_port
-        http_port=${http_port:-"8000"}
-        if [[ "$http_port" == "$https_port" ]]; then
-            log_error "HTTP 端口不能与 HTTPS 端口相同！"
-        elif check_port "$http_port"; then
-            break
-        fi
-    done
+    local domain
+    read -p "请输入您为 Portainer 准备的域名 (如果留空，则将使用 IP:端口 访问): " domain
 
-    log_info "正在安装 Portainer..."
+    # 停止并删除可能已存在的旧 Portainer 容器，避免端口冲突
+    if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+        log_warn "检测到已存在的 Portainer 容器，将停止并删除它以进行全新安装..."
+        docker stop portainer >/dev/null
+        docker rm portainer >/dev/null
+    fi
+
     docker volume create portainer_data
-    docker run -d \
-        -p "$http_port:8000" \
-        -p "$https_port:9443" \
-        --name portainer \
-        --restart=always \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v portainer_data:/data \
-        portainer/portainer-ce:latest
 
-    sleep 5
-    if docker ps | grep -q "portainer"; then
-        log_info "✅ Portainer 已成功启动！"
+    # --- 逻辑分支：根据是否提供域名来决定安装方式 ---
+    if [ -n "$domain" ]; then
+        # --- 路径1：使用反向代理 (推荐) ---
+        log_info "已输入域名，将为您配置反向代理。"
+        local internal_http_port
+        while true; do
+            read -p "请输入反向代理要连接的内部端口 (默认: 8880): " internal_http_port
+            internal_http_port=${internal_http_port:-"8880"}
+            if check_port "$internal_http_port"; then break; fi
+        done
 
-        read -p "安装已完成，是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
-        if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
-            local domain
-            while true; do
-                read -p "请输入您为 Portainer 准备的域名: " domain
-                if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
-            done
+        log_info "正在以反代模式启动 Portainer 容器..."
+        # 【最终修正】将容器内部端口硬编码为正确的 9000
+        docker run -d \
+            -p "$internal_http_port:9000" \
+            --name portainer \
+            --restart=always \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v portainer_data:/data \
+            portainer/portainer-ce:latest
 
-            if setup_auto_reverse_proxy "$domain" "$https_port"; then
+        sleep 5
+        if docker ps | grep -q "portainer"; then
+            log_info "✅ Portainer 容器已成功启动！"
+            log_info "正在为您配置反向代理..."
+
+            # 调用通用反代函数，代理到我们映射的内部 HTTP 端口
+            if setup_auto_reverse_proxy "$domain" "$internal_http_port"; then
                 log_info "✅ Portainer 反向代理设置完成！"
-                log_info "请通过以下地址访问 (Caddy 会自动处理证书，Nginx 会使用 Let's Encrypt):"
+                log_info "请通过以下地址访问 (脚本会自动处理SSL证书):"
                 log_info "https://$domain"
             else
                 log_error "反向代理设置失败，请检查之前的错误信息。"
             fi
         else
-            local public_ip=$(get_public_ip v4)
-            log_info "好的，您选择不设置反向代理。请通过 IP 地址访问进行初始化设置:"
-            log_info "https://$public_ip:$https_port"
-            log_warn "首次访问浏览器可能会提示证书不安全，请选择“继续前往”。"
+            log_error "Portainer 启动失败，请检查 Docker 日志。"
         fi
+
     else
-        log_error "Portainer 启动失败，请检查 Docker 日志。"
+        # --- 路径2：使用 IP:端口 访问 ---
+        log_info "未输入域名，将为您配置 IP:端口 访问模式。"
+        local external_https_port
+        while true; do
+            read -p "请输入 Portainer 的外部 HTTPS 访问端口 (默认: 9443): " external_https_port
+            external_https_port=${external_https_port:-"9443"}
+            if check_port "$external_https_port"; then break; fi
+        done
+
+        log_info "正在以 IP 访问模式启动 Portainer 容器..."
+        # 【最终修正】这里映射的是 Portainer 内部固定的 9443 HTTPS 端口
+        docker run -d \
+            -p "$external_https_port:9443" \
+            --name portainer \
+            --restart=always \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v portainer_data:/data \
+            portainer/portainer-ce:latest
+
+        sleep 5
+        if docker ps | grep -q "portainer"; then
+            local public_ip=$(get_public_ip v4)
+            log_info "✅ Portainer 已成功启动！"
+            log_info "请通过 IP 地址访问进行初始化设置:"
+            log_info "https://$public_ip:$external_https_port"
+            log_warn "首次访问浏览器可能会提示证书不安全，请选择“继续前往”。"
+        else
+            log_error "Portainer 启动失败，请检查 Docker 日志。"
+        fi
     fi
+
     press_any_key
 }
 

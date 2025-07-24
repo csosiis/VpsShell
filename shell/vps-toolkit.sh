@@ -3534,7 +3534,111 @@ install_portainer() {
 
     press_any_key
 }
+#------------------------------------------------------------------------------------
+# 新增的功能：完全卸载 Docker
+# Author: 编码助手
+# Description: 停止并删除所有容器、镜像、卷，然后卸载 Docker 软件包并清理相关目录。
+#------------------------------------------------------------------------------------
+uninstall_docker() {
+    # 在执行危险操作前，向用户请求确认
+    read -p "警告：此操作将删除所有 Docker 容器、镜像、卷和网络，并卸载 Docker 本身。数据将无法恢复。您确定要继续吗? [y/N] " confirmation
+    # 如果用户输入的不是 'y' 或 'Y'，则取消操作
+    if [[ ! "$confirmation" =~ ^[yY]$ ]]; then
+        echo "卸载操作已取消。"
+        docker_menu # 返回 Docker 菜单
+        return
+    fi
 
+    echo "开始执行 Docker 完全卸载程序..."
+
+    # 检查 Docker 是否已安装
+    if ! command -v docker &> /dev/null; then
+        echo "检测到 Docker 未安装，无需卸载。"
+        sleep 2s
+        docker_menu
+        return
+    fi
+
+    # 停止所有正在运行的容器
+    echo "正在停止所有运行中的容器..."
+    # 使用 `docker ps -aq` 列出所有容器的ID，然后传递给 `docker stop`
+    if [ -n "$(docker ps -q)" ]; then
+        docker stop $(docker ps -aq)
+    else
+        echo "没有正在运行的容器。"
+    fi
+
+    # 删除所有容器
+    echo "正在删除所有容器..."
+    if [ -n "$(docker ps -aq)" ]; then
+        docker rm $(docker ps -aq)
+    else
+        echo "没有容器需要删除。"
+    fi
+
+    # 删除所有 Docker 镜像
+    echo "正在删除所有 Docker 镜像..."
+    if [ -n "$(docker images -q)" ]; then
+        docker rmi -f $(docker images -q)
+    else
+        echo "没有 Docker 镜像需要删除。"
+    fi
+
+    # 删除所有 Docker 卷
+    echo "正在删除所有 Docker 卷..."
+    if [ -n "$(docker volume ls -q)" ]; then
+        docker volume rm $(docker volume ls -q)
+    else
+        echo "没有 Docker 卷需要删除。"
+    fi
+
+    # 清理无用的网络
+    echo "正在清理 Docker 网络..."
+    docker network prune -f
+
+    echo "正在卸载 Docker 相关软件包..."
+    # 通过检查 /etc/os-release 文件来判断操作系统类型
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        echo "无法确定操作系统类型，请手动卸载 Docker 软件包。"
+        return
+    fi
+
+    # 根据不同的操作系统执行相应的卸载命令
+    case $OS in
+        ubuntu|debian)
+            sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+            sudo apt-get autoremove -y --purge
+            ;;
+        centos|rhel|fedora)
+            # 对于 CentOS/RHEL/Fedora，使用 yum 或 dnf
+            if command -v dnf &> /dev/null; then
+                sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            else
+                sudo yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            fi
+            ;;
+        *)
+            echo "不支持的操作系统: $OS"
+            echo "请手动卸载 Docker 软件包。"
+            ;;
+    esac
+
+    echo "正在删除 Docker 的配置文件和数据目录..."
+    sudo rm -rf /var/lib/docker
+    sudo rm -rf /var/lib/containerd
+    sudo rm -rf /etc/docker
+    sudo rm -rf /var/run/docker.sock
+    # 同时删除用户家目录下的 docker 配置
+    rm -rf ~/.docker
+
+    echo "Docker 已被完全卸载。"
+    echo "3秒后将返回 Docker 管理菜单..."
+    sleep 3s
+    docker_menu
+}
 
 # --- 子菜单定义 ---
 
@@ -3637,6 +3741,8 @@ docker_manage_menu() {
         echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
@@ -3646,6 +3752,7 @@ docker_manage_menu() {
         2) docker_image_menu ;;
         3) docker_prune_system ;;
         4) install_portainer ;;
+        4) uninstall_docker ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
