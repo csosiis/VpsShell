@@ -4073,7 +4073,7 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
-# (这是最终修复版函数, 引入Supervisor守护进程以保证PHP容器的绝对稳定性)
+# (这是最终修复版函数, 修正了PHP-FPM的用户权限问题，直接解决日志中的报错)
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
@@ -4112,7 +4112,7 @@ install_maccms() {
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # --- 核心改动 1: 创建 Supervisor 配置文件 ---
+    # --- 核心改动 1: Supervisor配置文件中，让php-fpm以www-data用户运行 ---
     log_info "正在创建 Supervisor 守护进程配置文件..."
     cat > "$project_dir/php/supervisord.conf" <<'EOF'
 [supervisord]
@@ -4124,14 +4124,14 @@ command=/usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fp
 autostart=true
 autorestart=true
 priority=5
-user=root
+user=www-data
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
 
-    # --- 核心改动 2: 重写 Dockerfile 以集成 Supervisor ---
+    # --- 核心改动 2: Dockerfile中，不再修改php-fpm的默认用户 ---
     log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
@@ -4144,10 +4144,9 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libzip-dev \
     unzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && sed -i 's/^\(user\s*=\s*\)www-data/\1root/' /usr/local/etc/php-fpm.d/www.conf
+    && rm -rf /var/lib/apt/lists/*
 
-# 安装PHP扩展
+# 安装PHP扩展 (保持不变)
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
 
@@ -4245,14 +4244,13 @@ EOF
     log_info "等待容器初始化 (8秒)..."
     sleep 8
 
-    # 权限修复依然保留，作为双重保险
-    log_info "正在修复容器内文件权限..."
+    log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
     log_info "正在检查服务最终状态..."
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "引入Supervisor后，PHP 容器仍未能启动！问题可能非常复杂。"
+        log_error "最终尝试后，PHP 容器仍未能启动！问题可能非常复杂。"
         log_info "请使用以下命令查看容器的完整日志以诊断问题:"
         echo -e "\n  cd $project_dir && docker compose logs php\n"
         press_any_key
