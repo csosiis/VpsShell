@@ -2461,16 +2461,32 @@ _get_unique_tag() {
     echo "$final_tag"
 }
 
+# =================================================================
+#           函数：添加入站配置 (最终修复版 V3 - 智能排序)
+# =================================================================
 _add_protocol_inbound() {
     local protocol=$1 config=$2 node_link=$3
     log_info "正在为 [$protocol] 协议添加入站配置..."
     local tmp_file="$SINGBOX_CONFIG_FILE.tmp"
     register_temp_file "$tmp_file"
 
-    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$tmp_file"; then
-        log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"
+    local jq_command
+    # 【核心修正】判断协议类型，决定是前插还是后插
+    if [ "$protocol" == "VLESS-REALITY" ]; then
+        log_info "检测到 REALITY 节点，将置于配置列表顶部以确保兼容性。"
+        # 使用 jq 将新节点插入到 inbounds 数组的开头
+        jq_command="jq --argjson new_config \"$config\" '.inbounds = [\$new_config] + .inbounds' \"$SINGBOX_CONFIG_FILE\""
+    else
+        # 对于其他所有协议，保持原有的追加方式
+        jq_command="jq --argjson new_config \"$config\" '.inbounds += [\$new_config]' \"$SINGBOX_CONFIG_FILE\""
+    fi
+
+    # 执行构建好的 jq 命令
+    if ! eval "$jq_command" > "$tmp_file"; then
+        log_error "[$protocol] 协议配置写入失败！请检查JSON格式或 jq 命令。"
         return 1
     fi
+
     mv "$tmp_file" "$SINGBOX_CONFIG_FILE"
     echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
     log_info "✅ [$protocol] 协议配置添加成功！"
