@@ -3272,7 +3272,7 @@ substore_manage_menu() {
         clear
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
-            rp_menu_text="更换反代域名"
+            rp_menu_text="更换反代域名      "
         fi
 
         local STATUS_COLOR
@@ -3302,7 +3302,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                        $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -5171,8 +5171,6 @@ server {
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
-
-    client_max_body_size 512M;
 
     location / {
         proxy_pass http://127.0.0.1:$port;
