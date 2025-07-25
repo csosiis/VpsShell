@@ -2779,8 +2779,92 @@ generate_subscription_link() {
 
 generate_tuic_client_config() {
     clear
-    log_warn "TUIC 客户端配置生成功能正在开发中..."
-    log_info "此功能旨在为您选择的 TUIC 节点生成一个可以直接在客户端使用的 config.json 文件。"
+    log_info "开始为 TUIC 节点生成客户端配置文件..."
+
+    # 1. 筛选出所有的 TUIC 节点链接
+    if [ ! -s "$SINGBOX_NODE_LINKS_FILE" ]; then
+        log_warn "链接文件为空，没有任何节点。"
+        press_any_key; return
+    fi
+    mapfile -t tuic_links < <(grep '^tuic://' "$SINGBOX_NODE_LINKS_FILE")
+    if [ ${#tuic_links[@]} -eq 0 ]; then
+        log_warn "未找到任何已配置的 TUIC 节点。"
+        press_any_key; return
+    fi
+
+    # 2. 让用户选择一个节点
+    log_info "请选择一个 TUIC 节点以生成其客户端配置:\n"
+    for i in "${!tuic_links[@]}"; do
+        local node_name=$(echo "${tuic_links[$i]}" | sed 's/.*#\(.*\)/\1/')
+        echo -e "  $((i+1)). $WHITE$node_name$NC"
+    done
+    echo -e "\n  0. 返回\n"
+    read -p "请输入选项: " choice
+
+    if ! [[ "$choice" =~ ^[1-9][0-9]*$ ]] || [ "$choice" -gt ${#tuic_links[@]} ]; then
+        log_info "无效选择或已取消。"
+        press_any_key; return
+    fi
+
+    local selected_link="${tuic_links[$((choice-1))]}"
+
+    # 3. 解析选择的链接以提取关键信息
+    local server_info=$(echo "$selected_link" | sed -n 's#^tuic://\(.*\)@\([^?]*\).*#\2#p')
+    local credentials=$(echo "$selected_link" | sed -n 's#^tuic://\(.*\)@.*#\1#p')
+    local params=$(echo "$selected_link" | sed -n 's#.*\?\([^#]*\).*#\1#p')
+
+    local server_addr=$(echo "$server_info" | cut -d':' -f1)
+    local server_port=$(echo "$server_info" | cut -d':' -f2)
+    local uuid=$(echo "$credentials" | cut -d':' -f1)
+    local password=$(echo "$credentials" | cut -d':' -f2)
+    local sni=$(echo "$params" | sed -n 's/.*sni=\([^&]*\).*/\1/p')
+    local alpn=$(echo "$params" | sed -n 's/.*alpn=\([^&]*\).*/\1/p' | sed 's/%2C/","/g') # 将逗号分隔的alpn转为json数组格式
+    local allow_insecure=$(echo "$params" | grep -q 'allow_insecure=1' && echo "true" || echo "false")
+
+    # 4. 使用 jq 动态构建 JSON 配置文件
+    log_info "正在生成配置文件..."
+    local client_config
+    client_config=$(jq -n \
+        --arg server "$server_addr" \
+        --argjson port "$server_port" \
+        --arg uuid "$uuid" \
+        --arg password "$password" \
+        --arg sni "$sni" \
+        --argjson insecure "$allow_insecure" \
+        '{
+            "relay": {
+                "server": $server,
+                "port": $port,
+                "uuid": $uuid,
+                "password": $password,
+                "congestion_control": "bbr",
+                "udp_relay_mode": "native",
+                "tls": {
+                    "enabled": true,
+                    "sni": $sni,
+                    "insecure": $insecure,
+                    "alpn": ["'$alpn'"]
+                }
+            },
+            "local": {
+                "server": "127.0.0.1",
+                "port": 1080
+            },
+            "log": {
+                "level": "warn"
+            }
+        }')
+
+    # 5. 显示给用户
+    clear
+    log_info "✅ TUIC 客户端配置文件已生成！"
+    log_warn "请将以下内容完整复制，并保存为 'config.json' 文件，放置于你的 TUIC 客户端目录下。"
+    echo -e "$CYAN--------------------------------------------------------------$NC"
+    echo -e "$YELLOW"
+    echo "$client_config" | jq . # 使用 jq 再次格式化，使其带颜色和缩进
+    echo -e "$NC"
+    echo -e "$CYAN--------------------------------------------------------------$NC"
+
     press_any_key
 }
 
@@ -2853,95 +2937,119 @@ is_substore_installed() {
 }
 
 substore_do_install() {
+    # --- 首先，确保核心依赖已安装 ---
     ensure_dependencies "curl" "unzip" "git"
 
     log_info "开始执行 Sub-Store 安装流程..."
     set -e
 
-    log_info "正在安装 FNM (Node.js 版本管理器)..."
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
+    # --- 统一定义所有路径变量，使用 $HOME 提高通用性 ---
+    local FNM_DIR="$HOME/.fnm"
+    local PNPM_HOME="$HOME/.local/share/pnpm"
+    # 注意：SUBSTORE_INSTALL_DIR 是全局变量，建议在脚本顶部也修改为 "$HOME/sub-store"
+    # 如果未修改全局变量，这里的局部定义将确保本次安装的路径正确
+    local SUBSTORE_INSTALL_DIR_LOCAL="$HOME/sub-store"
 
-    export PATH="/root/.fnm:$PATH"
+    # --- FNM (Node.js 版本管理器) 安装 ---
+    log_info "正在安装 FNM (Node.js 版本管理器)..."
+    # 使用变量来指定安装目录
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell
+
+    # --- 设置当前会话的环境变量以继续安装 ---
+    export PATH="$FNM_DIR:$PATH"
     eval "$(fnm env)"
     log_info "FNM 安装完成。"
 
+    # --- Node.js 和 pnpm 安装 ---
     log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
     fnm install lts/iron
     fnm use lts/iron
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"
     export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 PNPM 环境准备就绪。"
+    log_info "Node.js 和 pnpm 环境准备就绪。"
 
+    # --- Sub-Store 项目文件下载与设置 ---
     log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"
-    cd "$SUBSTORE_INSTALL_DIR" || exit 1
+    mkdir -p "$SUBSTORE_INSTALL_DIR_LOCAL"
+    cd "$SUBSTORE_INSTALL_DIR_LOCAL" || exit 1
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务...\n"
 
+    # --- 获取用户配置（API 密钥和端口）---
+    log_info "开始配置系统服务...\n"
     local API_KEY
-    local random_api_key
-    random_api_key=$(generate_random_password)
+    local random_api_key=$(generate_random_password)
     read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
     API_KEY=${user_api_key:-$random_api_key}
     if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
     log_info "最终使用的 API 密钥为: ${API_KEY}\n"
+
     local FRONTEND_PORT
     while true; do
         read -p "请输入前端访问端口 [默认: 3000]: " port_input
         FRONTEND_PORT=${port_input:-"3000"}
         if check_port "$FRONTEND_PORT"; then break; fi
     done
+
     local BACKEND_PORT
     while true; do
         echo ""
         read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input
         BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$BACKEND_PORT"; then break; fi
+        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then
+            log_error "后端端口不能与前端端口相同!"
+        elif check_port "$BACKEND_PORT"; then
+            break
         fi
     done
 
+    # --- 创建 systemd 服务文件 (已移除硬编码路径) ---
     cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
-Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
+Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR_LOCAL}/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=::"
 Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
-Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
+Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR_LOCAL}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+# 使用变量路径，不再硬编码 /root
+ExecStart=$FNM_DIR/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR_LOCAL}/sub-store.bundle.js
 Type=simple
-User=root
-Group=root
+# 使用 whoami 自动获取当前运行脚本的用户名 (即 root)
+User=$(whoami)
+Group=$(id -g -n "$(whoami)")
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=32767
 ExecStartPre=/bin/sh -c "ulimit -n 51200"
 StandardOutput=journal
 StandardError=journal
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # --- 启动并检查服务 ---
     log_info "正在启动并启用 sub-store 服务..."
     systemctl daemon-reload
     systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
     systemctl start "$SUBSTORE_SERVICE_NAME"
+
     log_info "正在检测服务状态 (等待 5 秒)..."
     sleep 5
-    set +e
+    set +e # 临时禁用 set -e，以防 is-active 失败导致脚本退出
+
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 服务状态正常 (active)。"
         substore_view_access_link
@@ -2950,7 +3058,11 @@ EOF
     fi
 
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        substore_setup_reverse_proxy
+    else
+        press_any_key
+    fi
 }
 
 substore_do_uninstall() {
@@ -2966,15 +3078,35 @@ substore_do_uninstall() {
         press_any_key
         return
     fi
+
+    # --- 【核心修改】使用 $HOME 来定位正确的安装目录 ---
+    local install_dir_to_remove="$HOME/sub-store"
+
     set -e
     log_info "正在停止并禁用 Sub-Store 服务..."
-    systemctl stop "$SUBSTORE_SERVICE_NAME"
-    systemctl disable "$SUBSTORE_SERVICE_NAME"
+    systemctl stop "$SUBSTORE_SERVICE_NAME" &>/dev/null
+    systemctl disable "$SUBSTORE_SERVICE_NAME" &>/dev/null
+
     log_info "正在删除服务文件..."
     rm -f "$SUBSTORE_SERVICE_FILE"
     systemctl daemon-reload
-    log_info "正在删除 Sub-Store 安装目录..."
-    rm -rf "$SUBSTORE_INSTALL_DIR"
+
+    log_info "正在删除 Sub-Store 安装目录: $install_dir_to_remove"
+    # --- 使用新的变量进行删除 ---
+    rm -rf "$install_dir_to_remove"
+
+    # --- 【功能增强】增加可选的依赖清理步骤 ---
+    log_warn "Sub-Store 核心程序已卸载。"
+    log_warn "但它依赖的 FNM (Node管理器) 和 pnpm 可能仍然存在。"
+    read -p "是否要一并卸载这些依赖项？(这不会影响其他Node.js应用) (y/N): " confirm_deps
+    if [[ "$confirm_deps" =~ ^[Yy]$ ]]; then
+        log_info "正在卸载 FNM..."
+        rm -rf "$HOME/.fnm"
+        log_info "正在卸载 pnpm..."
+        rm -rf "$HOME/.local/share/pnpm"
+        log_info "✅ 依赖项已成功清理。"
+    fi
+
     set +e
     log_info "✅ Sub-Store 已成功卸载。"
     press_any_key
@@ -4442,7 +4574,10 @@ EOF
 
     log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
-    docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
+
+    # 【安全修复】将 777 权限改为更安全的 755
+    # 755 权限: 拥有者(www-data)可读写执行，同组用户和其他用户可读可执行，但不可写。
+    docker exec -i "${project_dir##*/}_php" chmod -R 755 /var/www/html/runtime
 
     log_info "正在检查服务最终状态..."
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
