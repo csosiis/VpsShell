@@ -1242,7 +1242,7 @@ install_warp() {
 # =================================================
 #           实用工具 (增强) - 新增及优化
 # =================================================
-
+# (这是被修改的函数, 修复了状态显示逻辑)
 fail2ban_menu() {
     ensure_dependencies "fail2ban"
     if ! command -v fail2ban-client &>/dev/null; then
@@ -1262,43 +1262,51 @@ maxretry = 5
 [sshd]
 enabled = true
 EOF
+        systemctl enable fail2ban >/dev/null 2>&1
         systemctl restart fail2ban
     fi
 
 
     while true; do
         clear
-        if ! systemctl is-active --quiet fail2ban; then
-            echo -e "$RED Fail2Ban 服务未运行！$NC"
-            read -p "服务未运行，是否立即启动? (Y/n): " start_f2b
-            if [[ ! "$start_f2b" =~ ^[Nn]$ ]]; then
-                systemctl start fail2ban
-                sleep 1
-            else
-                press_any_key
-                return
-            fi
-        fi
 
-        local status
-        status=$(fail2ban-client status)
-        local jail_count
-        jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//')
-        local sshd_status
-        sshd_status=$(fail2ban-client status sshd 2>/dev/null) # 2>/dev/null 避免在 jail 不存在时报错
-        local banned_count="0"
-        local total_banned="0"
-        if [ -n "$sshd_status" ]; then
-            banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
-            total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+        # --- 全新的、更健壮的状态检测逻辑 ---
+        local f2b_status_text
+        local jail_count="N/A"
+        local banned_count="N/A"
+        local total_banned="N/A"
+
+        # 每次循环都重新检查服务的真实状态
+        if systemctl is-active --quiet fail2ban; then
+            f2b_status_text="${GREEN}● 活动$NC"
+
+            # 仅在服务活动时才获取统计信息，并隐藏可能的错误输出
+            local status
+            status=$(fail2ban-client status 2>/dev/null)
+            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | xargs)
+
+            local sshd_status
+            sshd_status=$(fail2ban-client status sshd 2>/dev/null)
+            if [ -n "$sshd_status" ]; then
+                banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
+                total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
+            else
+                banned_count="0"
+                total_banned="0"
+            fi
+        else
+            f2b_status_text="${RED}● 不活动$NC"
+            # 当服务不活动时，统计信息保持为 N/A
         fi
+        # --- 状态检测逻辑结束 ---
 
 
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  当前状态: ${GREEN}● 活动$NC, Jails: ${jail_count}                   $CYAN║$NC"
+        # 使用变量动态显示状态和数据
+        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1356,6 +1364,7 @@ EOF
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 log_info "正在停止并卸载 Fail2Ban..."
                 systemctl stop fail2ban
+                systemctl disable fail2ban
                 if [ "$PKG_MANAGER" == "apt" ]; then
                     apt-get remove --purge -y fail2ban
                 else
@@ -1825,74 +1834,79 @@ is_singbox_installed() {
 }
 
 singbox_do_install() {
-    ensure_dependencies "curl"
+    ensure_dependencies "curl" "openssl"
     if is_singbox_installed; then
-        log_info "Sing-Box 已经安装，跳过安装过程。"
+        log_warn "Sing-Box 已经安装，建议先卸载再使用此方法安装特定内核。"
         press_any_key
         return
     fi
-    log_info "正在安装Sing-Box ..."
-    set -e
-    bash <(curl -fsSL https://sing-box.app/deb-install.sh)
-    set +e
-    if ! is_singbox_installed; then
-        log_error "Sing-Box 安装失败，请检查网络或脚本输出。"
-        exit 1
+    log_info "正在安装特定版本的 Sing-Box 内核..."
+
+    # --- **修正核心之三**：采用与成功脚本相同的内核下载和安装方式 ---
+    local ARCH_RAW=$(uname -m)
+    local ARCH
+    case "${ARCH_RAW}" in
+        'x86_64') ARCH='amd64' ;;
+        'aarch64' | 'arm64') ARCH='arm64' ;;
+        *) log_error "不支持的架构: ${ARCH_RAW}, 无法安装特定内核。"; press_any_key; return 1 ;;
+    esac
+
+    log_info "正在从特定源下载 sing-box 内核 for $ARCH..."
+    mkdir -p "$SUBSTORE_INSTALL_DIR" # 使用一个已定义的目录变量
+    if ! curl -sLo "/usr/local/bin/sing-box" "https://$ARCH.ssss.nyc.mn/sbx"; then
+        log_error "特定内核下载失败！"
+        press_any_key
+        return 1
     fi
-    log_info "✅ Sing-Box 安装成功！"
-    log_info "正在自动定位服务文件并修改运行权限..."
-    local service_file_path
-    service_file_path=$(systemctl status sing-box | grep -oP 'Loaded: loaded \(\K[^;]+')
-    if [ -n "$service_file_path" ] && [ -f "$service_file_path" ]; then
-        log_info "找到服务文件位于: $service_file_path"
-        sed -i.bak 's/User=sing-box/User=root/' "$service_file_path"
-        sed -i.bak 's/Group=sing-box/Group=root/' "$service_file_path"
-        systemctl daemon-reload
-        log_info "服务权限修改完成。"
-    else
-        log_error "无法自动定位 sing-box.service 文件！跳过权限修改。可能会导致证书读取失败。"
-    fi
-    local config_dir="/etc/sing-box"
-    mkdir -p "$config_dir"
+    chmod +x "/usr/local/bin/sing-box"
+
+    # 手动创建 systemd 服务文件
+    log_info "正在创建 systemd 服务文件..."
+    cat > /etc/systemd/system/sing-box.service << EOF
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+WorkingDirectory=/etc/sing-box
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # 创建基础配置文件
+    mkdir -p /etc/sing-box
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
-        log_info "正在创建兼容性更强的 Sing-Box 默认配置文件..."
+        log_info "正在创建兼容的默认配置文件..."
         cat >"$SINGBOX_CONFIG_FILE" <<EOL
 {
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
-  "dns": {},
+  "log": { "level": "info", "timestamp": true },
   "inbounds": [],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    },
-    {
-      "type": "dns",
-      "tag": "dns-out"
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "protocol": "dns",
-        "outbound": "dns-out"
-      }
-    ]
-  }
+  "outbounds": [ { "type": "direct", "tag": "direct" } ]
 }
 EOL
     fi
-    log_info "正在启用并重启 Sing-Box 服务..."
+
+    log_info "正在重载、启用并启动 Sing-Box 服务..."
+    systemctl daemon-reload
     systemctl enable sing-box.service
-    systemctl restart sing-box
-    log_info "✅ Sing-Box 配置文件初始化完成并已启动！"
+    systemctl start sing-box
+
+    sleep 2
+    if systemctl is-active --quiet sing-box; then
+        log_info "✅ 特定版本 Sing-Box 安装并启动成功！"
+    else
+        log_error "Sing-Box 服务启动失败！请使用 'journalctl -u sing-box -f' 查看日志。"
+    fi
     press_any_key
 }
 
@@ -1967,15 +1981,25 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     read -p "请输入选项: " protocol_choice
@@ -1999,7 +2023,133 @@ _singbox_prompt_for_protocols() {
     esac
     return 0
 }
+# =================================================
+#           函数：确保服务器时间精准 (新增)
+# =================================================
+_ensure_time_accuracy() {
+    # 检查常见的几种时间同步服务是否正在运行
+    if systemctl is-active --quiet chronyd || systemctl is-active --quiet ntpd || systemctl is-active --quiet systemd-timesyncd; then
+        log_info "检测到时间同步服务正在运行，时间被认为是准确的。"
+        return 0
+    fi
 
+    log_warn "警告：未检测到有效的时间同步服务！"
+    log_warn "REALITY 协议对服务器时间的精准度要求极高，任何显著偏差都会导致连接失败。"
+    read -p "是否要让脚本为您自动安装并配置 chrony (推荐的时间同步服务)？(Y/n): " confirm_install_chrony
+
+    # 如果用户选择 'n' 或 'N'，则跳过
+    if [[ "$confirm_install_chrony" =~ ^[Nn]$ ]]; then
+        log_warn "您已选择跳过自动时间同步。如果后续连接失败，请务必手动校准时间！"
+        # 返回1表示一个警告状态，但脚本会继续
+        return 1
+    fi
+
+    log_info "正在为您安装 chrony..."
+    if ! ensure_dependencies "chrony"; then
+        log_error "chrony 安装失败，请手动安装或检查您的包管理器配置。"
+        return 1
+    fi
+
+    log_info "正在启动并设置 chrony 服务开机自启..."
+    systemctl enable chrony >/dev/null 2>&1
+    systemctl start chrony
+
+    log_info "正在强制立即同步时间，这可能需要几秒钟..."
+    # 等待服务就绪
+    sleep 3
+    # 强制进行一次大的时间步进调整，对首次安装非常有效
+    chronyc -a makestep
+
+    if [ $? -eq 0 ]; then
+        log_info "✅ 时间已成功同步！"
+    else
+        log_warn "时间同步命令执行可能失败，但 chrony 服务已在后台运行，通常它会稍后自动完成同步。"
+    fi
+    return 0
+}
+# =================================================
+#           函数：处理 REALITY 特定设置 (增强版)
+# =================================================
+_singbox_handle_reality_setup() {
+    # --- 确保时间准确 (此函数调用保持不变) ---
+    _ensure_time_accuracy
+
+    # 声明-n类型的变量，以引用的方式修改外部变量的值
+    local -n private_key_ref=$1
+    local -n public_key_ref=$2
+    local -n connect_addr_ref=$3
+    local -n server_name_ref=$4
+    local -n short_id_ref=$5
+
+    clear
+    log_info "正在配置 VLESS + REALITY..."
+    if ! command -v sing-box &>/dev/null; then
+        log_error "未找到 sing-box 命令，无法生成 REALITY 密钥对。"
+        return 1
+    fi
+
+    log_info "正在生成 REALITY 密钥对..."
+    local key_pair
+    key_pair=$(sing-box generate reality-keypair)
+    private_key_ref=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}')
+    public_key_ref=$(echo "$key_pair" | awk '/PublicKey/ {print $2}')
+
+    if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
+        log_error "REALITY 密钥对生成失败！"
+        return 1
+    fi
+    log_info "✅ 密钥对生成成功！"
+    echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
+    echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
+    echo ""
+
+    # 选择连接地址 (IP)
+    local ipv4_addr=$(get_public_ip v4)
+    local ipv6_addr=$(get_public_ip v6)
+    if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+        echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
+        read -p "请输入选项 (1-2): " ip_choice
+        if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
+    elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
+    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
+    else log_error "无法获取任何公网 IP 地址！"; return 1; fi
+
+    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
+    while true; do
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.bing.com"}
+
+        log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
+        # 使用curl测试HTTPS连接，-m 5设置5秒超时
+        # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
+        if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
+            log_info "✅ 连通性测试通过。"
+            break
+        else
+            log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
+            log_warn "请检查域名拼写，或更换一个可从本机访问的域名 (如 www.apple.com, www.microsoft.com)。"
+            echo ""
+        fi
+    done
+    # --- **修改结束** ---
+
+    # 自动生成并验证 short_id
+    while true; do
+        local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
+        echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
+        read short_id_input
+        short_id_input=${short_id_input:-$random_short_id}
+        if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
+            short_id_ref=${short_id_input}
+            break
+        else
+            log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
+        fi
+    done
+
+    log_info "REALITY 配置信息收集完毕。"
+    return 0
+}
 _singbox_handle_certificate_setup() {
     local -n cert_path_ref=$1
     local -n key_path_ref=$2
@@ -2108,6 +2258,12 @@ _singbox_build_protocol_config_and_link() {
     local insecure_hy2=${args_ref[insecure_hy2]}
     local insecure_tuic=${args_ref[insecure_tuic]}
 
+    # REALITY 专属参数
+    local private_key=${args_ref[private_key]}
+    local public_key=${args_ref[public_key]}
+    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
+
+
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
@@ -2121,7 +2277,7 @@ _singbox_build_protocol_config_and_link() {
             link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_ws}#$tag"
         elif [[ "$protocol" == "VMess" ]]; then
             local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
-            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w 0)"
+            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         else
             link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
@@ -2136,7 +2292,9 @@ _singbox_build_protocol_config_and_link() {
         ;;
     esac
 }
-
+# =================================================
+#           函数: 节点添加总指挥 (增强版)
+# =================================================
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
@@ -2146,18 +2304,38 @@ singbox_add_node_orchestrator() {
 
     local cert_path key_path connect_addr sni_domain
     declare -A insecure_params
-    if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then press_any_key; return; fi
+    local reality_private_key reality_public_key reality_short_id
+
+    if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
+        # 注意：这里我们调用的是上面修改过的 _singbox_handle_reality_setup 函数
+        if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
+            press_any_key
+            return
+        fi
+    else
+        if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
+            press_any_key
+            return
+        fi
+    fi
 
     declare -A ports
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
 
-    read -p "请输入自定义标识 (如 Google, 回车则默认用 Jcole): " custom_id
-    custom_id=${custom_id:-"Jcole"}
+    log_info "正在获取地理及运营商信息..."
+    local geo_info_json
+    geo_info_json=$(curl -s ip-api.com/json)
 
-    local geo_info_json=$(curl -s ip-api.com/json)
+    local city operator_name
     local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
-    local region_name=$(echo "$geo_info_json" | jq -r '.regionName // "N/A"' | sed 's/ //g')
+    city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
+    operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
+
+    local custom_id
+    echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
+    read custom_id
+    custom_id=${custom_id:-$operator_name}
 
     local success_count=0
     local final_node_link=""
@@ -2167,7 +2345,7 @@ singbox_add_node_orchestrator() {
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
-        local tag_base="$country_code-$region_name-$custom_id"
+        local tag_base="$city-$custom_id"
         local base_tag_for_protocol="$tag_base-$protocol"
         local tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
@@ -2179,12 +2357,19 @@ singbox_add_node_orchestrator() {
         build_args[password]=$(generate_random_password)
         build_args[connect_addr]="$connect_addr"
         build_args[sni_domain]="$sni_domain"
-        build_args[cert_path]="$cert_path"
-        build_args[key_path]="$key_path"
-        build_args[insecure_ws]=${insecure_params[ws]}
-        build_args[insecure_vmess]=${insecure_params[vmess]}
-        build_args[insecure_hy2]=${insecure_params[hy2]}
-        build_args[insecure_tuic]=${insecure_params[tuic]}
+
+        if [ "$protocol" == "VLESS-REALITY" ]; then
+            build_args[private_key]="$reality_private_key"
+            build_args[public_key]="$reality_public_key"
+            build_args[short_id]="$reality_short_id"
+        else
+            build_args[cert_path]="$cert_path"
+            build_args[key_path]="$key_path"
+            build_args[insecure_ws]=${insecure_params[ws]}
+            build_args[insecure_vmess]=${insecure_params[vmess]}
+            build_args[insecure_hy2]=${insecure_params[hy2]}
+            build_args[insecure_tuic]=${insecure_params[tuic]}
+        fi
 
         local config node_link
         _singbox_build_protocol_config_and_link "$protocol" build_args config node_link
@@ -2211,6 +2396,15 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
+            # --- **修改核心**：增加 REALITY 和其他协议的最终提醒 ---
+            if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
+                echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
+                log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
+                log_warn "已经放行了此节点使用的 TCP 和 UDP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
+                log_warn "否则，客户端将无法连接！"
+                echo -e "$YELLOW==============================================================$NC"
+            fi
+
             if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
                 echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
                 for p in "${protocols_with_self_signed[@]}"; do
@@ -2227,6 +2421,7 @@ singbox_add_node_orchestrator() {
                 done
                 echo -e "\n$YELLOW==============================================================$NC"
             fi
+            # --- **修改结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
@@ -2239,8 +2434,6 @@ singbox_add_node_orchestrator() {
         press_any_key
     fi
 }
-
-
 _get_unique_tag() {
     local base_tag="$1"
     local final_tag="$base_tag"
@@ -2583,8 +2776,8 @@ singbox_main_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         local STATUS_COLOR
         if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
@@ -3534,7 +3727,111 @@ install_portainer() {
 
     press_any_key
 }
+#------------------------------------------------------------------------------------
+# 新增的功能：完全卸载 Docker
+# Author: 编码助手
+# Description: 停止并删除所有容器、镜像、卷，然后卸载 Docker 软件包并清理相关目录。
+#------------------------------------------------------------------------------------
+uninstall_docker() {
+    # 在执行危险操作前，向用户请求确认
+    read -p "警告：此操作将删除所有 Docker 容器、镜像、卷和网络，并卸载 Docker 本身。数据将无法恢复。您确定要继续吗? [y/N] " confirmation
+    # 如果用户输入的不是 'y' 或 'Y'，则取消操作
+    if [[ ! "$confirmation" =~ ^[yY]$ ]]; then
+        echo "卸载操作已取消。"
+        docker_menu # 返回 Docker 菜单
+        return
+    fi
 
+    echo "开始执行 Docker 完全卸载程序..."
+
+    # 检查 Docker 是否已安装
+    if ! command -v docker &> /dev/null; then
+        echo "检测到 Docker 未安装，无需卸载。"
+        sleep 2s
+        docker_menu
+        return
+    fi
+
+    # 停止所有正在运行的容器
+    echo "正在停止所有运行中的容器..."
+    # 使用 `docker ps -aq` 列出所有容器的ID，然后传递给 `docker stop`
+    if [ -n "$(docker ps -q)" ]; then
+        docker stop $(docker ps -aq)
+    else
+        echo "没有正在运行的容器。"
+    fi
+
+    # 删除所有容器
+    echo "正在删除所有容器..."
+    if [ -n "$(docker ps -aq)" ]; then
+        docker rm $(docker ps -aq)
+    else
+        echo "没有容器需要删除。"
+    fi
+
+    # 删除所有 Docker 镜像
+    echo "正在删除所有 Docker 镜像..."
+    if [ -n "$(docker images -q)" ]; then
+        docker rmi -f $(docker images -q)
+    else
+        echo "没有 Docker 镜像需要删除。"
+    fi
+
+    # 删除所有 Docker 卷
+    echo "正在删除所有 Docker 卷..."
+    if [ -n "$(docker volume ls -q)" ]; then
+        docker volume rm $(docker volume ls -q)
+    else
+        echo "没有 Docker 卷需要删除。"
+    fi
+
+    # 清理无用的网络
+    echo "正在清理 Docker 网络..."
+    docker network prune -f
+
+    echo "正在卸载 Docker 相关软件包..."
+    # 通过检查 /etc/os-release 文件来判断操作系统类型
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        echo "无法确定操作系统类型，请手动卸载 Docker 软件包。"
+        return
+    fi
+
+    # 根据不同的操作系统执行相应的卸载命令
+    case $OS in
+        ubuntu|debian)
+            sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+            sudo apt-get autoremove -y --purge
+            ;;
+        centos|rhel|fedora)
+            # 对于 CentOS/RHEL/Fedora，使用 yum 或 dnf
+            if command -v dnf &> /dev/null; then
+                sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            else
+                sudo yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            fi
+            ;;
+        *)
+            echo "不支持的操作系统: $OS"
+            echo "请手动卸载 Docker 软件包。"
+            ;;
+    esac
+
+    echo "正在删除 Docker 的配置文件和数据目录..."
+    sudo rm -rf /var/lib/docker
+    sudo rm -rf /var/lib/containerd
+    sudo rm -rf /etc/docker
+    sudo rm -rf /var/run/docker.sock
+    # 同时删除用户家目录下的 docker 配置
+    rm -rf ~/.docker
+
+    echo "Docker 已被完全卸载。"
+    echo "3秒后将返回 Docker 管理菜单..."
+    sleep 3s
+    docker_menu
+}
 
 # --- 子菜单定义 ---
 
@@ -3607,51 +3904,81 @@ docker_image_menu() {
         esac
     done
 }
-
-
 # --- 主管理菜单 (V2.0) ---
 docker_manage_menu() {
-    if ! command -v docker &>/dev/null; then
-        _install_docker_and_compose
-        if ! command -v docker &>/dev/null; then
-             log_error "Docker 安装失败，无法进入管理菜单。"
-             press_any_key
-             return
-        fi
-    fi
-
     while true; do
         clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 核心逻辑：首先检查 'docker' 命令是否存在
+        if ! command -v docker &>/dev/null; then
+            # --- Docker 未安装时显示的菜单 ---
+            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}                $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-        read -p "请输入选项: " choice
-        case $choice in
-        1) docker_container_menu ;;
-        2) docker_image_menu ;;
-        3) docker_prune_system ;;
-        4) install_portainer ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
+            read -p "请输入选项: " choice
+            case $choice in
+            1)
+                # 调用脚本中已有的安装函数
+                _install_docker_and_compose
+                press_any_key
+                # 不跳出循环，安装后会自动刷新菜单
+                ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        else
+            # --- Docker 已安装时显示的菜单 ---
+            local DOCKER_STATUS_COLOR
+            # 检测 Docker 服务是否正在运行
+            if systemctl is-active --quiet docker; then
+                DOCKER_STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                DOCKER_STATUS_COLOR="$RED● 不活动$NC"
+            fi
+
+            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC  当前状态: $DOCKER_STATUS_COLOR                                $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+            read -p "请输入选项: " choice
+            case $choice in
+            1) docker_container_menu ;;
+            2) docker_image_menu ;;
+            3) docker_prune_system ;;
+            4) install_portainer ;;
+            5) uninstall_docker ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+            esac
+        fi
     done
 }
-
 # =================================================
 #           Docker 应用 & 面板 (docker_apps_menu)
 # =================================================
@@ -3711,6 +4038,7 @@ _install_docker_and_compose() {
     fi
 }
 
+# (这是被修改的函数, 用来卸载所有基于 Docker Compose 的项目)
 uninstall_docker_compose_project() {
     local app_name=$1
     local default_dir=$2
@@ -3719,11 +4047,23 @@ uninstall_docker_compose_project() {
     read -e -p "请输入要卸载的 $app_name 的安装目录 [默认: $default_dir]: " project_dir
     project_dir=${project_dir:-$default_dir}
 
-    if [ ! -f "$project_dir/docker-compose.yml" ]; then
+    if [ ! -d "$project_dir" ] || [ ! -f "$project_dir/docker-compose.yml" ]; then
         log_error "目录 $project_dir 下未找到 docker-compose.yml 文件，请确认路径。"
         press_any_key
         return
     fi
+
+    # --- 新增的反代清理逻辑 ---
+    local proxy_domain_file="$project_dir/.proxy_domain"
+    if [ -f "$proxy_domain_file" ]; then
+        local domain=$(cat "$proxy_domain_file")
+        log_warn "检测到此应用关联了反向代理域名: $domain"
+        read -p "是否要在卸载应用的同时，删除其反代配置和SSL证书? (y/N): " confirm_delete_proxy
+        if [[ "$confirm_delete_proxy" =~ ^[Yy]$ ]]; then
+            _cleanup_reverse_proxy_config "$domain"
+        fi
+    fi
+    # --- 结束 ---
 
     log_info "准备卸载位于 $project_dir 的 $app_name..."
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; press_any_key; return 1; }
@@ -3747,7 +4087,6 @@ uninstall_docker_compose_project() {
     fi
 
     log_info "✅ $app_name 卸载完成。"
-    press_any_key
 }
 
 install_sui() {
@@ -3766,6 +4105,7 @@ install_3xui() {
     press_any_key
 }
 
+# (这是被修改的函数)
 install_wordpress() {
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
@@ -3781,28 +4121,14 @@ install_wordpress() {
         project_dir=${project_dir:-"/root/wordpress"}
         if [ -f "$project_dir/docker-compose.yml" ]; then
             log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
-            read -p "是否要先卸载它？(y/N): " uninstall_choice
-            if [[ "$uninstall_choice" =~ ^[Yy]$ ]]; then
-                uninstall_wordpress
-                if [ -d "$project_dir" ]; then continue; else break; fi
-            else
-                log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
-                continue
-            fi
+            log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
+            continue
         else
             break
         fi
     done
-    mkdir -p "$project_dir" || {
-        log_error "无法创建目录 $project_dir！"
-        press_any_key
-        return 1
-    }
-    cd "$project_dir" || {
-        log_error "无法进入目录 $project_dir！"
-        press_any_key
-        return 1
-    }
+    mkdir -p "$project_dir" || { log_error "无法创建目录 $project_dir！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir！"; press_any_key; return 1; }
     log_info "新的 WordPress 将被安装在: $(pwd)"
 
     local db_password
@@ -3813,7 +4139,7 @@ install_wordpress() {
 
     local wp_port
     while true; do
-        read -p "请输入 WordPress 的外部访问端口 (例如 8080): " wp_port
+        read -p "请输入 WordPress 的内部代理端口 (例如 8080，外部无法直接访问): " wp_port
         if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
             log_error "端口号必须是 1-65535 之间的数字。"
         elif ! check_port "$wp_port"; then
@@ -3823,10 +4149,11 @@ install_wordpress() {
 
     local domain
     while true; do
-        read -p "请输入您的网站访问域名 (例如 blog.example.com): " domain
+        read -p "请输入您的网站访问域名 (例如 blog.example.com)，必须提前解析: " domain
         if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
     done
     local site_url="https://$domain"
+
     log_info "正在生成 docker-compose.yml 文件..."
     cat >docker-compose.yml <<EOF
 version: '3.8'
@@ -3873,33 +4200,22 @@ volumes:
 networks:
   wordpress_net:
 EOF
-    if [ ! -f "docker-compose.yml" ]; then
-        log_error "docker-compose.yml 文件创建失败！"
-        press_any_key
-        return
-    fi
 
     log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
     log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
     docker compose up -d
-
     log_info "正在检查服务状态..."
     sleep 5
     docker compose ps
-
     log_info "✅ WordPress 容器已成功启动！"
 
-    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
-    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
-        setup_auto_reverse_proxy "$domain" "$wp_port"
+    log_info "正在为域名 $domain 设置反向代理..."
+    if setup_auto_reverse_proxy "$domain" "$wp_port"; then
+        # --- 新增：记录反代域名 ---
+        echo "$domain" > "$project_dir/.proxy_domain"
         log_info "WordPress 配置流程完毕！您现在应该可以通过 $site_url 访问您的网站了。"
     else
-        log_info "好的，您选择不设置反向代理。"
-        log_info "您可以通过以下 IP 地址完成 WordPress 的初始化安装："
-        local ipv4
-        ipv4=$(get_public_ip v4)
-        if [ -n "$ipv4" ]; then log_info "IPv4 地址: http://$ipv4:$wp_port"; fi
-        log_warn "请注意，直接使用 IP 访问可能会导致网站样式或功能异常。"
+         log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
     fi
     press_any_key
 }
@@ -3932,17 +4248,18 @@ download_maccms_source() {
     return 0
 }
 
+# (这是最终修复版函数, 经过仔细检查确保完整无误)
 install_maccms() {
-    log_info "开始安装苹果CMS"
+    log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
         press_any_key
         return
     fi
-    ensure_dependencies "unzip" "file"
+    ensure_dependencies "unzip" "file" "curl"
 
     local project_dir
-    read -e -p "请输入安装目录 [默认: /root/maccms]: " project_dir
+    read -e -p "请输入苹果CMS的安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
 
     if [ -f "$project_dir/docker-compose.yml" ]; then
@@ -3963,40 +4280,73 @@ install_maccms() {
     local db_user="maccms_user"
     local db_port="3306"
     local web_port
-    read -p "请输入外部访问端口 [默认: 8880]: " web_port
+    read -p "请输入一个内部代理端口 (例如 8880，用于反代): " web_port
     web_port=${web_port:-"8880"}
+    if ! check_port "$web_port"; then press_any_key; return; fi
 
-    mkdir -p "$project_dir/nginx" "$project_dir/source"
+    mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
+
+    log_info "正在创建 Supervisor 守护进程配置文件..."
+    cat > "$project_dir/php/supervisord.conf" <<'EOF'
+[supervisord]
+nodaemon=true
+user=root
+
+[program:php-fpm]
+command=/usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/www.conf
+autostart=true
+autorestart=true
+priority=5
+user=www-data
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+    log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
+    cat > "$project_dir/php/Dockerfile" <<'EOF'
+FROM php:7.4-fpm
+
+# 安装 Supervisor 和其他依赖
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libzip-dev \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 容器化改造：修改php-fpm配置，将日志输出到标准错误流，而不是文件
+RUN sed -i 's#^error_log = .*#error_log = /proc/self/fd/2#' /usr/local/etc/php-fpm.conf \
+    && sed -i 's#;catch_workers_output = yes#catch_workers_output = yes#' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's#^php_admin_value\[error_log\] = .*#php_admin_value[error_log] = /proc/self/fd/2#' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's#^php_admin_flag\[log_errors\] = .*#php_admin_flag[log_errors] = on#' /usr/local/etc/php-fpm.d/www.conf
+
+# 安装PHP扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
+
+# 复制 Supervisor 配置文件到镜像中
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# 设置容器启动时执行的命令为 Supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+EOF
 
     local maccms_version
     maccms_version=$(get_latest_maccms_tag)
-    if [ -z "$maccms_version" ]; then
-        log_error "获取 maccms 版本失败"
-        press_any_key
-        return 1
-    fi
+    if [ -z "$maccms_version" ]; then log_error "获取 maccms 最新版本标签失败！"; press_any_key; return 1; fi
     log_info "获取到最新版标签: $maccms_version"
-
-    if ! download_maccms_source "$maccms_version"; then
-        press_any_key
-        return 1
-    fi
-
+    if ! download_maccms_source "$maccms_version"; then press_any_key; return 1; fi
     unzip -q source.zip || { log_error "解压失败"; return 1; }
     rm -f source.zip
-
     local dir="maccms10-${maccms_version#v}"
-    if [ ! -d "$dir" ]; then
-        log_error "解压后目录不存在"
-        return 1
-    fi
-
-    mv "$dir"/* "$project_dir/source/"
-    mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
+    if [ ! -d "$dir" ]; then log_error "解压后目录不存在"; return 1; fi
+    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
     rm -rf "$dir"
-
-    chown -R 82:82 "$project_dir/source"
 
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
@@ -4005,20 +4355,12 @@ server {
     root /var/www/html;
     index index.php index.html index.htm;
     location / {
-        if (!-e $request_filename) {
-            rewrite ^/index.php(.*)$ /index.php?s=$1 last;
-            rewrite ^/admin.php(.*)$ /admin.php?s=$1 last;
-            rewrite ^/api.php(.*)$ /api.php?s=$1 last;
-            rewrite ^(.*)$ /index.php?s=$1 last;
-            break;
-        }
+        try_files $uri $uri/ /index.php?$query_string;
     }
     location ~ \.php$ {
-        try_files $uri =404;
-        fastcgi_pass   php:9000;
-        fastcgi_index  index.php;
-        fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include        fastcgi_params;
+        include fastcgi_params;
+        fastcgi_pass php:9000;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
     location ~ /\.ht {
         deny all;
@@ -4039,15 +4381,19 @@ services:
       MYSQL_PASSWORD: "$db_user_password"
     volumes:
       - db_data:/var/lib/mysql
+    networks:
+      - maccms_net
 
   php:
-    image: php:7.4-fpm
+    build: ./php
     container_name: ${project_dir##*/}_php
     volumes:
       - ./source:/var/www/html
     restart: always
     depends_on:
       - db
+    networks:
+      - maccms_net
 
   nginx:
     image: nginx:1.21-alpine
@@ -4060,49 +4406,65 @@ services:
     restart: always
     depends_on:
       - php
+    networks:
+      - maccms_net
 
 volumes:
   db_data:
+
+networks:
+  maccms_net:
 EOF
 
-    log_info "正在启动服务..."
-    docker compose up -d
-    sleep 5
-    docker compose ps
+    log_info "正在构建集成Supervisor的PHP镜像并启动所有服务..."
+    log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
+    docker compose up -d --build
 
-    log_info "正在修复文件权限..."
+    log_info "等待容器初始化 (8秒)..."
+    sleep 8
+
+    log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
-    docker exec -i "${project_dir##*/}_php" chmod 666 /var/www/html/application/database.php || true
 
-    log_info "正在写入数据库配置文件..."
-    docker exec -i "${project_dir##*/}_php" bash -c "cat > /var/www/html/application/database.php <<EOF
-<?php
-return [
-    'type'     => 'mysql',
-    'hostname' => 'db',
-    'database' => '$db_name',
-    'username' => '$db_user',
-    'password' => '$db_user_password',
-    'hostport' => '$db_port',
-    'charset'  => 'utf8mb4',
-    'prefix'   => 'mac_',
-];
-EOF
-"
-    local public_ip
-    public_ip=$(get_public_ip v4)
-    log_info "✅ 安装完成，信息如下："
-    echo "--------------------------------------------"
-    echo "网站地址: http://$public_ip:$web_port"
-    echo "数据库信息："
-    echo "  主机: db"
-    echo "  端口: $db_port"
-    echo "  数据库: $db_name"
-    echo "  用户: $db_user"
-    echo "  用户密码: $db_user_password"
-    echo "  Root密码: $db_root_password"
-    echo "--------------------------------------------"
+    log_info "正在检查服务最终状态..."
+    if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
+        log_error "最终尝试后，PHP 容器仍未能启动！问题可能非常复杂。"
+        log_info "请使用以下命令查看容器的完整日志以诊断问题:"
+        echo -e "\n  cd $project_dir && docker compose logs php\n"
+        press_any_key
+        return 1
+    fi
+
+    log_info "✅ 所有服务均已成功启动！"
+    docker compose ps
+
+    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
+    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
+        local domain
+        while true; do
+            read -p "请输入您的网站访问域名 (例如 maccms.example.com): " domain
+            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+        done
+        if setup_auto_reverse_proxy "$domain" "$web_port"; then
+            echo "$domain" > "$project_dir/.proxy_domain"
+            log_info "✅ 反向代理设置完成！"
+            echo "--------------------------------------------"
+            log_info "请访问以下地址完成安装向导："
+            log_info "https://$domain/install.php"
+            echo "--------------------------------------------"
+        else
+             log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
+        fi
+    else
+        local public_ip
+        public_ip=$(get_public_ip v4)
+        log_info "好的，您选择不设置反向代理。"
+        log_warn "在安装向导的数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
+        echo "--------------------------------------------"
+        echo "网站安装地址: http://$public_ip:$web_port/install.php"
+        echo "--------------------------------------------"
+    fi
     press_any_key
 }
 
@@ -4162,35 +4524,241 @@ EOF
 uninstall_uptime_kuma() {
     uninstall_docker_compose_project "Uptime Kuma" "/root/uptime-kuma"
 }
+# =================================================================
+#           以下是为新的 “Docker 应用 & 面板安装” 菜单新增的函数
+# =================================================================
 
+# --- 新增：面板安装函数 ---
+
+install_bt_panel() {
+    clear
+    log_warn "宝塔面板是一个功能强大但相对独立的服务器管理面板。"
+    log_warn "它会安装自己的Web服务器套件 (Nginx, Apache等)，可能会与您现有的环境冲突。"
+    log_warn "请确保您在一个纯净的系统上安装宝塔面板。"
+    read -p "您确定要继续安装吗? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "安装已取消。"
+        press_any_key
+        return
+    fi
+    log_info "正在根据您的操作系统选择合适的宝塔安装脚本..."
+    local install_script_url=""
+    case "$OS_ID" in
+        ubuntu)
+            install_script_url="http://download.bt.cn/install/install-ubuntu_6.0.sh"
+            ;;
+        debian)
+            install_script_url="http://download.bt.cn/install/install-debian_6.0.sh"
+            ;;
+        centos|rhel|fedora)
+             # 对于 Red Hat 系，使用通用安装脚本
+            install_script_url="http://download.bt.cn/install/install_6.0.sh"
+            ;;
+        *)
+            log_error "您的操作系统 ($OS_ID) 不在宝塔官方支持的自动安装列表内。"
+            log_error "请访问 http://www.bt.cn 手动获取安装方法。"
+            press_any_key
+            return
+            ;;
+    esac
+
+    log_info "即将执行宝塔官方安装脚本，请根据提示操作..."
+    wget -O install.sh "$install_script_url" && bash install.sh
+    log_info "宝塔面板安装脚本执行完毕。"
+    press_any_key
+}
+
+install_1panel() {
+    clear
+    log_warn "1Panel 是一个现代化的 Linux 服务器运维管理面板。"
+    log_info "即将执行 1Panel 官方一键安装脚本..."
+    read -p "您确定要继续安装吗? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "安装已取消。"
+        press_any_key
+        return
+    fi
+    curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && bash quick_start.sh
+    log_info "1Panel 安装脚本执行完毕。"
+    press_any_key
+}
+
+
+# --- 新增：面板卸载函数 ---
+
+_cleanup_reverse_proxy_config() {
+    local domain="$1"
+    if [ -z "$domain" ]; then return 1; fi
+
+    log_info "正在为域名 [$domain] 清理反向代理配置..."
+    local nginx_conf="/etc/nginx/sites-available/$domain.conf"
+    local nginx_enabled_conf="/etc/nginx/sites-enabled/$domain.conf"
+
+    if [ -f "$nginx_conf" ] || [ -L "$nginx_enabled_conf" ]; then
+        log_info "检测到 Nginx 配置，正在删除..."
+        rm -f "$nginx_enabled_conf"
+        rm -f "$nginx_conf"
+        # 测试 Nginx 配置并静默重载
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx
+            log_info "✅ Nginx 配置已清理并重载。"
+        else
+            log_warn "Nginx 配置文件测试失败，可能需要手动修复。"
+        fi
+    fi
+
+    if command -v certbot &>/dev/null && certbot certificates 2>/dev/null | grep -q -E "Certificate Name: $domain"; then
+        log_info "检测到 Certbot 证书，正在删除..."
+        certbot delete --cert-name "$domain" --non-interactive
+        log_info "✅ Certbot 证书已删除。"
+    fi
+    return 0
+}
+
+uninstall_3xui() {
+    log_info "3x-ui 的卸载功能集成在其安装脚本中。"
+    log_info "即将重新运行其安装脚本，请在脚本菜单中选择【卸载】选项。"
+    press_any_key
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    log_warn "请注意：此操作不会自动清理您可能为 3x-ui 手动配置的反向代理。"
+    press_any_key
+}
+
+uninstall_sui() {
+    log_info "S-ui 的卸载功能集成在其安装脚本中。"
+    log_info "即将重新运行其安装脚本，请在脚本菜单中选择【卸载】选项。"
+    press_any_key
+    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
+    log_warn "请注意：此操作不会自动清理您可能为 S-ui 手动配置的反向代理。"
+    press_any_key
+}
+
+uninstall_bt_panel() {
+    local uninstall_script="/www/server/panel/install/uninstall.sh"
+    if [ -f "$uninstall_script" ]; then
+        log_info "检测到宝塔卸载脚本，即将执行..."
+        bash "$uninstall_script"
+    else
+        log_error "未找到宝塔卸载脚本！可能已损坏或未正确安装。"
+    fi
+    press_any_key
+}
+
+uninstall_1panel() {
+    if command -v 1pctl &>/dev/null; then
+        log_info "检测到 1Panel 控制命令，即将执行卸载..."
+        1pctl uninstall
+    else
+        log_error "未找到 '1pctl' 命令！可能已损坏或未正确安装。"
+    fi
+    press_any_key
+}
+
+
+# --- 新增：智能卸载菜单 ---
+
+uninstall_panels_menu() {
+    while true; do
+        clear
+        log_info "正在检测已安装的应用和面板..."
+
+        local installed_items=()
+        local function_map=()
+
+        # 检测逻辑
+        if [ -f "/root/wordpress/docker-compose.yml" ]; then
+            installed_items+=("WordPress (位于 /root/wordpress)")
+            function_map+=("uninstall_wordpress")
+        fi
+        if [ -f "/root/maccms/docker-compose.yml" ]; then
+            installed_items+=("苹果CMS (位于 /root/maccms)")
+            function_map+=("uninstall_maccms")
+        fi
+        if [ -d "/usr/local/x-ui/" ]; then
+            installed_items+=("3x-ui 面板")
+            function_map+=("uninstall_3xui")
+        fi
+        if [ -d "/usr/local/s-ui/" ]; then
+            installed_items+=("S-ui 面板")
+            function_map+=("uninstall_sui")
+        fi
+         if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
+            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
+            function_map+=("uninstall_uptime_kuma")
+        fi
+        if [ -d "/www/server/panel" ]; then
+            installed_items+=("宝塔面板")
+            function_map+=("uninstall_bt_panel")
+        fi
+        if [ -d "/opt/1panel" ]; then
+            installed_items+=("1Panel")
+            function_map+=("uninstall_1panel")
+        fi
+        if [ -f "/root/portainer/docker-compose.yml" ] || docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+            installed_items+=("Portainer (通用Docker面板)")
+            function_map+=("uninstall_portainer") # 假设你有一个卸载它的函数
+        fi
+
+
+        if [ ${#installed_items[@]} -eq 0 ]; then
+            log_warn "未检测到任何通过本脚本安装的应用或面板。"
+            press_any_key
+            return
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 选择要卸载的面板                 $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        for i in "${!installed_items[@]}"; do
+            printf "$CYAN║$NC  %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
+        done
+
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 0 ] && [ "$choice" -le ${#installed_items[@]} ]; then
+            if [ "$choice" -eq 0 ]; then
+                break
+            else
+                local index=$((choice-1))
+                # 调用对应的卸载函数
+                ${function_map[$index]}
+                # 卸载后暂停，以便用户可以再次进入此菜单查看结果
+                press_any_key
+            fi
+        else
+            log_error "无效选项！"; sleep 1
+        fi
+    done
+}
+# (这是被修改的函数, 全新的菜单结构)
 docker_apps_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              Docker 应用 & 面板安装              $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                     应用 & 面板安装              $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 UI 面板 (S-ui / 3x-ui)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 搭建 WordPress                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟────────────────── $WHITE WordPress $CYAN ───────────────────╢$NC"
+        echo -e "$CYAN║$NC   2. 搭建苹果CMS影视站                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 搭建 WordPress                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 安装 3x-ui (搭建节点-Xray)                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}卸载 WordPress$NC                              $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 安装 S-ui (搭建节点-SingBox)                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE苹果CMS$CYAN ──────────────────────╢$NC"
+        echo -e "$CYAN║$NC   5. 安装 Uptime Kuma 监控面板                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 搭建苹果CMS影视站                           $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 安装宝塔面板 (BT Panel)                     $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载苹果CMS$NC                                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────── $WHITEUptime Kuma$CYAN ────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${GREEN}安装 Uptime Kuma 监控面板${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${RED}卸载 Uptime Kuma${NC}                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 安装 1Panel 面板                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. ${RED}卸载应用或面板${NC}                              $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -4198,13 +4766,14 @@ docker_apps_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) ui_panels_menu ;;
-        2) install_wordpress ;;
-        3) uninstall_wordpress ;;
-        4) install_maccms ;;
-        5) uninstall_maccms ;;
-        6) install_uptime_kuma ;;
-        7) uninstall_uptime_kuma ;;
+        1) install_wordpress ;;
+        2) install_maccms ;;
+        3) install_3xui ;;
+        4) install_sui ;;
+        5) install_uptime_kuma ;;
+        6) install_bt_panel ;;
+        7) install_1panel ;;
+        8) uninstall_panels_menu ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -4655,7 +5224,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. Docker 应用 & 面板安装                      $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"

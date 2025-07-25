@@ -9,13 +9,12 @@ const SERVICE_TO_RESTART = 'sub-store.service';
 const IDENTITY_FILE_PATH = '/root/.ssh/server';
 
 const REMOTE_SERVERS = [
-    { ip: '79.72.72.95', user: 'ubuntu', path: '/root/sub-store/', alias: 'Oracle-London(伦敦)' },
     { ip: '137.131.41.2', user: 'ubuntu', path: '/root/sub-store/', alias: 'Oracle-Phoenix(凤凰城)' }
 ];
 
 const ENABLE_TELEGRAM_NOTIFICATIONS = true;
-const TELEGRAM_BOT_TOKEN = '7189461669:AAFJJk4JO0rhSV4wRMxcWsY4e3eG7o-x7DE';
-const TELEGRAM_CHAT_ID = '7457253104';
+const TELEGRAM_BOT_TOKEN = '**********';
+const TELEGRAM_CHAT_ID = '**********';
 // --- 配置区结束 ---
 
 let debounceTimeout = null;
