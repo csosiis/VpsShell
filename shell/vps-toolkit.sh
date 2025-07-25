@@ -1981,7 +1981,7 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}               $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1995,7 +1995,7 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $GREEN一键生成 WSS/UDP 全部协议 (不含REALITY)${NC}  $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $GREEN一键生成 WSS/UDP 全部协议 (不含REALITY)${NC}     $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2267,7 +2267,7 @@ _singbox_build_protocol_config_and_link() {
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
-    # --- 新增：定义 REALITY 的 TLS 配置块 ---
+    # --- 定义 REALITY 的 TLS 配置块 ---
     local reality_tls_config="{\"enabled\":true,\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
 
 
@@ -2287,9 +2287,9 @@ _singbox_build_protocol_config_and_link() {
         fi
         ;;
     "VLESS-REALITY")
-        # --- 新增：REALITY 协议的配置和链接生成 ---
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
-        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&pbk=$public_key&sid=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
+        # --- 【最终修复】 将 pbk= 改为 publicKey= ---
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&sid=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
