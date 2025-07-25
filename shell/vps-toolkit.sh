@@ -3272,7 +3272,7 @@ substore_manage_menu() {
         clear
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
-            rp_menu_text="更换反代域名      "
+            rp_menu_text="更换反代域名       "
         fi
 
         local STATUS_COLOR
@@ -3302,7 +3302,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $GREEN$rp_menu_text$NC                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
