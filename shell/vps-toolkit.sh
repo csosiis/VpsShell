@@ -2118,8 +2118,8 @@ _singbox_handle_reality_setup() {
 
     # --- **修改核心**：获取并验证伪装域名 (serverName) ---
     while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.bing.com"}
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.microsoft.com"}
 
         log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
         # 使用curl测试HTTPS连接，-m 5设置5秒超时
@@ -2190,8 +2190,8 @@ _singbox_handle_certificate_setup() {
         elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
         else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
-        sni_domain_ref=${sni_input:-"www.bing.com"}
+        read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
+        sni_domain_ref=${sni_input:-"www.microsoft.com"}
         if ! _create_self_signed_cert "$sni_domain_ref"; then log_error "自签名证书处理失败。"; return 1; fi
         cert_path_ref="/etc/sing-box/certs/$sni_domain_ref.cert.pem"
         key_path_ref="/etc/sing-box/certs/$sni_domain_ref.key.pem"
@@ -2301,51 +2301,12 @@ _singbox_build_protocol_config_and_link() {
         ;;
     esac
 }
-# =================================================================
-#           辅助函数：为 REALITY 重置并清理配置文件
-# =================================================================
-_reset_singbox_config_for_reality() {
-    log_warn "检测到您正在创建 VLESS+REALITY 节点。"
-    log_warn "为确保100%兼容性和稳定性，脚本将清空所有现有的节点配置。"
-    read -p "这将删除所有已存在的 WSS/Trojan 等节点，您确定要继续吗? (y/N): " confirm_reset
-    if [[ ! "$confirm_reset" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        return 1
-    fi
-
-    log_info "正在重置配置文件为 REALITY 专用模式..."
-    # 使用能正常工作的模板来覆盖旧文件
-    cat > "$SINGBOX_CONFIG_FILE" <<'EOF'
-{
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
-  "inbounds": [],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    }
-  ]
-}
-EOF
-    # 清空链接记录文件
-    > "$SINGBOX_NODE_LINKS_FILE"
-    log_info "✅ 配置文件已重置。现在可以安全地添加 REALITY 节点了。"
-    return 0
-}
 # =================================================
 #           函数: 节点添加总指挥 (增强版)
 # =================================================
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
-    if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        if ! _reset_singbox_config_for_reality; then
-            press_any_key
-            return
-        fi
-    fi
+
     local protocols_to_create=()
     local is_one_click=false
     if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
