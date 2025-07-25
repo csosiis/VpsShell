@@ -2288,8 +2288,8 @@ _singbox_build_protocol_config_and_link() {
         ;;
     "VLESS-REALITY")
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
-        # --- 【最终修复】 将 pbk= 改为 publicKey= ---
-        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&sid=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
+        # --- 【最终修复 V2】 将 sid= 改为 shortId= ---
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
