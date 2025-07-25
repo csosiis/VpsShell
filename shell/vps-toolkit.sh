@@ -1972,7 +1972,6 @@ _create_self_signed_cert() {
         return 1
     fi
 }
-
 _singbox_prompt_for_protocols() {
     local -n protocols_ref=$1
     local -n is_one_click_ref=$2
@@ -1982,19 +1981,21 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $GREEN一键生成 WSS/UDP 全部协议 (不含REALITY)${NC}  $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -2005,12 +2006,13 @@ _singbox_prompt_for_protocols() {
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-    1) protocols_ref=("VLESS") ;;
-    2) protocols_ref=("VMess") ;;
-    3) protocols_ref=("Trojan") ;;
-    4) protocols_ref=("Hysteria2") ;;
-    5) protocols_ref=("TUIC") ;;
-    6)
+    1) protocols_ref=("VLESS-REALITY") ;;
+    2) protocols_ref=("VLESS") ;;
+    3) protocols_ref=("VMess") ;;
+    4) protocols_ref=("Trojan") ;;
+    5) protocols_ref=("Hysteria2") ;;
+    6) protocols_ref=("TUIC") ;;
+    7)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
@@ -2238,13 +2240,13 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
-
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
     local -n config_ref=$3
     local -n link_ref=$4
 
+    # --- 从参数数组中提取变量，增加可读性 ---
     local tag=${args_ref[tag]}
     local current_port=${args_ref[port]}
     local uuid=${args_ref[uuid]}
@@ -2257,30 +2259,37 @@ _singbox_build_protocol_config_and_link() {
     local insecure_vmess=${args_ref[insecure_vmess]}
     local insecure_hy2=${args_ref[insecure_hy2]}
     local insecure_tuic=${args_ref[insecure_tuic]}
-
-    # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
-    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
+    local short_id=${args_ref[short_id]}
 
-
+    # --- 定义通用 TLS 配置块 ---
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+
+    # --- 新增：定义 REALITY 的 TLS 配置块 ---
+    local reality_tls_config="{\"enabled\":true,\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
+
 
     case $protocol in
     "VLESS" | "VMess" | "Trojan")
         config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
             [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
-        then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        then echo "{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
 
         if [[ "$protocol" == "VLESS" ]]; then
-            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_ws}#$tag"
+            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision${insecure_ws}#$tag"
         elif [[ "$protocol" == "VMess" ]]; then
             local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
             link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         else
             link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
+        ;;
+    "VLESS-REALITY")
+        # --- 新增：REALITY 协议的配置和链接生成 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&pbk=$public_key&sid=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
@@ -2438,10 +2447,17 @@ _get_unique_tag() {
     local base_tag="$1"
     local final_tag="$base_tag"
     local counter=2
-    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" >/dev/null; do
-        final_tag="$base_tag-$counter"
+
+    # 首先，一次性将所有已存在的 tags 读入一个 Bash 数组
+    local existing_tags
+    mapfile -t existing_tags < <(jq -r '.inbounds[].tag' "$SINGBOX_CONFIG_FILE")
+
+    # 接着，在内存中的数组里进行检查，而不是反复读文件
+    while [[ " ${existing_tags[*]} " =~ " ${final_tag} " ]]; do
+        final_tag="${base_tag}-${counter}"
         ((counter++))
     done
+
     echo "$final_tag"
 }
 
@@ -3802,15 +3818,16 @@ uninstall_docker() {
     # 根据不同的操作系统执行相应的卸载命令
     case $OS in
         ubuntu|debian)
-            sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
-            sudo apt-get autoremove -y --purge
+            # 使用 || true 来忽略 "package not found" 错误
+            apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras || true
+            apt-get autoremove -y --purge
             ;;
         centos|rhel|fedora)
             # 对于 CentOS/RHEL/Fedora，使用 yum 或 dnf
             if command -v dnf &> /dev/null; then
-                sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
             else
-                sudo yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
             fi
             ;;
         *)
@@ -5012,6 +5029,8 @@ server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
     server_name $domain;
+
+    client_max_body_size 512M;
 
     ssl_certificate $cert_path;
     ssl_certificate_key $key_path;
