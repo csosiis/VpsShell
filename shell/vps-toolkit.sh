@@ -2270,11 +2270,11 @@ _singbox_build_protocol_config_and_link() {
 
     case $protocol in
     "VLESS-REALITY")
-        # 为 REALITY 构建专属的 TLS 配置
         local reality_tls_config="{\"enabled\": true, \"server_name\": \"$sni_domain\", \"reality\": {\"enabled\": true, \"handshake\": {\"server\": \"$sni_domain\", \"server_port\": 443}, \"private_key\": \"$private_key\", \"short_id\": [\"$short_id\"]}}"
-        # VLESS + REALITY 的入站配置，使用 TCP 传输
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"transport\":{\"type\":\"tcp\"},\"tls\":$reality_tls_config}"
-        # VLESS + REALITY 的分享链接
+
+        # --- **核心修正**：移除了错误的 "transport" 字段 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
+
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key&shortId=$short_id#$tag"
         ;;
     "VLESS" | "VMess" | "Trojan")
