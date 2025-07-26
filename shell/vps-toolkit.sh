@@ -2070,7 +2070,7 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#      函数：处理 REALITY 特定设置 (V2 - 简化版)
+#      函数：处理 REALITY 特定设置 (最终修复版)
 # =================================================
 _singbox_handle_reality_setup() {
     _ensure_time_accuracy
@@ -2082,61 +2082,80 @@ _singbox_handle_reality_setup() {
     local -n short_id_ref=$5
 
     clear
-    log_info "正在自动配置 VLESS + REALITY (简化流程)..."
+    log_info "正在配置 VLESS + REALITY..."
     if ! command -v sing-box &>/dev/null; then
         log_error "未找到 sing-box 命令，无法生成 REALITY 密钥对。"
         return 1
     fi
 
-    # 1. 自动生成密钥对
     log_info "正在生成 REALITY 密钥对..."
+
+    # --- 【核心修正】采用更健壮的方式捕获密钥对 ---
+    # 1. 将命令的输出保存到一个临时文件中，避免管道操作中变量作用域问题
     local key_pair_output_file="/tmp/reality_keys.txt"
     register_temp_file "$key_pair_output_file"
     sing-box generate reality-keypair > "$key_pair_output_file"
+
+    # 2. 从临时文件中精确地提取公钥和私钥
     private_key_ref=$(grep 'PrivateKey' "$key_pair_output_file" | awk '{print $2}')
     public_key_ref=$(grep 'PublicKey' "$key_pair_output_file" | awk '{print $2}')
+    # --- 修正结束 ---
+
     if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
         log_error "REALITY 密钥对生成或捕获失败！"
         return 1
     fi
-    log_info "✅ 密钥对已生成并成功捕获！"
 
-    # 2. 自动选择IP地址 (IPv4 优先)
-    log_info "正在自动选择公网IP地址..."
+    # 增加调试输出，让用户可以确认密钥
+    log_info "✅ 密钥对已生成并成功捕获！"
+    echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
+    echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
+    echo ""
+
+    # 选择连接地址 (IP)
     local ipv4_addr=$(get_public_ip v4)
     local ipv6_addr=$(get_public_ip v6)
-    if [ -n "$ipv4_addr" ]; then
-        connect_addr_ref="$ipv4_addr"
-        log_info "✅ 已自动选择 IPv4 地址: $ipv4_addr"
-    elif [ -n "$ipv6_addr" ]; then
-        connect_addr_ref="[$ipv6_addr]"
-        log_info "✅ 未找到 IPv4，已自动选择 IPv6 地址: $ipv6_addr"
-    else
-        log_error "无法获取任何公网 IP 地址！"; return 1;
-    fi
+    if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+        echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
+        read -p "请输入选项 (1-2): " ip_choice
+        if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
+    elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
+    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
+    else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # 3. 自动设置并测试伪装域名
-    server_name_ref="www.microsoft.com"
-    log_info "正在测试与默认伪装域名 ($server_name_ref) 的连通性..."
-    if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
-        log_info "✅ 连通性测试通过。"
-    else
-        log_error "无法从本机连接到默认伪装域名 $server_name_ref。"
-        log_warn "请检查服务器网络。如果需要更换域名，请手动修改本脚本的 _singbox_handle_reality_setup 函数。"
-        return 1
-    fi
+    # 获取并验证伪装域名 (serverName)
+    while true; do
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.microsoft.com"}
 
-    # 4. 自动生成 short_id
-    short_id_ref=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
-    log_info "✅ 已自动生成 short_id: $short_id_ref"
+        log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
+        if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
+            log_info "✅ 连通性测试通过。"
+            break
+        else
+            log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
+            log_warn "请检查域名拼写，或更换一个可从本机访问的域名。"
+            echo ""
+        fi
+    done
 
-    echo ""
-    log_info "✅ REALITY 自动化配置信息收集完毕。"
+    # 自动生成并验证 short_id
+    while true; do
+        local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
+        echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
+        read short_id_input
+        short_id_input=${short_id_input:-$random_short_id}
+        if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
+            short_id_ref=${short_id_input}
+            break
+        else
+            log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
+        fi
+    done
+
+    log_info "REALITY 配置信息收集完毕。"
     return 0
 }
-# =================================================
-#      函数：处理证书设置 (V2 - 简化版)
-# =================================================
 _singbox_handle_certificate_setup() {
     local -n cert_path_ref=$1
     local -n key_path_ref=$2
@@ -2165,20 +2184,15 @@ _singbox_handle_certificate_setup() {
         insecure_params_ref["hy2"]="&insecure=1"
         insecure_params_ref["tuic"]="&allow_insecure=1"
 
-        # --- 【核心修正】自动选择IP，不再询问 ---
-        log_info "正在自动选择公网IP地址 (IPv4 优先)..."
         local ipv4_addr=$(get_public_ip v4)
         local ipv6_addr=$(get_public_ip v6)
-        if [ -n "$ipv4_addr" ]; then
-            connect_addr_ref="$ipv4_addr"
-            log_info "✅ 已自动选择 IPv4 地址: $ipv4_addr"
-        elif [ -n "$ipv6_addr" ]; then
-            connect_addr_ref="[$ipv6_addr]"
-            log_info "✅ 未找到 IPv4，已自动选择 IPv6 地址: $ipv6_addr"
-        else
-            log_error "无法获取任何公网 IP 地址！"; return 1;
-        fi
-        # --- 修正结束 ---
+        if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
+            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
+            read -p "请输入选项 (1-2): " ip_choice
+            if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
+        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
+        elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
+        else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
         read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
         sni_domain_ref=${sni_input:-"www.microsoft.com"}
@@ -2293,78 +2307,71 @@ _singbox_build_protocol_config_and_link() {
     esac
 }
 # =================================================
-#           函数: 节点添加总指挥 (健壮性修复)
+#           函数: 节点添加总指挥 (增强版)
 # =================================================
 singbox_add_node_orchestrator() {
-    # --- 【核心修正】在所有操作开始前，确保核心配置目录存在 ---
-    mkdir -p /etc/sing-box
-    # --- 修正结束 ---
-
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
-
-    # ... 函数余下的部分与你现有的代码完全相同，无需改动 ...
-    # (这里省略了后面一百多行重复的代码，你只需要替换整个函数即可)
 
     local protocols_to_create=()
     local is_one_click=false
     if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
-
-    local target_config_file=""
-    local target_service_name=""
-
-    if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        target_config_file="/etc/sing-box/config_reality.json"
-        target_service_name="sing-box-reality"
-        # 确保 REALITY 的配置文件也存在
-        if [ ! -f "$target_config_file" ]; then
-            cat > "$target_config_file" <<'EOF'
-{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}
-EOF
-        fi
-    else
-        target_config_file="/etc/sing-box/config.json"
-        target_service_name="sing-box"
-        # 确保主配置文件也存在
-        if [ ! -f "$target_config_file" ]; then
-            cat > "$target_config_file" <<'EOF'
-{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}
-EOF
-        fi
-    fi
-    log_info "本次操作将针对: $target_service_name 服务"
 
     local cert_path key_path connect_addr sni_domain
     declare -A insecure_params
     local reality_private_key reality_public_key reality_short_id
 
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then press_any_key && return; fi
+        # 注意：这里我们调用的是上面修改过的 _singbox_handle_reality_setup 函数
+        if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
+            press_any_key
+            return
+        fi
     else
-        if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then press_any_key && return; fi
+        if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
+            press_any_key
+            return
+        fi
     fi
 
     declare -A ports
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
 
-    local geo_info_json=$(curl -s ip-api.com/json)
-    local city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
-    local operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
-    read -p "请输入自定义标识 [回车则使用: ${GREEN}${operator_name}${NC}]: " custom_id
+    log_info "正在获取地理及运营商信息..."
+    local geo_info_json
+    geo_info_json=$(curl -s ip-api.com/json)
+
+    local city operator_name
+    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
+    city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
+    operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
+
+    local custom_id
+    echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
+    read custom_id
     custom_id=${custom_id:-$operator_name}
 
     local success_count=0
     local final_node_link=""
+    local protocols_with_self_signed=()
+    if [ ${#insecure_params[@]} -gt 0 ]; then
+        protocols_with_self_signed=("${protocols_to_create[@]}")
+    fi
+
     for protocol in "${protocols_to_create[@]}"; do
-        local tag=$(_get_unique_tag "$city-$custom_id-$protocol")
+        local tag_base="$city-$custom_id"
+        local base_tag_for_protocol="$tag_base-$protocol"
+        local tag=$(_get_unique_tag "$base_tag_for_protocol")
         log_info "已为 [$protocol] 节点分配唯一 Tag: $tag"
 
         declare -A build_args
-        build_args=(
-            [tag]="$tag" [port]=${ports[$protocol]} [uuid]=$(uuidgen)
-            [password]=$(generate_random_password) [connect_addr]="$connect_addr"
-            [sni_domain]="$sni_domain"
-        )
+        build_args[tag]="$tag"
+        build_args[port]=${ports[$protocol]}
+        build_args[uuid]=$(uuidgen)
+        build_args[password]=$(generate_random_password)
+        build_args[connect_addr]="$connect_addr"
+        build_args[sni_domain]="$sni_domain"
+
         if [ "$protocol" == "VLESS-REALITY" ]; then
             build_args[private_key]="$reality_private_key"
             build_args[public_key]="$reality_public_key"
@@ -2372,24 +2379,28 @@ EOF
         else
             build_args[cert_path]="$cert_path"
             build_args[key_path]="$key_path"
+            build_args[insecure_ws]=${insecure_params[ws]}
+            build_args[insecure_vmess]=${insecure_params[vmess]}
+            build_args[insecure_hy2]=${insecure_params[hy2]}
+            build_args[insecure_tuic]=${insecure_params[tuic]}
         fi
 
         local config node_link
         _singbox_build_protocol_config_and_link "$protocol" build_args config node_link
 
-        if _add_protocol_inbound "$protocol" "$config" "$node_link" "$target_config_file"; then
+        if _add_protocol_inbound "$protocol" "$config" "$node_link"; then
             ((success_count++))
             final_node_link="$node_link"
         fi
     done
 
     if [ "$success_count" -gt 0 ]; then
-        log_info "共成功添加 $success_count 个节点，正在重启 $target_service_name 服务..."
-        systemctl restart "$target_service_name"
+        log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
+        systemctl restart sing-box
         sleep 2
-        if systemctl is-active --quiet "$target_service_name"; then
-            log_info "$target_service_name 重启成功。"
-             if [ "$success_count" -eq 1 ] && ! $is_one_click; then
+        if systemctl is-active --quiet sing-box; then
+            log_info "Sing-Box 重启成功。"
+            if [ "$success_count" -eq 1 ] && ! $is_one_click; then
                 log_info "✅ 节点添加成功！分享链接如下："
                 echo -e "$CYAN--------------------------------------------------------------$NC"
                 echo -e "\n$YELLOW$final_node_link$NC\n"
@@ -2398,9 +2409,38 @@ EOF
                 log_info "正在跳转到节点管理页面..."
                 sleep 1
             fi
-            if [ "$is_one_click" == "true" ]; then view_node_info; else press_any_key; fi
+
+            # --- **修改核心**：增加 REALITY 和其他协议的最终提醒 ---
+            if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
+                echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
+                log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
+                log_warn "已经放行了此节点使用的 TCP 和 UDP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
+                log_warn "否则，客户端将无法连接！"
+                echo -e "$YELLOW==============================================================$NC"
+            fi
+
+            if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                for p in "${protocols_with_self_signed[@]}"; do
+                    if [[ "$p" == "VMess" ]]; then
+                        echo -e "\n${YELLOW}[VMess 节点]$NC"
+                        log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
+                        log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
+                    fi
+                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                        echo -e "\n${YELLOW}[$p 节点]$NC"
+                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                    fi
+                done
+                echo -e "\n$YELLOW==============================================================$NC"
+            fi
+            # --- **修改结束** ---
+
+            if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
-            log_error "$target_service_name 重启失败！请使用 'journalctl -u $target_service_name -f' 查看日志。"
+            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            log_warn "配置文件可能出错，旧的配置文件已备份为 $SINGBOX_CONFIG_FILE.tmp"
             press_any_key
         fi
     else
