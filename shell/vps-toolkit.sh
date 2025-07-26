@@ -2244,9 +2244,6 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
-# =================================================
-#      函数：构建配置和链接 (最终完美修复版)
-# =================================================
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
@@ -2272,10 +2269,11 @@ _singbox_build_protocol_config_and_link() {
 
     # --- 定义通用 TLS 配置块 ---
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-    local tls_config_udp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+    local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
-    # --- 【最终修复】在 REALITY 的 TLS 配置中，补上 server_name 字段 ---
-    local reality_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
+    # --- 定义 REALITY 的 TLS 配置块 ---
+    local reality_tls_config="{\"enabled\":true,\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
+
 
     case $protocol in
     "VLESS" | "VMess" | "Trojan")
@@ -2294,6 +2292,7 @@ _singbox_build_protocol_config_and_link() {
         ;;
     "VLESS-REALITY")
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
+        # --- 【最终修复 V2】 将 sid= 改为 shortId= ---
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
