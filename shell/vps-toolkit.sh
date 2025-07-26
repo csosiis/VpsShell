@@ -1834,55 +1834,65 @@ is_singbox_installed() {
 }
 
 singbox_do_install() {
-    ensure_dependencies "curl" "openssl" "jq"
+    ensure_dependencies "curl" "openssl"
     if is_singbox_installed; then
-        log_warn "Sing-Box 已经安装，建议先卸载再重新安装以确保内核版本统一。"
+        log_warn "Sing-Box 已经安装，建议先卸载再使用此方法安装特定内核。"
         press_any_key
         return
     fi
-    log_info "正在安装与旧配置兼容的 Sing-Box 内核..."
+    log_info "正在安装特定版本的 Sing-Box 内核..."
 
+    # --- **修正核心之三**：采用与成功脚本相同的内核下载和安装方式 ---
     local ARCH_RAW=$(uname -m)
     local ARCH
     case "${ARCH_RAW}" in
         'x86_64') ARCH='amd64' ;;
         'aarch64' | 'arm64') ARCH='arm64' ;;
-        *) log_error "不支持的架构: ${ARCH_RAW}"; press_any_key; return 1 ;;
+        *) log_error "不支持的架构: ${ARCH_RAW}, 无法安装特定内核。"; press_any_key; return 1 ;;
     esac
 
     log_info "正在从特定源下载 sing-box 内核 for $ARCH..."
+    mkdir -p "$SUBSTORE_INSTALL_DIR" # 使用一个已定义的目录变量
     if ! curl -sLo "/usr/local/bin/sing-box" "https://$ARCH.ssss.nyc.mn/sbx"; then
-        log_error "内核下载失败！"
+        log_error "特定内核下载失败！"
         press_any_key
         return 1
     fi
     chmod +x "/usr/local/bin/sing-box"
 
+    # 手动创建 systemd 服务文件
     log_info "正在创建 systemd 服务文件..."
-    cat > /etc/systemd/system/sing-box.service << 'EOF'
+    cat > /etc/systemd/system/sing-box.service << EOF
 [Unit]
 Description=sing-box service
 Documentation=https://sing-box.sagernet.org
 After=network.target nss-lookup.target
+
 [Service]
 User=root
 WorkingDirectory=/etc/sing-box
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
-ExecReload=/bin/kill -HUP $MAINPID
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=infinity
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # 创建基础配置文件
     mkdir -p /etc/sing-box
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
         log_info "正在创建兼容的默认配置文件..."
-        cat >"$SINGBOX_CONFIG_FILE" <<'EOL'
-{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}
+        cat >"$SINGBOX_CONFIG_FILE" <<EOL
+{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [],
+  "outbounds": [ { "type": "direct", "tag": "direct" } ]
+}
 EOL
     fi
 
@@ -1890,9 +1900,10 @@ EOL
     systemctl daemon-reload
     systemctl enable sing-box.service
     systemctl start sing-box
+
     sleep 2
     if systemctl is-active --quiet sing-box; then
-        log_info "✅ Sing-Box (兼容版) 安装并启动成功！"
+        log_info "✅ 特定版本 Sing-Box 安装并启动成功！"
     else
         log_error "Sing-Box 服务启动失败！请使用 'journalctl -u sing-box -f' 查看日志。"
     fi
@@ -1961,6 +1972,7 @@ _create_self_signed_cert() {
         return 1
     fi
 }
+
 _singbox_prompt_for_protocols() {
     local -n protocols_ref=$1
     local -n is_one_click_ref=$2
@@ -1970,21 +1982,19 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $GREEN一键生成 WSS/UDP 全部协议 (不含REALITY)${NC}     $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1995,13 +2005,12 @@ _singbox_prompt_for_protocols() {
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-    1) protocols_ref=("VLESS-REALITY") ;;
-    2) protocols_ref=("VLESS") ;;
-    3) protocols_ref=("VMess") ;;
-    4) protocols_ref=("Trojan") ;;
-    5) protocols_ref=("Hysteria2") ;;
-    6) protocols_ref=("TUIC") ;;
-    7)
+    1) protocols_ref=("VLESS") ;;
+    2) protocols_ref=("VMess") ;;
+    3) protocols_ref=("Trojan") ;;
+    4) protocols_ref=("Hysteria2") ;;
+    5) protocols_ref=("TUIC") ;;
+    6)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
@@ -2059,11 +2068,13 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#      函数：处理 REALITY 特定设置 (最终修复版)
+#           函数：处理 REALITY 特定设置 (增强版)
 # =================================================
 _singbox_handle_reality_setup() {
+    # --- 确保时间准确 (此函数调用保持不变) ---
     _ensure_time_accuracy
 
+    # 声明-n类型的变量，以引用的方式修改外部变量的值
     local -n private_key_ref=$1
     local -n public_key_ref=$2
     local -n connect_addr_ref=$3
@@ -2078,25 +2089,16 @@ _singbox_handle_reality_setup() {
     fi
 
     log_info "正在生成 REALITY 密钥对..."
-
-    # --- 【核心修正】采用更健壮的方式捕获密钥对 ---
-    # 1. 将命令的输出保存到一个临时文件中，避免管道操作中变量作用域问题
-    local key_pair_output_file="/tmp/reality_keys.txt"
-    register_temp_file "$key_pair_output_file"
-    sing-box generate reality-keypair > "$key_pair_output_file"
-
-    # 2. 从临时文件中精确地提取公钥和私钥
-    private_key_ref=$(grep 'PrivateKey' "$key_pair_output_file" | awk '{print $2}')
-    public_key_ref=$(grep 'PublicKey' "$key_pair_output_file" | awk '{print $2}')
-    # --- 修正结束 ---
+    local key_pair
+    key_pair=$(sing-box generate reality-keypair)
+    private_key_ref=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}')
+    public_key_ref=$(echo "$key_pair" | awk '/PublicKey/ {print $2}')
 
     if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
-        log_error "REALITY 密钥对生成或捕获失败！"
+        log_error "REALITY 密钥对生成失败！"
         return 1
     fi
-
-    # 增加调试输出，让用户可以确认密钥
-    log_info "✅ 密钥对已生成并成功捕获！"
+    log_info "✅ 密钥对生成成功！"
     echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
     echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
     echo ""
@@ -2107,26 +2109,29 @@ _singbox_handle_reality_setup() {
     if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
         echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
         read -p "请输入选项 (1-2): " ip_choice
-        if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
+        if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
     elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
     elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # 获取并验证伪装域名 (serverName)
+    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
     while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.microsoft.com"}
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.bing.com"}
 
         log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
+        # 使用curl测试HTTPS连接，-m 5设置5秒超时
+        # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
         if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
             log_info "✅ 连通性测试通过。"
             break
         else
             log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
-            log_warn "请检查域名拼写，或更换一个可从本机访问的域名。"
+            log_warn "请检查域名拼写，或更换一个可从本机访问的域名 (如 www.apple.com, www.microsoft.com)。"
             echo ""
         fi
     done
+    # --- **修改结束** ---
 
     # 自动生成并验证 short_id
     while true; do
@@ -2183,8 +2188,8 @@ _singbox_handle_certificate_setup() {
         elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
         else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-        read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
-        sni_domain_ref=${sni_input:-"www.microsoft.com"}
+        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
+        sni_domain_ref=${sni_input:-"www.bing.com"}
         if ! _create_self_signed_cert "$sni_domain_ref"; then log_error "自签名证书处理失败。"; return 1; fi
         cert_path_ref="/etc/sing-box/certs/$sni_domain_ref.cert.pem"
         key_path_ref="/etc/sing-box/certs/$sni_domain_ref.key.pem"
@@ -2233,9 +2238,7 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
-# =================================================
-#      函数：构建配置和链接 (混合语法最终版)
-# =================================================
+
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
@@ -2250,48 +2253,42 @@ _singbox_build_protocol_config_and_link() {
     local sni_domain=${args_ref[sni_domain]}
     local cert_path=${args_ref[cert_path]}
     local key_path=${args_ref[key_path]}
+    local insecure_ws=${args_ref[insecure_ws]}
+    local insecure_vmess=${args_ref[insecure_vmess]}
+    local insecure_hy2=${args_ref[insecure_hy2]}
+    local insecure_tuic=${args_ref[insecure_tuic]}
 
     # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
-    local short_id=${args_ref[short_id]}
+    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
 
-    # --- 为 WSS/UDP 协议定义“旧语法”的 TLS 配置 ---
+
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-    local tls_config_udp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-
-    # --- 为 REALITY 协议定义“新语法”的 TLS 配置 ---
-    local reality_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
+    local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
     case $protocol in
     "VLESS" | "VMess" | "Trojan")
-        # --- 沿用你成功的“旧语法”来构建 WSS 节点 ---
         config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
             [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
         then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
 
-        # 链接生成逻辑保持不变
         if [[ "$protocol" == "VLESS" ]]; then
-            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F#$tag"
+            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F${insecure_ws}#$tag"
         elif [[ "$protocol" == "VMess" ]]; then
-            local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+            local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
             link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         else
-            link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
+            link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
         fi
-        ;;
-    "VLESS-REALITY")
-        # --- 使用我们之前完善的“新语法”来构建 REALITY 节点 ---
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$reality_tls_config}"
-        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-        link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
+        link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${insecure_hy2}#$tag"
         ;;
     "TUIC")
         config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-        link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
+        link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${insecure_tuic}#$tag"
         ;;
     esac
 }
@@ -2441,49 +2438,23 @@ _get_unique_tag() {
     local base_tag="$1"
     local final_tag="$base_tag"
     local counter=2
-
-    # 首先，一次性将所有已存在的 tags 读入一个 Bash 数组
-    local existing_tags
-    mapfile -t existing_tags < <(jq -r '.inbounds[].tag' "$SINGBOX_CONFIG_FILE")
-
-    # 接着，在内存中的数组里进行检查，而不是反复读文件
-    while [[ " ${existing_tags[*]} " =~ " ${final_tag} " ]]; do
-        final_tag="${base_tag}-${counter}"
+    while jq -e --arg t "$final_tag" 'any(.inbounds[]; .tag == $t)' "$SINGBOX_CONFIG_FILE" >/dev/null; do
+        final_tag="$base_tag-$counter"
         ((counter++))
     done
-
     echo "$final_tag"
 }
-# =================================================================
-#           函数：添加入站配置 (最终修复版 V4 - 弃用 eval)
-# =================================================================
+
 _add_protocol_inbound() {
     local protocol=$1 config=$2 node_link=$3
     log_info "正在为 [$protocol] 协议添加入站配置..."
     local tmp_file="$SINGBOX_CONFIG_FILE.tmp"
     register_temp_file "$tmp_file"
 
-    local success=false
-
-    # 【核心修正】不再使用 eval，而是直接调用 jq 命令，确保参数传递的准确无误
-    if [ "$protocol" == "VLESS-REALITY" ]; then
-        log_info "检测到 REALITY 节点，将置于配置列表顶部以确保兼容性。"
-        # 直接调用 jq，使用前插逻辑
-        if jq --argjson new_config "$config" '.inbounds = [$new_config] + .inbounds' "$SINGBOX_CONFIG_FILE" > "$tmp_file"; then
-            success=true
-        fi
-    else
-        # 直接调用 jq，使用标准的追加逻辑
-        if jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" > "$tmp_file"; then
-            success=true
-        fi
-    fi
-
-    if ! $success; then
+    if ! jq --argjson new_config "$config" '.inbounds += [$new_config]' "$SINGBOX_CONFIG_FILE" >"$tmp_file"; then
         log_error "[$protocol] 协议配置写入失败！请检查JSON格式。"
         return 1
     fi
-
     mv "$tmp_file" "$SINGBOX_CONFIG_FILE"
     echo "$node_link" >>"$SINGBOX_NODE_LINKS_FILE"
     log_info "✅ [$protocol] 协议配置添加成功！"
@@ -2792,92 +2763,8 @@ generate_subscription_link() {
 
 generate_tuic_client_config() {
     clear
-    log_info "开始为 TUIC 节点生成客户端配置文件..."
-
-    # 1. 筛选出所有的 TUIC 节点链接
-    if [ ! -s "$SINGBOX_NODE_LINKS_FILE" ]; then
-        log_warn "链接文件为空，没有任何节点。"
-        press_any_key; return
-    fi
-    mapfile -t tuic_links < <(grep '^tuic://' "$SINGBOX_NODE_LINKS_FILE")
-    if [ ${#tuic_links[@]} -eq 0 ]; then
-        log_warn "未找到任何已配置的 TUIC 节点。"
-        press_any_key; return
-    fi
-
-    # 2. 让用户选择一个节点
-    log_info "请选择一个 TUIC 节点以生成其客户端配置:\n"
-    for i in "${!tuic_links[@]}"; do
-        local node_name=$(echo "${tuic_links[$i]}" | sed 's/.*#\(.*\)/\1/')
-        echo -e "  $((i+1)). $WHITE$node_name$NC"
-    done
-    echo -e "\n  0. 返回\n"
-    read -p "请输入选项: " choice
-
-    if ! [[ "$choice" =~ ^[1-9][0-9]*$ ]] || [ "$choice" -gt ${#tuic_links[@]} ]; then
-        log_info "无效选择或已取消。"
-        press_any_key; return
-    fi
-
-    local selected_link="${tuic_links[$((choice-1))]}"
-
-    # 3. 解析选择的链接以提取关键信息
-    local server_info=$(echo "$selected_link" | sed -n 's#^tuic://\(.*\)@\([^?]*\).*#\2#p')
-    local credentials=$(echo "$selected_link" | sed -n 's#^tuic://\(.*\)@.*#\1#p')
-    local params=$(echo "$selected_link" | sed -n 's#.*\?\([^#]*\).*#\1#p')
-
-    local server_addr=$(echo "$server_info" | cut -d':' -f1)
-    local server_port=$(echo "$server_info" | cut -d':' -f2)
-    local uuid=$(echo "$credentials" | cut -d':' -f1)
-    local password=$(echo "$credentials" | cut -d':' -f2)
-    local sni=$(echo "$params" | sed -n 's/.*sni=\([^&]*\).*/\1/p')
-    local alpn=$(echo "$params" | sed -n 's/.*alpn=\([^&]*\).*/\1/p' | sed 's/%2C/","/g') # 将逗号分隔的alpn转为json数组格式
-    local allow_insecure=$(echo "$params" | grep -q 'allow_insecure=1' && echo "true" || echo "false")
-
-    # 4. 使用 jq 动态构建 JSON 配置文件
-    log_info "正在生成配置文件..."
-    local client_config
-    client_config=$(jq -n \
-        --arg server "$server_addr" \
-        --argjson port "$server_port" \
-        --arg uuid "$uuid" \
-        --arg password "$password" \
-        --arg sni "$sni" \
-        --argjson insecure "$allow_insecure" \
-        '{
-            "relay": {
-                "server": $server,
-                "port": $port,
-                "uuid": $uuid,
-                "password": $password,
-                "congestion_control": "bbr",
-                "udp_relay_mode": "native",
-                "tls": {
-                    "enabled": true,
-                    "sni": $sni,
-                    "insecure": $insecure,
-                    "alpn": ["'$alpn'"]
-                }
-            },
-            "local": {
-                "server": "127.0.0.1",
-                "port": 1080
-            },
-            "log": {
-                "level": "warn"
-            }
-        }')
-
-    # 5. 显示给用户
-    clear
-    log_info "✅ TUIC 客户端配置文件已生成！"
-    log_warn "请将以下内容完整复制，并保存为 'config.json' 文件，放置于你的 TUIC 客户端目录下。"
-    echo -e "$CYAN--------------------------------------------------------------$NC"
-    echo -e "$YELLOW"
-    echo "$client_config" | jq . # 使用 jq 再次格式化，使其带颜色和缩进
-    echo -e "$NC"
-    echo -e "$CYAN--------------------------------------------------------------$NC"
-
+    log_warn "TUIC 客户端配置生成功能正在开发中..."
+    log_info "此功能旨在为您选择的 TUIC 节点生成一个可以直接在客户端使用的 config.json 文件。"
     press_any_key
 }
 
@@ -2950,119 +2837,95 @@ is_substore_installed() {
 }
 
 substore_do_install() {
-    # --- 首先，确保核心依赖已安装 ---
     ensure_dependencies "curl" "unzip" "git"
 
     log_info "开始执行 Sub-Store 安装流程..."
     set -e
 
-    # --- 统一定义所有路径变量，使用 $HOME 提高通用性 ---
-    local FNM_DIR="$HOME/.fnm"
-    local PNPM_HOME="$HOME/.local/share/pnpm"
-    # 注意：SUBSTORE_INSTALL_DIR 是全局变量，建议在脚本顶部也修改为 "$HOME/sub-store"
-    # 如果未修改全局变量，这里的局部定义将确保本次安装的路径正确
-    local SUBSTORE_INSTALL_DIR_LOCAL="$HOME/sub-store"
-
-    # --- FNM (Node.js 版本管理器) 安装 ---
     log_info "正在安装 FNM (Node.js 版本管理器)..."
-    # 使用变量来指定安装目录
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
 
-    # --- 设置当前会话的环境变量以继续安装 ---
-    export PATH="$FNM_DIR:$PATH"
+    export PATH="/root/.fnm:$PATH"
     eval "$(fnm env)"
     log_info "FNM 安装完成。"
 
-    # --- Node.js 和 pnpm 安装 ---
     log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
     fnm install lts/iron
     fnm use lts/iron
 
     log_info "正在安装 pnpm..."
     curl -fsSL https://get.pnpm.io/install.sh | sh -
+    export PNPM_HOME="$HOME/.local/share/pnpm"
     export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 pnpm 环境准备就绪。"
+    log_info "Node.js 和 PNPM 环境准备就绪。"
 
-    # --- Sub-Store 项目文件下载与设置 ---
     log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR_LOCAL"
-    cd "$SUBSTORE_INSTALL_DIR_LOCAL" || exit 1
+    mkdir -p "$SUBSTORE_INSTALL_DIR"
+    cd "$SUBSTORE_INSTALL_DIR" || exit 1
     curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
     curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-
-    # --- 获取用户配置（API 密钥和端口）---
     log_info "开始配置系统服务...\n"
+
     local API_KEY
-    local random_api_key=$(generate_random_password)
+    local random_api_key
+    random_api_key=$(generate_random_password)
     read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
     API_KEY=${user_api_key:-$random_api_key}
     if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
     log_info "最终使用的 API 密钥为: ${API_KEY}\n"
-
     local FRONTEND_PORT
     while true; do
         read -p "请输入前端访问端口 [默认: 3000]: " port_input
         FRONTEND_PORT=${port_input:-"3000"}
         if check_port "$FRONTEND_PORT"; then break; fi
     done
-
     local BACKEND_PORT
     while true; do
         echo ""
         read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input
         BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then
-            log_error "后端端口不能与前端端口相同!"
-        elif check_port "$BACKEND_PORT"; then
-            break
+        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
+            if check_port "$BACKEND_PORT"; then break; fi
         fi
     done
 
-    # --- 创建 systemd 服务文件 (已移除硬编码路径) ---
     cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
-Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR_LOCAL}/frontend"
+Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
 Environment="SUB_STORE_FRONTEND_HOST=::"
 Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
-Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR_LOCAL}"
+Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-# 使用变量路径，不再硬编码 /root
-ExecStart=$FNM_DIR/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR_LOCAL}/sub-store.bundle.js
+ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
-# 使用 whoami 自动获取当前运行脚本的用户名 (即 root)
-User=$(whoami)
-Group=$(id -g -n "$(whoami)")
+User=root
+Group=root
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=32767
 ExecStartPre=/bin/sh -c "ulimit -n 51200"
 StandardOutput=journal
 StandardError=journal
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # --- 启动并检查服务 ---
     log_info "正在启动并启用 sub-store 服务..."
     systemctl daemon-reload
     systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
     systemctl start "$SUBSTORE_SERVICE_NAME"
-
     log_info "正在检测服务状态 (等待 5 秒)..."
     sleep 5
-    set +e # 临时禁用 set -e，以防 is-active 失败导致脚本退出
-
+    set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 服务状态正常 (active)。"
         substore_view_access_link
@@ -3071,11 +2934,7 @@ EOF
     fi
 
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        substore_setup_reverse_proxy
-    else
-        press_any_key
-    fi
+    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
 }
 
 substore_do_uninstall() {
@@ -3091,35 +2950,15 @@ substore_do_uninstall() {
         press_any_key
         return
     fi
-
-    # --- 【核心修改】使用 $HOME 来定位正确的安装目录 ---
-    local install_dir_to_remove="$HOME/sub-store"
-
     set -e
     log_info "正在停止并禁用 Sub-Store 服务..."
-    systemctl stop "$SUBSTORE_SERVICE_NAME" &>/dev/null
-    systemctl disable "$SUBSTORE_SERVICE_NAME" &>/dev/null
-
+    systemctl stop "$SUBSTORE_SERVICE_NAME"
+    systemctl disable "$SUBSTORE_SERVICE_NAME"
     log_info "正在删除服务文件..."
     rm -f "$SUBSTORE_SERVICE_FILE"
     systemctl daemon-reload
-
-    log_info "正在删除 Sub-Store 安装目录: $install_dir_to_remove"
-    # --- 使用新的变量进行删除 ---
-    rm -rf "$install_dir_to_remove"
-
-    # --- 【功能增强】增加可选的依赖清理步骤 ---
-    log_warn "Sub-Store 核心程序已卸载。"
-    log_warn "但它依赖的 FNM (Node管理器) 和 pnpm 可能仍然存在。"
-    read -p "是否要一并卸载这些依赖项？(这不会影响其他Node.js应用) (y/N): " confirm_deps
-    if [[ "$confirm_deps" =~ ^[Yy]$ ]]; then
-        log_info "正在卸载 FNM..."
-        rm -rf "$HOME/.fnm"
-        log_info "正在卸载 pnpm..."
-        rm -rf "$HOME/.local/share/pnpm"
-        log_info "✅ 依赖项已成功清理。"
-    fi
-
+    log_info "正在删除 Sub-Store 安装目录..."
+    rm -rf "$SUBSTORE_INSTALL_DIR"
     set +e
     log_info "✅ Sub-Store 已成功卸载。"
     press_any_key
@@ -3285,7 +3124,7 @@ substore_manage_menu() {
         clear
         local rp_menu_text="设置反向代理 (推荐)"
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
-            rp_menu_text="更换反代域名       "
+            rp_menu_text="更换反代域名"
         fi
 
         local STATUS_COLOR
@@ -3315,7 +3154,7 @@ substore_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $GREEN$rp_menu_text$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -3963,16 +3802,15 @@ uninstall_docker() {
     # 根据不同的操作系统执行相应的卸载命令
     case $OS in
         ubuntu|debian)
-            # 使用 || true 来忽略 "package not found" 错误
-            apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras || true
-            apt-get autoremove -y --purge
+            sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+            sudo apt-get autoremove -y --purge
             ;;
         centos|rhel|fedora)
             # 对于 CentOS/RHEL/Fedora，使用 yum 或 dnf
             if command -v dnf &> /dev/null; then
-                dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+                sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             else
-                yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+                sudo yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             fi
             ;;
         *)
@@ -4587,10 +4425,7 @@ EOF
 
     log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
-
-    # 【安全修复】将 777 权限改为更安全的 755
-    # 755 权限: 拥有者(www-data)可读写执行，同组用户和其他用户可读可执行，但不可写。
-    docker exec -i "${project_dir##*/}_php" chmod -R 755 /var/www/html/runtime
+    docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
     log_info "正在检查服务最终状态..."
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
@@ -5178,12 +5013,12 @@ server {
     listen [::]:443 ssl http2;
     server_name $domain;
 
-    client_max_body_size 512M;
-
     ssl_certificate $cert_path;
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+
+    client_max_body_size 512M;
 
     location / {
         proxy_pass http://127.0.0.1:$port;
