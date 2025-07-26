@@ -5468,8 +5468,39 @@ initial_setup_check() {
 main_menu() {
     while true; do
         clear
+
+        # 获取 IP 地址以供显示，函数内部有缓存机制，不会重复请求
+        local ipv4
+        ipv4=$(get_public_ip v4)
+        local ipv6
+        ipv6=$(get_public_ip v6)
+
+        # 构建要显示的 IP 字符串
+        local ip_display_line="  当前IP: "
+        if [ -n "$ipv4" ]; then
+            ip_display_line+="${WHITE}IPv4: ${ipv4}${CYAN}"
+        else
+            ip_display_line+="${RED}IPv4: N/A${CYAN}"
+        fi
+        if [ -n "$ipv6" ]; then
+            ip_display_line+=" | ${WHITE}IPv6: ${ipv6}${CYAN}"
+        fi
+
+        # --- 以下是菜单的绘制 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        # --- 新增的 IP 显示行 ---
+        # 为了美观，计算右侧需要填充的空格数
+        local content_len
+        content_len=$(echo -e "$ip_display_line" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+        local padding_len=$((52 - content_len))
+        [ $padding_len -lt 0 ] && padding_len=0
+        local padding_space
+        padding_space=$(printf "%${padding_len}s")
+        echo -e "$CYAN║$ip_display_line$padding_space$CYAN║$NC"
+
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
