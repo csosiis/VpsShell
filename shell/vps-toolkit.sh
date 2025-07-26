@@ -3655,21 +3655,25 @@ nezha_agent_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 
         local v0_status
-        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
-        local v1_status
-        if is_nezha_agent_v1_installed; then v1_status="${GREEN}(已安装)$NC"; else v1_status="${YELLOW}(未安装)$NC"; fi
+        if is_nezha_agent_v0_installed; then
+            v0_status="${GREEN}(已安装)$NC"
+            echo -e "$CYAN║$NC   2. $RED卸载 NEZHA V0 探针$NC                          $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"; e
+            lse v0_status="${YELLOW}(未安装)$NC";
+        fi
         local phoenix_status
-        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
+        if is_nezha_agent_phoenix_installed; then
+            phoenix_status="${GREEN}(已安装)$NC";
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. $RED卸载 NEZHA V1 探针$NC                          $CYAN║$NC"
+        else phoenix_status="${YELLOW}(未安装)$NC";
+        fi
 
         echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 NEZHA V0 探针$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 NEZHA V1 探针$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
