@@ -3478,255 +3478,173 @@ substore_main_menu() {
     done
 }
 # =================================================
-#               哪吒监控 (nezha_main_menu) - 修正版
+#               哪吒监控 (nezha_main_menu)
 # =================================================
 
-# --- 辅助检查函数 ---
-is_nezha_agent_sanjose_v0_installed() { [ -f "/etc/systemd/system/nezha-agent-v0.service" ]; }
-is_nezha_agent_london_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-v1.service" ]; }
-is_nezha_agent_phoenix_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]; }
+is_nezha_agent_v0_installed() { [ -f "/etc/systemd/system/nezha-agent-v0.service" ]; }
+is_nezha_agent_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-v1.service" ]; }
+is_nezha_agent_phoenix_installed() { [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]; }
 
-
-# --- 专用的安装函数 (核心修正) ---
-
-# 1. San Jose V0 专用安装
-install_nezha_agent_sanjose_v0() {
-    log_info "即将执行 [San Jose V0] 的专用安装脚本..."
-    log_warn "此脚本会安装 V0 版本的探针。"
-    # 这是针对 V0 面板的专用安装命令
-    curl -L https://raw.githubusercontent.com/naiba/nezha/master/script/install.sh -o nezha.sh && chmod +x nezha.sh && ./nezha.sh install_agent nz.wiitwo.eu.org 443 CSra33OHQcrbfc4g4a
-    if [ $? -eq 0 ]; then
-        log_info "脚本执行完毕，正在进行适配..."
-        # 脚本安装的服务名为 nezha-agent, 我们需要重命名以实现共存
-        systemctl stop nezha-agent.service
-        systemctl disable nezha-agent.service
-        mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v0.service
-        sed -i 's/Description=Nezha Agent/Description=Nezha Agent (San Jose V0)/' /etc/systemd/system/nezha-agent-v0.service
-        systemctl daemon-reload
-        systemctl enable nezha-agent-v0.service
-        systemctl start nezha-agent-v0.service
-        log_info "✅ [San Jose V0] 探针适配并启动成功！"
+uninstall_nezha_agent_v0() {
+    if ! is_nezha_agent_v0_installed; then
+        log_warn "San Jose V0 探针未安装，无需卸载。"
     else
-        log_error "[San Jose V0] 专用安装脚本执行失败！"
-    fi
-}
-
-# 2. London V1 专用安装
-install_nezha_agent_london_v1() {
-    log_info "即将执行 [London V1] 的专用安装脚本..."
-    # 这是针对 London V1 面板的专用安装命令
-    curl -L https://raw.githubusercontent.com/applexad/nezha-agent-installer/main/nezha.sh -o nezha.sh && chmod +x nezha.sh && ./nezha.sh install_agent nezha.london.ad-vin.com 5555 hO8CaAFX16eBCuop81 --tls
-    if [ $? -eq 0 ]; then
-        log_info "脚本执行完毕，正在进行适配..."
-        systemctl stop nezha-agent.service
-        systemctl disable nezha-agent.service
-        mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-v1.service
-        sed -i 's/Description=Nezha Agent/Description=Nezha Agent (London V1)/' /etc/systemd/system/nezha-agent-v1.service
+        log_info "正在停止并禁用 nezha-agent-v0 服务..."
+        systemctl stop nezha-agent-v0.service &>/dev/null
+        systemctl disable nezha-agent-v0.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent-v0.service
+        rm -rf /opt/nezha/agent-v0
         systemctl daemon-reload
-        systemctl enable nezha-agent-v1.service
-        systemctl start nezha-agent-v1.service
-        log_info "✅ [London V1] 探针适配并启动成功！"
-    else
-        log_error "[London V1] 专用安装脚本执行失败！"
+        log_info "✅ SanJose V0 探针已成功卸载。"
     fi
+    press_any_key
 }
 
-# 3. Phoenix V1 专用安装
-install_nezha_agent_phoenix_v1() {
-    log_info "即将执行 [Phoenix V1] 的专用安装脚本..."
-    # 这是针对 Phoenix V1 面板的专用安装命令
-    curl -L https://raw.githubusercontent.com/CoiaPrant/nezha-agent-installer/main/nezha.sh -o nezha.sh && chmod +x nezha.sh && ./nezha.sh install_agent nz.chat.nyc.im 8008 XuqiRu4XcGttDDFWz8ipJNbv7HCoZe7M3
-    if [ $? -eq 0 ]; then
-        log_info "脚本执行完毕，正在进行适配..."
-        systemctl stop nezha-agent.service
-        systemctl disable nezha-agent.service
-        mv /etc/systemd/system/nezha-agent.service /etc/systemd/system/nezha-agent-phoenix.service
-        sed -i 's/Description=Nezha Agent/Description=Nezha Agent (Phoenix V1)/' /etc/systemd/system/nezha-agent-phoenix.service
+uninstall_nezha_agent_v1() {
+    if ! is_nezha_agent_v1_installed; then
+        log_warn "Nezha V1 探针未安装，无需卸载。"
+    else
+        log_info "正在停止并禁用 nezha-agent-v1 服务..."
+        systemctl stop nezha-agent-v1.service &>/dev/null
+        systemctl disable nezha-agent-v1.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent-v1.service
+        rm -rf /opt/nezha/agent-v1
         systemctl daemon-reload
-        systemctl enable nezha-agent-phoenix.service
-        systemctl start nezha-agent-phoenix.service
-        log_info "✅ [Phoenix V1] 探针适配并启动成功！"
+        log_info "✅ Nezha V1 探针已成功卸载。"
+    fi
+    press_any_key
+}
+
+uninstall_nezha_agent_phoenix() {
+    if ! is_nezha_agent_phoenix_installed; then
+        log_warn "Phoenix Nezha V1 探针未安装，无需卸载。"
     else
-        log_error "[Phoenix V1] 专用安装脚本执行失败！"
+        log_info "正在停止并禁用 nezha-agent-phoenix 服务..."
+        systemctl stop nezha-agent-phoenix.service &>/dev/null
+        systemctl disable nezha-agent-phoenix.service &>/dev/null
+        rm -f /etc/systemd/system/nezha-agent-phoenix.service
+        rm -rf /opt/nezha/agent-phoenix
+        systemctl daemon-reload
+        log_info "✅ Phoenix Nezha V1 探针已成功卸载。"
     fi
+    press_any_key
 }
 
+install_and_adapt_nezha_agent() {
+    local version_id="$1"
+    local official_script_url="$2"
+    local install_command="$3"
+    local service_name="nezha-agent-$version_id"
+    local install_dir="/opt/nezha/agent-$version_id"
+    local service_file="/etc/systemd/system/$service_name.service"
 
-# --- 专用的卸载函数 ---
+    log_info "正在为 Nezha Agent ($version_id) 执行通用安装流程..."
 
-uninstall_nezha_agent_sanjose_v0() {
-    log_info "正在卸载 [San Jose V0] 探针..."
-    systemctl stop nezha-agent-v0.service &>/dev/null
-    systemctl disable nezha-agent-v0.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v0.service
+    if [ -f "$service_file" ]; then
+        log_warn "检测到旧的 ($version_id) 安装，将先执行卸载..."
+        systemctl stop "$service_name" &>/dev/null
+        systemctl disable "$service_name" &>/dev/null
+        rm -f "$service_file"
+        rm -rf "$install_dir"
+        systemctl daemon-reload
+        log_info "旧版本清理完毕。"
+    fi
+
+    ensure_dependencies "curl" "wget" "unzip"
+
+    local script_tmp_path="/tmp/nezha_install_${version_id}.sh"
+    register_temp_file "$script_tmp_path"
+    log_info "正在下载官方安装脚本..."
+    if ! curl -L "$official_script_url" -o "$script_tmp_path"; then
+        log_error "下载官方脚本失败！"
+        press_any_key
+        return 1
+    fi
+    chmod +x "$script_tmp_path"
+
+    log_info "第1步：执行官方原版脚本进行标准安装..."
+    eval "$install_command"
+    rm "$script_tmp_path"
+
+    if ! [ -f "/etc/systemd/system/nezha-agent.service" ]; then
+        log_error "官方脚本未能成功创建标准服务，操作中止。"
+        press_any_key
+        return 1
+    fi
+    log_info "标准服务安装成功，即将开始改造..."
+    sleep 1
+
+    log_info "第2步：停止标准服务并重命名文件以实现隔离..."
+    systemctl stop nezha-agent.service &>/dev/null
+    systemctl disable nezha-agent.service &>/dev/null
+    mv /etc/systemd/system/nezha-agent.service "$service_file"
+    mv /opt/nezha/agent "$install_dir"
+
+    log_info "第3步：修改新的服务文件，使其指向正确的路径..."
+    sed -i.bak "s|/opt/nezha/agent|$install_dir|g" "$service_file"
+
+    log_info "第4步：重载并启动改造后的 '$service_name' 服务..."
     systemctl daemon-reload
-    # 官方脚本默认安装到 /opt/nezha
-    if [ -d "/opt/nezha" ]; then
-        read -p "是否删除 /opt/nezha 目录? (y/N): " confirm_delete
-        if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
-            rm -rf /opt/nezha
-        fi
+    systemctl enable "$service_name"
+    systemctl start "$service_name"
+
+    log_info "检查最终服务状态..."
+    sleep 2
+    if systemctl is-active --quiet "$service_name"; then
+        log_info "✅ Nezha Agent ($version_id) (隔离版) 已成功安装并启动！"
+    else
+        log_error "Nezha Agent ($version_id) (隔离版) 最终启动失败！"
+        log_warn "显示详细状态以供诊断:"
+        systemctl status "$service_name" --no-pager -l
     fi
-    log_info "✅ [San Jose V0] 卸载完成。"
+    press_any_key
 }
 
-uninstall_nezha_agent_london_v1() {
-    log_info "正在卸载 [London V1] 探针..."
-    systemctl stop nezha-agent-v1.service &>/dev/null
-    systemctl disable nezha-agent-v1.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-v1.service
-    systemctl daemon-reload
-    if [ -d "/opt/nezha" ]; then
-        read -p "是否删除 /opt/nezha 目录? (y/N): " confirm_delete
-        if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
-            rm -rf /opt/nezha
-        fi
-    fi
-    log_info "✅ [London V1] 卸载完成。"
-}
-
-uninstall_nezha_agent_phoenix_v1() {
-    log_info "正在卸载 [Phoenix V1] 探针..."
-    systemctl stop nezha-agent-phoenix.service &>/dev/null
-    systemctl disable nezha-agent-phoenix.service &>/dev/null
-    rm -f /etc/systemd/system/nezha-agent-phoenix.service
-    systemctl daemon-reload
-    if [ -d "/opt/nezha" ]; then
-        read -p "是否删除 /opt/nezha 目录? (y/N): " confirm_delete
-        if [[ "$confirm_delete" =~ ^[Yy]$ ]]; then
-            rm -rf /opt/nezha
-        fi
-    fi
-    log_info "✅ [Phoenix V1] 卸载完成。"
-}
-
-
-# --- 管理菜单 (简化版，负责调用专用函数) ---
-
-manage_single_agent() {
+_nezha_v1_style_installer() {
     local version_id="$1"
     local friendly_name="$2"
-    local check_installed_func="$3"
-    local install_func="$4"
-    local uninstall_func="$5"
-    local service_name="nezha-agent-$version_id"
+    local server_info="$3"
+    local server_secret="$4"
 
-    if ! $check_installed_func; then
-        # 如果未安装，直接进入安装流程
-        log_info "即将安装 [$friendly_name] 探针..."
-        $install_func
+    local user_command
+    read -p "您正在安装 $friendly_name 探针，请输入安装指令以继续: " user_command
+    if [ "$user_command" != "csos" ]; then
+        log_error "指令错误，安装已中止。"
+        press_any_key
+        return 1
+    fi
+
+    local NZ_TLS="false"
+    local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh"
+    local command_to_run="export NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'; bash /tmp/nezha_install_${version_id}.sh"
+
+    install_and_adapt_nezha_agent "$version_id" "$script_url" "$command_to_run"
+}
+
+install_nezha_agent_v0() {
+    local server_key
+    read -p "请输入San Jose V0哪吒面板密钥: " server_key
+    if [ -z "$server_key" ]; then
+        log_error "面板密钥不能为空！操作中止。"
         press_any_key
         return
     fi
 
-    # 如果已安装，显示管理菜单
-    while true; do
-        clear
-        local status_text
-        if systemctl is-active --quiet "$service_name"; then
-            status_text="${GREEN}● 运行中${NC}"
-        else
-            status_text="${RED}● 已停止${NC}"
-        fi
+    local server_addr="nz.wiitwo.eu.org"
+    local server_port="443"
+    local tls_option="--tls"
+    local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh"
+    local command_to_run="bash /tmp/nezha_install_v0.sh install_agent $server_addr $server_port $server_key $tls_option"
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE             管理探针: $friendly_name             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前状态: $status_text                               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   1. 启动服务            2. 停止服务             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 重启服务            4. 查看实时日志         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${GREEN}重装探针${NC}                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${RED}卸载探针${NC}                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-            1) systemctl start "$service_name"; log_info "命令已发送"; sleep 1 ;;
-            2) systemctl stop "$service_name"; log_info "命令已发送"; sleep 1 ;;
-            3) systemctl restart "$service_name"; log_info "命令已发送"; sleep 1 ;;
-            4) clear; journalctl -u "$service_name" -f --no-pager ;;
-            5) $install_func; break ;;
-            6) $uninstall_func; break ;;
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
+    install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
 
-nezha_agent_menu() {
-    while true; do
-        clear
-        local v0_status_text v1_status_text phoenix_status_text
-        if is_nezha_agent_sanjose_v0_installed; then
-            if systemctl is-active --quiet nezha-agent-v0; then v0_status_text="${GREEN}(已安装 - ● 运行中)${NC}"; else v0_status_text="${YELLOW}(已安装 - ● 已停止)${NC}"; fi
-        else v0_status_text="${RED}(未安装)${NC}"; fi
-
-        if is_nezha_agent_london_v1_installed; then
-            if systemctl is-active --quiet nezha-agent-v1; then v1_status_text="${GREEN}(已安装 - ● 运行中)${NC}"; else v1_status_text="${YELLOW}(已安装 - ● 已停止)${NC}"; fi
-        else v1_status_text="${RED}(未安装)${NC}"; fi
-
-        if is_nezha_agent_phoenix_v1_installed; then
-            if systemctl is-active --quiet nezha-agent-phoenix; then phoenix_status_text="${GREEN}(已安装 - ● 运行中)${NC}"; else phoenix_status_text="${YELLOW}(已安装 - ● 已停止)${NC}"; fi
-        else phoenix_status_text="${RED}(未安装)${NC}"; fi
-
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE             哪吒探针 (Agent) 管理              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. San Jose (V0)  探针... $v0_status_text         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. London (V1)    探针... $v1_status_text           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. Phoenix (V1)   探针... $phoenix_status_text          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) manage_single_agent "v0" "San Jose V0" "is_nezha_agent_sanjose_v0_installed" "install_nezha_agent_sanjose_v0" "uninstall_nezha_agent_sanjose_v0" ;;
-        2) manage_single_agent "v1" "London V1" "is_nezha_agent_london_v1_installed" "install_nezha_agent_london_v1" "uninstall_nezha_agent_london_v1" ;;
-        3) manage_single_agent "phoenix" "Phoenix V1" "is_nezha_agent_phoenix_v1_installed" "install_nezha_agent_phoenix_v1" "uninstall_nezha_agent_phoenix_v1" ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
+install_nezha_agent_v1() {
+    _nezha_v1_style_installer "v1" "London V1" "nz.ssong.eu.org:8008" "Pln0X91X18urAudToiwDGVlZhkpUb0Qv"
 }
 
-
-# --- 主菜单和面板菜单 (无需修改，保持原样) ---
-
-nezha_main_menu() {
-    while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   哪吒监控管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 探针 (Agent) 管理                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 面板 (Dashboard) 管理                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
-        case $choice in
-        1) nezha_agent_menu ;;
-        2) nezha_dashboard_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
+install_nezha_agent_phoenix() {
+    _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.chat.nyc.mn:8008" "XuqVRw4XcOtDDFwz8ipJN9v7HcQZe7M3"
 }
 
 install_nezha_dashboard_v0() {
@@ -3742,9 +3660,60 @@ install_nezha_dashboard_v1() {
     ensure_dependencies "curl"
     log_info "即将运行官方 V1 面板安装/管理脚本..."
     press_any_key
-    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && ./nezha.sh
+    curl -L https://raw.githubusercontent.com/nezhahq/scripts/refs/heads/main/install.sh -o nezha.sh && chmod +x nezha.sh && sudo ./nezha.sh
     log_info "脚本执行完毕。"
     press_any_key
+}
+
+nezha_agent_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+
+        local v0_status
+        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
+        local v1_status
+        if is_nezha_agent_v1_installed; then v1_status="${GREEN}(已安装)$NC"; else v1_status="${YELLOW}(未安装)$NC"; fi
+        local phoenix_status
+        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
+
+        echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 $v0_status         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 $v1_status           $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 London V1 探针$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V1 探针 $phoenix_status          $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V1 探针$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) install_nezha_agent_v0 ;;
+        2) uninstall_nezha_agent_v0 ;;
+        3) install_nezha_agent_v1 ;;
+        4) uninstall_nezha_agent_v1 ;;
+        5) install_nezha_agent_phoenix ;;
+        6) uninstall_nezha_agent_phoenix ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
 }
 
 nezha_dashboard_menu() {
@@ -3777,6 +3746,32 @@ nezha_dashboard_menu() {
     done
 }
 
+nezha_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 # =================================================
 #           新增：Docker 通用管理 (V2.0 增强版)
 # =================================================
@@ -3900,36 +3895,7 @@ docker_prune_system() {
     fi
     press_any_key
 }
-uninstall_portainer() {
-    log_info "正在准备卸载 Portainer..."
-    local was_uninstalled=false
 
-    if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
-        log_info "检测到 Portainer 容器，正在停止并删除..."
-        docker stop portainer >/dev/null
-        docker rm portainer >/dev/null
-        was_uninstalled=true
-    else
-        log_info "未找到名为 'portainer' 的容器。"
-    fi
-
-    if docker volume ls -q | grep -q "^portainer_data$"; then
-        log_warn "检测到 Portainer 的数据卷 (portainer_data)。"
-        read -p "是否要删除此数据卷 (这将清除所有 Portainer 设置)？(y/N): " confirm_delete_volume
-        if [[ "$confirm_delete_volume" =~ ^[Yy]$ ]]; then
-            docker volume rm portainer_data
-            log_info "数据卷 'portainer_data' 已删除。"
-        fi
-        was_uninstalled=true
-    fi
-
-    if $was_uninstalled; then
-        log_info "✅ Portainer 已成功卸载。"
-    else
-        log_warn "未发现任何需要卸载的 Portainer 组件。"
-    fi
-    press_any_key
-}
 install_portainer() {
     if ! _install_docker_and_compose; then press_any_key; return; fi
     clear
@@ -5581,7 +5547,7 @@ certificate_management_menu() {
         case $choice in
         1) setup_auto_reverse_proxy "" "" ;; # 传递空参数以启动完整交互流程
         2) apply_ssl_certificate_only_workflow ;;
-        3) clear; certbot certificates; press_any_key ;;
+        3) clear; list_certificates; press_any_key ;;
         4) renew_certificates ;;
         5) delete_certificate_and_proxy ;;
         0) break ;;
