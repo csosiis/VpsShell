@@ -3089,8 +3089,8 @@ EOF
     cat > docker-compose.yml <<'EOF'
 services:
   sub-store:
-    # [修复] 已将镜像地址更新为访问更友好的社区镜像 (Docker Hub)
-    image: jonathanstar/sub-store:latest
+    # [最终修复] 已将镜像地址更新为当前最活跃、最可靠的社区镜像
+    image: tindy2013/sub-store:latest
     container_name: sub-store
     restart: always
     ports:
