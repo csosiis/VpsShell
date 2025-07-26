@@ -3482,7 +3482,6 @@ substore_main_menu() {
 # =================================================
 
 is_nezha_agent_v0_installed() { [ -f "/etc/systemd/system/nezha-agent-v0.service" ]; }
-is_nezha_agent_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-v1.service" ]; }
 is_nezha_agent_phoenix_installed() { [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]; }
 
 uninstall_nezha_agent_v0() {
@@ -3656,8 +3655,6 @@ nezha_agent_menu() {
 
         local v0_status
         if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
-        local v1_status
-        if is_nezha_agent_v1_installed; then v1_status="${GREEN}(已安装)$NC"; else v1_status="${YELLOW}(未安装)$NC"; fi
         local phoenix_status
         if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
 
@@ -3672,7 +3669,7 @@ nezha_agent_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
-        if is_nezha_agent_v1_installed; then
+        if is_nezha_agent_phoenix_installed; then
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   xz1. $RED卸载 NEZHA V1 探针$NC                        $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
