@@ -1982,7 +1982,7 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}              $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1996,7 +1996,7 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC            $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC             $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
@@ -2737,7 +2737,18 @@ push_to_sub_store() {
     fi
     press_any_key
 }
-
+# (新增) 智能获取 Nginx 的 Web 根目录
+_get_nginx_web_root() {
+    if [ -d "/var/www/html" ]; then
+        echo "/var/www/html"
+    elif [ -d "/usr/share/nginx/html" ]; then
+        echo "/usr/share/nginx/html"
+    else
+        log_warn "无法检测到标准的 Nginx Web 根目录，将默认使用 /var/www/html"
+        echo "/var/www/html"
+    fi
+}
+# (优化后)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -2750,11 +2761,15 @@ generate_subscription_link() {
         press_any_key
         return
     fi
+
     local host=""
+    # 尝试从 Sub-Store 的反代配置中获取域名
     if is_substore_installed && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-        host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
+        host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
         log_info "检测到 Sub-Store 已配置域名，将使用: $host"
     fi
+
+    # 如果没有域名，则回退到使用公网IP
     if [ -z "$host" ]; then
         host=$(get_public_ip v4)
         log_info "未检测到配置的域名，将使用公网 IP: $host"
@@ -2764,13 +2779,16 @@ generate_subscription_link() {
         press_any_key
         return
     fi
-    local sub_dir="/var/www/html"
+
+    # --- **核心修正**：调用新函数自动获取正确的 Web 根目录 ---
+    local sub_dir
+    sub_dir=$(_get_nginx_web_root)
     mkdir -p "$sub_dir"
+
     local sub_filename
     sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     local sub_filepath="$sub_dir/$sub_filename"
 
-    # 注册临时文件以便自动删除
     register_temp_file "$sub_filepath"
 
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
@@ -2779,7 +2797,15 @@ generate_subscription_link() {
     local base64_content
     base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
-    local sub_url="http://$host/$sub_filename"
+
+    # --- **核心修正**：智能判断使用 https 还是 http ---
+    local protocol="http://"
+    # 通过简单的正则判断 host 是否为 IP 地址
+    if ! [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        protocol="https://"
+    fi
+    local sub_url="${protocol}${host}/${sub_filename}"
+
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
     log_warn "此链接将在您退出脚本后被自动删除。"
@@ -2789,10 +2815,98 @@ generate_subscription_link() {
     press_any_key
 }
 
+# (已完善)
 generate_tuic_client_config() {
+    ensure_dependencies "jq"
     clear
-    log_warn "TUIC 客户端配置生成功能正在开发中..."
-    log_info "此功能旨在为您选择的 TUIC 节点生成一个可以直接在客户端使用的 config.json 文件。"
+
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+        log_warn "没有找到任何已配置的节点。"
+        press_any_key
+        return
+    fi
+
+    # 1. 查找所有 TUIC 节点
+    mapfile -t tuic_nodes < <(grep "^tuic://" "$SINGBOX_NODE_LINKS_FILE")
+
+    if [ ${#tuic_nodes[@]} -eq 0 ]; then
+        log_warn "在当前配置中没有找到任何 TUIC v5 节点。"
+        press_any_key
+        return
+    fi
+
+    local selected_node
+    # 2. 如果多于一个，让用户选择
+    if [ ${#tuic_nodes[@]} -gt 1 ]; then
+        log_info "检测到多个 TUIC 节点，请选择一个以生成配置：\n"
+        for i in "${!tuic_nodes[@]}"; do
+            local node_name=$(echo "${tuic_nodes[$i]}" | sed 's/.*#\(.*\)/\1/')
+            echo " $((i+1)). $node_name"
+        done
+        echo ""
+        read -p "请输入选项: " choice
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#tuic_nodes[@]} ]; then
+            log_error "无效选项！"
+            press_any_key
+            return
+        fi
+        selected_node=${tuic_nodes[$((choice-1))]}
+    else
+        selected_node=${tuic_nodes[0]}
+        log_info "检测到唯一的 TUIC 节点，将为其生成配置。"
+    fi
+
+    # 3. 解析分享链接
+    log_info "正在解析节点参数..."
+    local url_without_prefix=${selected_node#tuic://}
+    local creds_and_server=${url_without_prefix%%\?*}
+    local query_params=${url_without_prefix#*\?}
+
+    local uuid=$(echo "$creds_and_server" | cut -d: -f1)
+    local password=$(echo "$creds_and_server" | cut -d: -f2 | cut -d@ -f1)
+    local server_part=$(echo "$creds_and_server" | cut -d@ -f2)
+    local server_address=$(echo "$server_part" | rev | cut -d: -f2- | rev)
+    local server_port=$(echo "$server_part" | rev | cut -d: -f1 | rev)
+
+    local sni=$(echo "$query_params" | grep -o -E 'sni=[^&]+' | cut -d= -f2)
+    local alpn=$(echo "$query_params" | grep -o -E 'alpn=[^&]+' | cut -d= -f2)
+    local allow_insecure=$(echo "$query_params" | grep -q 'allow_insecure=1' && echo "true" || echo "false")
+
+    # 4. 动态生成 JSON
+    log_info "正在生成客户端 config.json..."
+    local client_config
+    client_config=$(jq -n \
+        --arg server "$server_address:$server_port" \
+        --arg uuid "$uuid" \
+        --arg password "$password" \
+        --arg sni "$sni" \
+        --argjson alpn "[\"$alpn\"]" \
+        --argjson insecure "$allow_insecure" \
+    '{
+        "relay": {
+            "server": $server,
+            "uuid": $uuid,
+            "password": $password,
+            "udp_relay_mode": "native",
+            "congestion_control": "bbr",
+            "alpn": $alpn,
+            "tls": {
+                "sni": $sni,
+                "insecure_skip_verify": $insecure
+            }
+        },
+        "local": {
+            "server": "127.0.0.1:1080"
+        }
+    }')
+
+    # 5. 清晰展示
+    clear
+    log_info "✅ TUIC 客户端配置已生成！"
+    echo "您可以将以下内容保存为 \`config.json\` 文件，并使用 \`tuic-client -c config.json\` 命令来启动客户端。"
+    echo -e "${CYAN}--------------------------------------------------------------------${NC}"
+    echo -e "${YELLOW}${client_config}${NC}"
+    echo -e "${CYAN}--------------------------------------------------------------------${NC}"
     press_any_key
 }
 
