@@ -1982,35 +1982,36 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC            $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-    1) protocols_ref=("VLESS") ;;
-    2) protocols_ref=("VMess") ;;
-    3) protocols_ref=("Trojan") ;;
-    4) protocols_ref=("Hysteria2") ;;
-    5) protocols_ref=("TUIC") ;;
-    6)
+    1) protocols_ref=("VLESS-REALITY") ;;
+    2) protocols_ref=("VLESS") ;;
+    3) protocols_ref=("VMess") ;;
+    4) protocols_ref=("Trojan") ;;
+    5) protocols_ref=("Hysteria2") ;;
+    6) protocols_ref=("TUIC") ;;
+    7)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
@@ -2067,11 +2068,8 @@ _ensure_time_accuracy() {
     fi
     return 0
 }
-# =================================================
-#           函数：处理 REALITY 特定设置 (增强版)
-# =================================================
 _singbox_handle_reality_setup() {
-    # --- 确保时间准确 (此函数调用保持不变) ---
+    # --- 确保时间准确 ---
     _ensure_time_accuracy
 
     # 声明-n类型的变量，以引用的方式修改外部变量的值
@@ -2114,7 +2112,7 @@ _singbox_handle_reality_setup() {
     elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
+    # --- **核心优化**：获取并验证伪装域名 (serverName) ---
     while true; do
         read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
         server_name_ref=${server_name_input:-"www.bing.com"}
@@ -2131,7 +2129,7 @@ _singbox_handle_reality_setup() {
             echo ""
         fi
     done
-    # --- **修改结束** ---
+    # --- **优化结束** ---
 
     # 自动生成并验证 short_id
     while true; do
@@ -2199,12 +2197,16 @@ _singbox_handle_certificate_setup() {
     log_info "证书处理完毕。"
     return 0
 }
-
 _singbox_prompt_for_ports() {
     local -n protocols_ref=$1
     local -n ports_ref=$2
     local -n used_ports_this_run_ref=$3
     local is_one_click=$4
+
+    # 针对 REALITY 的端口特殊提示
+    if [[ " ${protocols_ref[*]} " =~ " VLESS-REALITY " ]]; then
+         log_info "\nREALITY 协议需要一个 TCP 端口进行连接。"
+    fi
 
     if $is_one_click; then
         log_info "您已选择一键模式，请为每个协议指定端口。"
@@ -2238,7 +2240,6 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
-
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
@@ -2261,13 +2262,21 @@ _singbox_build_protocol_config_and_link() {
     # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
-    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
+    local short_id=${args_ref[short_id]}
 
 
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
     case $protocol in
+    "VLESS-REALITY")
+        # 为 REALITY 构建专属的 TLS 配置
+        local reality_tls_config="{\"enabled\": true, \"server_name\": \"$sni_domain\", \"reality\": {\"enabled\": true, \"handshake\": {\"server\": \"$sni_domain\", \"server_port\": 443}, \"private_key\": \"$private_key\", \"short_id\": [\"$short_id\"]}}"
+        # VLESS + REALITY 的入站配置，使用 TCP 传输
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"transport\":{\"type\":\"tcp\"},\"tls\":$reality_tls_config}"
+        # VLESS + REALITY 的分享链接
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key&shortId=$short_id#$tag"
+        ;;
     "VLESS" | "VMess" | "Trojan")
         config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
             [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
@@ -2306,13 +2315,15 @@ singbox_add_node_orchestrator() {
     declare -A insecure_params
     local reality_private_key reality_public_key reality_short_id
 
+    # --- 核心逻辑分支：判断是配置 REALITY 还是其他 TLS 协议 ---
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        # 注意：这里我们调用的是上面修改过的 _singbox_handle_reality_setup 函数
+        # 调用 REALITY 专属配置函数
         if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
             press_any_key
             return
         fi
     else
+        # 调用基于证书的 TLS 配置函数
         if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
             press_any_key
             return
@@ -2328,7 +2339,6 @@ singbox_add_node_orchestrator() {
     geo_info_json=$(curl -s ip-api.com/json)
 
     local city operator_name
-    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
@@ -2382,6 +2392,8 @@ singbox_add_node_orchestrator() {
 
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
+        # 备份旧配置，以防新配置导致启动失败
+        cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.bak"
         systemctl restart sing-box
         sleep 2
         if systemctl is-active --quiet sing-box; then
@@ -2396,37 +2408,53 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
-            # --- **修改核心**：增加 REALITY 和其他协议的最终提醒 ---
+            # --- **核心优化**：增加 REALITY 和其他协议的最终提醒 ---
             if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
                 echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
                 log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
-                log_warn "已经放行了此节点使用的 TCP 和 UDP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
+                log_warn "已经放行了此节点使用的 TCP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
                 log_warn "否则，客户端将无法连接！"
                 echo -e "$YELLOW==============================================================$NC"
             fi
 
             if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
-                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                echo -e "\n$YELLOW====================== IP直连节点重要提示 ====================$NC"
+                log_warn "您使用了IP直连方式(自签名证书)，部分客户端需要特殊设置："
                 for p in "${protocols_with_self_signed[@]}"; do
                     if [[ "$p" == "VMess" ]]; then
                         echo -e "\n${YELLOW}[VMess 节点]$NC"
                         log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
                         log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
                     fi
-                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
-                        echo -e "\n${YELLOW}[$p 节点]$NC"
-                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
-                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
-                    fi
                 done
-                echo -e "\n$YELLOW==============================================================$NC"
+                echo -e "\n${YELLOW}[通用提示]$NC"
+                log_warn "对于 VLESS, Trojan 等协议，请确保客户端配置中"
+                log_warn "与“允许不安全连接”或“跳过证书验证”相关的选项已开启。"
+                echo -e "$YELLOW==============================================================$NC"
             fi
-            # --- **修改结束** ---
+
+            local udp_protocols_created=()
+            for p in "${protocols_to_create[@]}"; do
+                if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                    udp_protocols_created+=("$p")
+                fi
+            done
+            if [ ${#udp_protocols_created[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW======================= UDP 协议重要提示 =======================$NC"
+                for p in "${udp_protocols_created[@]}"; do
+                    log_warn "[$p 节点] 这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                    log_warn "(及云服务商安全组) 已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                done
+                echo -e "$YELLOW==============================================================$NC"
+            fi
+            # --- **优化结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
-            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
-            log_warn "配置文件可能出错，旧的配置文件已备份为 $SINGBOX_CONFIG_FILE.tmp"
+            log_error "Sing-Box 重启失败！您的新配置可能存在问题。"
+            log_error "旧的配置文件已自动恢复。请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            # 回滚操作
+            mv "$SINGBOX_CONFIG_FILE.bak" "$SINGBOX_CONFIG_FILE"
             press_any_key
         fi
     else
