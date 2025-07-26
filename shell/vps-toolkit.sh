@@ -5480,47 +5480,46 @@ main_menu() {
         echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-        # --- IP 显示逻辑 (精确对齐版) ---
+        # --- IP 显示逻辑 ---
         if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
             # 情况1: IPv4 和 IPv6 都存在，换行显示
-
-            # 处理 IPv4 行
-            local text1="  IPv4: ${ipv4}"
-            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
-            local len1=${#text1}
-            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
+            local line1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            local len1
+            len1=$(echo -e "$line1" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len1=$((len1 - 1))
+            local pad1=$((50 - len1))
+            [ $pad1 -lt 0 ] && pad1=0
             local space1
             space1=$(printf "%${pad1}s")
-            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
+            echo -e "$CYAN║$line1$space1$CYAN║$NC"
 
-            # 处理 IPv6 行
-            local text2="  IPv6: ${ipv6}"
-            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
-            local len2=${#text2}
-            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
+            local line2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            local len2
+            len2=$(echo -e "$line2" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len2=$((len2 - 1))
+            local pad2=$((50 - len2))
+            [ $pad2 -lt 0 ] && pad2=0
             local space2
             space2=$(printf "%${pad2}s")
-            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
-
+            echo -e "$CYAN║$line2$space2$CYAN║$NC"
         else
-            # 情况2: 只有一个IP或都没有，显示单行
-            local text=""
-            local display=""
+            # 情况2: 只有一个IP或都没有
+            local line="  " # 行首预留2个空格
             if [ -n "$ipv4" ]; then
-                text="  IPv4: ${ipv4}"
-                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+                line+="${WHITE}IPv4: ${ipv4}${CYAN}"
             elif [ -n "$ipv6" ]; then
-                text="  IPv6: ${ipv6}"
-                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+                line+="${WHITE}IPv6: ${ipv6}${CYAN}"
             else
-                text="  IP: 获取失败"
-                display="  ${RED}IP: 获取失败${CYAN}"
+                line+="${RED}IP: 获取失败${CYAN}"
             fi
-            local len=${#text}
-            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
+            local len
+            len=$(echo -e "$line" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len=$((len - 1))
+            local pad=$((50 - len))
+            [ $pad -lt 0 ] && pad=0
             local space
             space=$(printf "%${pad}s")
-            echo -e "$CYAN║${display}${space}$CYAN║$NC"
+            echo -e "$CYAN║$line$space$CYAN║$NC"
         fi
 
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
