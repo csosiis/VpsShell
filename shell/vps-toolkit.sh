@@ -536,7 +536,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
         echo -e "$CYAN║$NC  12. 防火墙助手 (UFW/FirewallD)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检${NC}                              $CYAN║$NC"
+        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检${NC}                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
