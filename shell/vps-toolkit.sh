@@ -3664,16 +3664,18 @@ nezha_agent_menu() {
         echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
         if is_nezha_agent_v0_installed; then
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $RED卸载 NEZHA V0 探针$NC                          $CYAN║$NC"
+            echo -e "$CYAN║$NC   xz0. $RED卸载 NEZHA V0 探针$NC                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         else
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         fi
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
-        if is_nezha_agent_v0_installed; then
+        echo -e "$CYAN║$NC   2. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
+        if is_nezha_agent_v1_installed; then
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. $RED卸载 NEZHA V1 探针$NC                          $CYAN║$NC"
+            echo -e "$CYAN║$NC   xz1. $RED卸载 NEZHA V1 探针$NC                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         else
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         fi
@@ -3686,9 +3688,9 @@ nezha_agent_menu() {
         read -p "请输入选项: " choice
         case $choice in
         1) install_nezha_agent_v0 ;;
-        2) uninstall_nezha_agent_v0 ;;
-        3) install_nezha_agent_phoenix ;;
-        4) uninstall_nezha_agent_phoenix ;;
+        xz0) uninstall_nezha_agent_v0 ;;
+        2) install_nezha_agent_phoenix ;;
+        xz1) uninstall_nezha_agent_phoenix ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
