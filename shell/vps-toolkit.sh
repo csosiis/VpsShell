@@ -5894,7 +5894,7 @@ main_menu() {
         5) docker_manage_menu ;;
         6) docker_apps_menu ;;
         7) certificate_management_menu ;;
-        7) certificate_management_menu ;;
+        8) system_health_check ;;
         9) system_health_check ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
