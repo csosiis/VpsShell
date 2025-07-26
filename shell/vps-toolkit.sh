@@ -5063,54 +5063,6 @@ ui_panels_menu() {
         esac
     done
 }
-
-# =================================================
-#           证书 & 反代 (certificate_management_menu)
-# =================================================
-
-list_certificates() {
-    if ! command -v certbot &>/dev/null; then
-        log_error "Certbot 未安装，无法管理证书。"
-        return 1
-    fi
-
-    log_info "正在获取所有证书列表..."
-    local certs_output
-    certs_output=$(certbot certificates 2>/dev/null)
-
-    if [[ -z "$certs_output" || ! "$certs_output" =~ "Found the following certs:" ]]; then
-        log_warn "未找到任何由 Certbot 管理的证书。"
-        return 2
-    fi
-
-    echo "$certs_output" | awk '
-        /Certificate Name:/ {
-            cert_name = $3
-        }
-        /Domains:/ {
-            domains = $2
-            for (i=3; i<=NF; i++) domains = domains " " $i
-        }
-        /Expiry Date:/ {
-            expiry_date = $3 " " $4 " " $5
-            gsub(/\(.*\)/, "", expiry_date)
-            gsub(/^[ \t]+|[ \t]+$/, "", expiry_date)
-
-            status = ""
-            if (index($0, "VALID")) {
-                status = "\033[0;32m(VALID)\033[0m"
-            } else if (index($0, "EXPIRED")) {
-                status = "\033[0;31m(EXPIRED)\033[0m"
-            }
-
-            printf "\n  - 证书名称: \033[1;37m%s\033[0m\n", cert_name
-            printf "    域名: \033[0;33m%s\033[0m\n", domains
-            printf "    到期时间: %s %s\n", expiry_date, status
-        }
-    '
-    echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
-    return 0
-}
 # =================================================
 #           证书 & 反代 (V2.0 增强版)
 #
