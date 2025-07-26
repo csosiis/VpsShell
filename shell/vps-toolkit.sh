@@ -2737,7 +2737,7 @@ push_to_sub_store() {
     fi
     press_any_key
 }
-# (新增) 智能获取 Nginx 的 Web 根目录
+# (V5辅助函数) 智能获取 Nginx 的 Web 根目录
 _get_nginx_web_root() {
     if [ -d "/var/www/html" ]; then
         echo "/var/www/html"
@@ -2745,10 +2745,31 @@ _get_nginx_web_root() {
         echo "/usr/share/nginx/html"
     else
         log_warn "无法检测到标准的 Nginx Web 根目录，将默认使用 /var/www/html"
+        mkdir -p /var/www/html
         echo "/var/www/html"
     fi
 }
-# (V4 - 最终版, 根据用户要求强制使用IP地址，最直接可靠)
+
+# (V5辅助函数) 智能获取 Nginx 的运行用户
+_get_nginx_user() {
+    # 尝试从 Nginx 主配置文件中解析 user 指令
+    if [ -f /etc/nginx/nginx.conf ]; then
+        # grep 查找以 'user' 开头（可能前面有空格）的行，排除注释行
+        # awk 提取最后一个字段（用户名），然后 sed 去掉分号
+        local user=$(grep -E '^\s*user\s+' /etc/nginx/nginx.conf | grep -v '#' | awk '{print $NF}' | sed 's/;//')
+        if [ -n "$user" ]; then
+            echo "$user"
+            return
+        fi
+    fi
+    # 如果找不到，则根据系统类型猜测
+    if [ "$PKG_MANAGER" == "apt" ]; then
+        echo "www-data" # Debian/Ubuntu 默认用户
+    else
+        echo "nginx"    # CentOS/RHEL 默认用户
+    fi
+}
+# (V5 - 最终修复版，处理文件所有权和SELinux)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -2762,7 +2783,7 @@ generate_subscription_link() {
         return
     fi
 
-    # --- **核心修改**：不再询问或检测域名，直接获取公网IP ---
+    # 直接获取公网IP
     local host
     host=$(get_public_ip v4)
     if [ -z "$host" ]; then
@@ -2770,55 +2791,42 @@ generate_subscription_link() {
         press_any_key
         return
     fi
-    log_info "将使用服务器公网 IP: $host 生成链接。"
 
-    # 在一个安全的临时目录中创建订阅文件
-    local temp_sub_dir="/tmp/vps-toolkit-subs"
-    mkdir -p "$temp_sub_dir"
+    # 1. 在正确的 Web 根目录中创建文件
+    local web_root
+    web_root=$(_get_nginx_web_root)
     local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
-    local sub_filepath="$temp_sub_dir/$sub_filename"
+    local sub_filepath="${web_root}/${sub_filename}"
 
     register_temp_file "$sub_filepath"
-    register_temp_file "$temp_sub_dir"
 
-    # 将节点信息 Base64 编码后写入文件
+    # 2. 写入内容
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str=$(printf "%s\n" "${node_lines[@]}")
     local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
+
+    # --- **核心修复步骤** ---
+    # 3. 修正文件所有权
+    local nginx_user
+    nginx_user=$(_get_nginx_user)
+    log_info "修正文件权限，所有者 -> ${nginx_user}"
+    chown "${nginx_user}:${nginx_user}" "$sub_filepath"
     chmod 644 "$sub_filepath"
 
-    # 动态创建 Nginx 配置文件
-    local nginx_temp_conf="/etc/nginx/conf.d/vps-toolkit-temp-subs.conf"
-    local secret_path_segment="vps-subs-temp"
-
-    log_info "正在创建临时的 Nginx 配置文件..."
-    cat > "$nginx_temp_conf" <<EOF
-# 由 vps-toolkit 自动生成，退出后会自动删除
-server {
-    listen 80;
-    listen [::]:80;
-
-    location /${secret_path_segment}/ {
-        alias ${temp_sub_dir}/;
-    }
-}
-EOF
-    register_temp_file "$nginx_temp_conf"
-
-    # 测试并重载 Nginx
-    if ! nginx -t; then
-        log_error "Nginx 配置测试失败！无法生成链接。请检查 Nginx 主配置。"
-        rm -f "$nginx_temp_conf"
-        press_any_key
-        return
+    # 4. 修正 SELinux 安全上下文
+    if command -v sestatus &>/dev/null && sestatus | grep -q "SELinux status:\s*enabled"; then
+        log_info "检测到 SELinux 已启用，正在设置文件安全上下文..."
+        if command -v restorecon &>/dev/null; then
+            restorecon "$sub_filepath"
+        else
+            log_warn "未找到 restorecon 命令，无法自动设置 SELinux 上下文。"
+        fi
     fi
-    systemctl reload nginx
-    log_info "Nginx 配置已成功加载。"
+    # --- **修复结束** ---
 
-    # --- **核心修改**：固定使用 http 和 80 端口 ---
-    # 大多数情况下，Nginx的http server块会监听80端口，因此可以省略
-    local sub_url="http://${host}/${secret_path_segment}/${sub_filename}"
+    # 5. 生成最终链接 (此方法无需重载 Nginx)
+    local sub_url="http://${host}/${sub_filename}"
 
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
