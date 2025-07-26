@@ -2515,7 +2515,7 @@ view_node_info() {
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
 
-        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}  5. ${BLUE}生成TUIC客户端配置(开发中)${NC}\n\n0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接${NC}  5. 生成TUIC客户端配置(开发中)    0. 返回上一级菜单\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -2749,10 +2749,11 @@ _get_nginx_web_root() {
     fi
 }
 # (优化后)
+# (V3 - 重写版, 采用动态Nginx Location配置, 更健壮可靠)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
-        log_error "Nginx 未安装，无法生成可访问的订阅链接。"
+        log_error "Nginx 未安装，无法执行此功能。"
         press_any_key
         return
     fi
@@ -2763,48 +2764,79 @@ generate_subscription_link() {
     fi
 
     local host=""
-    # 尝试从 Sub-Store 的反代配置中获取域名
+    # 优先使用 Sub-Store 配置的域名
     if is_substore_installed && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
         host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-        log_info "检测到 Sub-Store 已配置域名，将使用: $host"
     fi
 
-    # 如果没有域名，则回退到使用公网IP
+    # 如果没有域名，则让用户输入或使用IP
     if [ -z "$host" ]; then
-        host=$(get_public_ip v4)
-        log_info "未检测到配置的域名，将使用公网 IP: $host"
+        read -p "请输入您已解析到本机的域名 (留空则使用IP): " host
+        if [ -z "$host" ]; then
+            host=$(get_public_ip v4)
+            log_info "未输入域名，将使用公网 IP: $host"
+        fi
+    else
+        log_info "将自动使用检测到的域名: $host"
     fi
+
     if [ -z "$host" ]; then
         log_error "无法确定主机地址 (域名或IP)，操作中止。"
         press_any_key
         return
     fi
 
-    # --- **核心修正**：调用新函数自动获取正确的 Web 根目录 ---
-    local sub_dir
-    sub_dir=$(_get_nginx_web_root)
-    mkdir -p "$sub_dir"
+    # 1. 在一个安全的临时目录中创建订阅文件
+    local temp_sub_dir="/tmp/vps-toolkit-subs"
+    mkdir -p "$temp_sub_dir"
+    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filepath="$temp_sub_dir/$sub_filename"
 
-    local sub_filename
-    sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
-    local sub_filepath="$sub_dir/$sub_filename"
-
+    # 将订阅文件注册到退出清理机制
     register_temp_file "$sub_filepath"
+    # 同时将整个临时目录注册，确保万无一失
+    register_temp_file "$temp_sub_dir"
 
+
+    # 2. 将节点信息 Base64 编码后写入文件
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
-    local all_links_str
-    all_links_str=$(printf "%s\n" "${node_lines[@]}")
-    local base64_content
-    base64_content=$(echo -n "$all_links_str" | base64 -w0)
+    local all_links_str=$(printf "%s\n" "${node_lines[@]}")
+    local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
+    # 确保 Nginx 用户有权限读取
+    chmod 644 "$sub_filepath"
 
-    # --- **核心修正**：智能判断使用 https 还是 http ---
+    # 3. 动态创建 Nginx 配置文件
+    local nginx_temp_conf="/etc/nginx/conf.d/vps-toolkit-temp-subs.conf"
+    local secret_path_segment="vps-subs-temp" # 定义一个URL路径片段
+
+    log_info "正在创建临时的 Nginx 配置文件..."
+    cat > "$nginx_temp_conf" <<EOF
+# 由 vps-toolkit 自动生成，退出后会自动删除
+location /${secret_path_segment}/ {
+    alias ${temp_sub_dir}/;
+}
+EOF
+    # 将 Nginx 配置文件也注册到退出清理机制
+    register_temp_file "$nginx_temp_conf"
+
+    # 4. 测试并重载 Nginx
+    if ! nginx -t; then
+        log_error "Nginx 配置测试失败！无法生成链接。请检查 Nginx 主配置。"
+        # 手动清理掉刚刚创建的conf文件，因为它注册了但还没生效
+        rm -f "$nginx_temp_conf"
+        press_any_key
+        return
+    fi
+    systemctl reload nginx
+    log_info "Nginx 配置已成功加载。"
+
+    # 5. 生成最终链接
     local protocol="http://"
-    # 通过简单的正则判断 host 是否为 IP 地址
     if ! [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         protocol="https://"
     fi
-    local sub_url="${protocol}${host}/${sub_filename}"
+    local sub_url="${protocol}${host}/${secret_path_segment}/${sub_filename}"
 
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
@@ -2814,7 +2846,6 @@ generate_subscription_link() {
     echo -e "$CYAN--------------------------------------------------------------$NC"
     press_any_key
 }
-
 # (已完善)
 generate_tuic_client_config() {
     ensure_dependencies "jq"
