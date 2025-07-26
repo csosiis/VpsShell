@@ -3767,6 +3767,30 @@ nezha_dashboard_menu() {
         esac
     done
 }
+nezha_main_menu() {
+    while true; do
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   哪吒监控管理                   $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 探针 (Agent) 管理                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 面板 (Dashboard) 管理                     $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 # =================================================
 #           新增：Docker 通用管理 (V2.0 增强版)
 # =================================================
@@ -3890,7 +3914,36 @@ docker_prune_system() {
     fi
     press_any_key
 }
+uninstall_portainer() {
+    log_info "正在准备卸载 Portainer..."
+    local was_uninstalled=false
 
+    if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+        log_info "检测到 Portainer 容器，正在停止并删除..."
+        docker stop portainer >/dev/null
+        docker rm portainer >/dev/null
+        was_uninstalled=true
+    else
+        log_info "未找到名为 'portainer' 的容器。"
+    fi
+
+    if docker volume ls -q | grep -q "^portainer_data$"; then
+        log_warn "检测到 Portainer 的数据卷 (portainer_data)。"
+        read -p "是否要删除此数据卷 (这将清除所有 Portainer 设置)？(y/N): " confirm_delete_volume
+        if [[ "$confirm_delete_volume" =~ ^[Yy]$ ]]; then
+            docker volume rm portainer_data
+            log_info "数据卷 'portainer_data' 已删除。"
+        fi
+        was_uninstalled=true
+    fi
+
+    if $was_uninstalled; then
+        log_info "✅ Portainer 已成功卸载。"
+    else
+        log_warn "未发现任何需要卸载的 Portainer 组件。"
+    fi
+    press_any_key
+}
 install_portainer() {
     if ! _install_docker_and_compose; then press_any_key; return; fi
     clear
@@ -5542,7 +5595,7 @@ certificate_management_menu() {
         case $choice in
         1) setup_auto_reverse_proxy "" "" ;; # 传递空参数以启动完整交互流程
         2) apply_ssl_certificate_only_workflow ;;
-        3) clear; list_certificates; press_any_key ;;
+        3) clear; certbot certificates; press_any_key ;;
         4) renew_certificates ;;
         5) delete_certificate_and_proxy ;;
         0) break ;;
