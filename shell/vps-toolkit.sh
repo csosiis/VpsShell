@@ -2515,7 +2515,7 @@ view_node_info() {
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
 
-        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接${NC}  5. 生成TUIC客户端配置(开发中)    0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接${NC}  5. 生成TUIC客户端配置    0. ${GREEN}返回上一级菜单${NC}\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -2769,7 +2769,7 @@ _get_nginx_user() {
         echo "nginx"    # CentOS/RHEL 默认用户
     fi
 }
-# (V6 - 最终决定版, 主动询问开放端口，动态创建监听)
+# (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -2783,11 +2783,11 @@ generate_subscription_link() {
         return
     fi
 
-    # --- **核心修改 1: 主动询问一个已开放的端口** ---
+    # 1. 主动询问一个您确定已在防火墙/安全组中开放的端口
     local listen_port
     while true; do
         echo ""
-        read -p "请输入一个您确定已在防火墙/安全组中开放的端口 (例如 8080): " listen_port
+        read -p "请输入一个您确定已在防火墙/安全组中开放的TCP端口: " listen_port
         if ! [[ "$listen_port" =~ ^[0-9]+$ ]] || [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
             log_error "无效的端口号。请输入 1-65535 之间的数字。"
         elif ss -tln | grep -q -E "(:|:::)$listen_port\b"; then
@@ -2797,7 +2797,6 @@ generate_subscription_link() {
         fi
     done
 
-    # 直接获取公网IP
     local host
     host=$(get_public_ip v4)
     if [ -z "$host" ]; then
@@ -2806,8 +2805,8 @@ generate_subscription_link() {
         return
     fi
 
-    # 在一个安全的临时目录中创建订阅文件
-    local temp_sub_dir="/tmp/vps-toolkit-subs"
+    # 2. 在 Nginx 自己的工作目录中创建临时文件，避免一切权限问题
+    local temp_sub_dir="/var/lib/nginx/vps-toolkit-subs"
     mkdir -p "$temp_sub_dir"
     local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     local sub_filepath="$temp_sub_dir/$sub_filename"
@@ -2815,28 +2814,36 @@ generate_subscription_link() {
     register_temp_file "$sub_filepath"
     register_temp_file "$temp_sub_dir"
 
-    # 写入内容
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str=$(printf "%s\n" "${node_lines[@]}")
     local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
+
+    # 确保 Nginx 用户可以读取
+    if command -v chown &>/dev/null; then
+        local nginx_user="www-data"
+        if [ "$PKG_MANAGER" != "apt" ]; then
+           nginx_user="nginx"
+        fi
+        chown -R ${nginx_user}:${nginx_user} "$temp_sub_dir"
+    fi
     chmod 644 "$sub_filepath"
 
-    # --- **核心修改 2: 动态创建只监听指定端口的 Nginx Server 配置** ---
-    local nginx_temp_conf="/etc/nginx/conf.d/vps-toolkit-temp-subs.conf"
+
+    # 3. 创建一个极其精简、无冲突的 Nginx 临时配置
+    local nginx_temp_conf="/etc/nginx/conf.d/000-vps-toolkit-temp.conf"
 
     log_info "正在创建 Nginx 临时配置以监听端口 ${listen_port}..."
     cat > "$nginx_temp_conf" <<EOF
 # 由 vps-toolkit 自动生成，退出后会自动删除
 server {
-    listen ${listen_port};
-    listen [::]:${listen_port};
-    server_name _;
+    listen ${listen_port} default_server;
+    listen [::]:${listen_port} default_server;
 
-    root ${temp_sub_dir};
-
-    location / {
-        try_files \$uri =404;
+    # 直接将根路径映射到我们创建的临时文件上
+    location /${sub_filename} {
+        alias ${sub_filepath};
+        default_type text/plain;
     }
 }
 EOF
@@ -2844,7 +2851,7 @@ EOF
 
     # 测试并重载 Nginx
     if ! nginx -t; then
-        log_error "Nginx 配置测试失败！请检查 Nginx 主配置。"
+        log_error "Nginx 配置测试失败！您的 Nginx 主配置可能存在问题。"
         rm -f "$nginx_temp_conf"
         press_any_key
         return
@@ -2852,7 +2859,7 @@ EOF
     systemctl reload nginx
     log_info "Nginx 配置已成功加载。"
 
-    # --- **核心修改 3: 生成包含指定端口的链接** ---
+    # 生成最终链接
     local sub_url="http://${host}:${listen_port}/${sub_filename}"
 
     clear
