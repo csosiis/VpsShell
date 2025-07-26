@@ -2748,8 +2748,7 @@ _get_nginx_web_root() {
         echo "/var/www/html"
     fi
 }
-# (优化后)
-# (V3 - 重写版, 采用动态Nginx Location配置, 更健壮可靠)
+# (V4 - 最终版, 根据用户要求强制使用IP地址，最直接可靠)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -2763,67 +2762,53 @@ generate_subscription_link() {
         return
     fi
 
-    local host=""
-    # 优先使用 Sub-Store 配置的域名
-    if is_substore_installed && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-        host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    fi
-
-    # 如果没有域名，则让用户输入或使用IP
+    # --- **核心修改**：不再询问或检测域名，直接获取公网IP ---
+    local host
+    host=$(get_public_ip v4)
     if [ -z "$host" ]; then
-        read -p "请输入您已解析到本机的域名 (留空则使用IP): " host
-        if [ -z "$host" ]; then
-            host=$(get_public_ip v4)
-            log_info "未输入域名，将使用公网 IP: $host"
-        fi
-    else
-        log_info "将自动使用检测到的域名: $host"
-    fi
-
-    if [ -z "$host" ]; then
-        log_error "无法确定主机地址 (域名或IP)，操作中止。"
+        log_error "无法获取服务器的公网IPv4地址，操作中止。"
         press_any_key
         return
     fi
+    log_info "将使用服务器公网 IP: $host 生成链接。"
 
-    # 1. 在一个安全的临时目录中创建订阅文件
+    # 在一个安全的临时目录中创建订阅文件
     local temp_sub_dir="/tmp/vps-toolkit-subs"
     mkdir -p "$temp_sub_dir"
     local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     local sub_filepath="$temp_sub_dir/$sub_filename"
 
-    # 将订阅文件注册到退出清理机制
     register_temp_file "$sub_filepath"
-    # 同时将整个临时目录注册，确保万无一失
     register_temp_file "$temp_sub_dir"
 
-
-    # 2. 将节点信息 Base64 编码后写入文件
+    # 将节点信息 Base64 编码后写入文件
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str=$(printf "%s\n" "${node_lines[@]}")
     local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
-    # 确保 Nginx 用户有权限读取
     chmod 644 "$sub_filepath"
 
-    # 3. 动态创建 Nginx 配置文件
+    # 动态创建 Nginx 配置文件
     local nginx_temp_conf="/etc/nginx/conf.d/vps-toolkit-temp-subs.conf"
-    local secret_path_segment="vps-subs-temp" # 定义一个URL路径片段
+    local secret_path_segment="vps-subs-temp"
 
     log_info "正在创建临时的 Nginx 配置文件..."
     cat > "$nginx_temp_conf" <<EOF
 # 由 vps-toolkit 自动生成，退出后会自动删除
-location /${secret_path_segment}/ {
-    alias ${temp_sub_dir}/;
+server {
+    listen 80;
+    listen [::]:80;
+
+    location /${secret_path_segment}/ {
+        alias ${temp_sub_dir}/;
+    }
 }
 EOF
-    # 将 Nginx 配置文件也注册到退出清理机制
     register_temp_file "$nginx_temp_conf"
 
-    # 4. 测试并重载 Nginx
+    # 测试并重载 Nginx
     if ! nginx -t; then
         log_error "Nginx 配置测试失败！无法生成链接。请检查 Nginx 主配置。"
-        # 手动清理掉刚刚创建的conf文件，因为它注册了但还没生效
         rm -f "$nginx_temp_conf"
         press_any_key
         return
@@ -2831,12 +2816,9 @@ EOF
     systemctl reload nginx
     log_info "Nginx 配置已成功加载。"
 
-    # 5. 生成最终链接
-    local protocol="http://"
-    if ! [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        protocol="https://"
-    fi
-    local sub_url="${protocol}${host}/${secret_path_segment}/${sub_filename}"
+    # --- **核心修改**：固定使用 http 和 80 端口 ---
+    # 大多数情况下，Nginx的http server块会监听80端口，因此可以省略
+    local sub_url="http://${host}/${secret_path_segment}/${sub_filename}"
 
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
