@@ -241,8 +241,221 @@ ensure_dependencies() {
     fi
     return 0
 }
+# =================================================
+#           新增：系统健康巡检辅助函数
+# =================================================
+_check_service_status() {
+    local service_name="$1"
+    local display_name="$2"
+    local status_text
+    if systemctl is-active --quiet "$service_name"; then
+        status_text="${GREEN}● 运行中${NC}"
+    else
+        # 如果服务文件存在但未运行，则为不活动；如果文件不存在，则为未安装
+        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text="${RED}● 不活动${NC}"
+        else
+            status_text="${YELLOW}○ 未安装${NC}"
+        fi
+    fi
+    # 使用printf进行格式化对齐
+    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "$display_name" "$status_text"
+}
 
+# =================================================
+#           新增：系统健康巡检主函数
+# =================================================
+system_health_check() {
+    clear
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    echo -e "$CYAN║$WHITE                   系统健康巡检报告                 $CYAN║$NC"
+    echo -e "$CYAN╟─────────────── $WHITE核心服务状态$CYAN ───────────────────╢$NC"
+    _check_service_status "docker" "Docker 服务"
+    _check_service_status "nginx" "Nginx 服务"
+    _check_service_status "caddy" "Caddy 服务"
+    _check_service_status "sing-box" "Sing-Box 服务"
+    _check_service_status "fail2ban" "Fail2Ban 服务"
+    echo -e "$CYAN╟─────────────── $WHITE系统资源使用$CYAN ───────────────────╢$NC"
 
+    # 磁盘空间
+    local disk_usage_percent
+    disk_usage_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+    local disk_status_color
+    if [ "$disk_usage_percent" -gt 85 ]; then
+        disk_status_color="$RED"
+    elif [ "$disk_usage_percent" -gt 65 ]; then
+        disk_status_color="$YELLOW"
+    else
+        disk_status_color="$GREEN"
+    fi
+    local disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
+    printf "$CYAN║$NC  %-16s: ${disk_status_color}%-29s${NC} $CYAN║$NC\n" "根目录磁盘" "$disk_info"
+
+    # 内存使用
+    local mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
+    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "内存使用" "$mem_info"
+
+    # Docker 容器状态
+    if command -v docker &>/dev/null; then
+        echo -e "$CYAN╟─────────────── $WHITEDocker 容器概览$CYAN ──────────────────╢$NC"
+        local total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
+        local running_containers=$(docker ps --format '{{.Names}}' | wc -l)
+        local restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
+
+        printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "总容器数" "$total_containers"
+        printf "$CYAN║$NC  %-16s: ${GREEN}%-29s${NC} $CYAN║$NC\n" "运行中" "$running_containers"
+        if [ -n "$restarting_containers" ]; then
+             printf "$CYAN║$NC  %-16s: ${RED}%-29s${NC} $CYAN║$NC\n" "异常(重启中)" "$restarting_containers"
+        fi
+    fi
+
+    # SSL 证书状态
+    if command -v certbot &>/dev/null; then
+        echo -e "$CYAN╟─────────────── $WHITESSL 证书有效期$CYAN ──────────────────╢$NC"
+        local cert_info
+        cert_info=$(certbot certificates 2>/dev/null)
+        if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
+            printf "$CYAN║$NC  %-46s $CYAN║$NC\n" "未发现任何 Certbot 证书"
+        else
+            # 解析并显示证书信息
+            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Domains:/ {domains=$0; sub(/Domains: /,"",domains)} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(.*\)/,""); printf "%-20s -> %s\n", name, expiry}' | while read -r line; do
+                printf "$CYAN║$NC  ${YELLOW}%-46s${NC} $CYAN║$NC\n" "$line"
+            done
+        fi
+    fi
+
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    press_any_key
+}
+# =================================================
+#           新增：防火墙助手
+# =================================================
+firewall_helper_menu() {
+    local FW_COMMAND=""
+    local FW_TYPE=""
+
+    # 优先检测 UFW
+    if command -v ufw &>/dev/null; then
+        FW_COMMAND="ufw"
+        FW_TYPE="UFW"
+    elif command -v firewall-cmd &>/dev/null; then
+        FW_COMMAND="firewall-cmd"
+        FW_TYPE="FirewallD"
+    else
+        log_error "未检测到 UFW 或 FirewallD，无法使用此功能。"
+        press_any_key
+        return
+    fi
+
+    log_info "检测到防火墙类型: $FW_TYPE"
+
+    while true; do
+        clear
+        local status_text
+        if [ "$FW_TYPE" == "UFW" ]; then
+            # UFW状态输出比较长，这里简化显示
+            if ufw status | grep -q 'Status: active'; then
+                status_text="${GREEN}● 活动 (Active)${NC}"
+            else
+                status_text="${RED}● 不活动 (Inactive)${NC}"
+            fi
+        else # FirewallD
+            if systemctl is-active --quiet firewalld; then
+                status_text="${GREEN}● 活动 (Active)${NC}"
+            else
+                status_text="${RED}● 不活动 (Inactive)${NC}"
+            fi
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 防火墙助手 ($FW_TYPE)               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前状态: $status_text                              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 查看当前所有规则                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}开放一个端口 (Allow)${NC}                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}关闭一个端口 (Delete/Remove)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 开启防火墙                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 关闭防火墙                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            clear
+            log_info "当前防火墙规则:"
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw status numbered
+            else
+                firewall-cmd --list-all
+            fi
+            press_any_key
+            ;;
+        2)
+            read -p "请输入要开放的端口号: " port
+            read -p "请输入协议 [默认: tcp]: " proto
+            proto=${proto:-"tcp"}
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw allow "$port/$proto"
+            else
+                firewall-cmd --permanent --add-port="$port/$proto"
+                firewall-cmd --reload
+            fi
+            log_info "✅ 规则添加完成 (如果需要)。"
+            press_any_key
+            ;;
+        3)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                log_info "请参考下面的列表，输入要删除的规则【编号】。"
+                ufw status numbered
+                read -p "请输入要删除的规则编号: " rule_num
+                if [[ "$rule_num" =~ ^[0-9]+$ ]]; then
+                    # UFW需要二次确认
+                    yes | ufw delete "$rule_num"
+                else
+                    log_error "无效的编号。"
+                fi
+            else # FirewallD
+                read -p "请输入要关闭的端口号: " port
+                read -p "请输入协议 [默认: tcp]: " proto
+                proto=${proto:-"tcp"}
+                firewall-cmd --permanent --remove-port="$port/$proto"
+                firewall-cmd --reload
+            fi
+            log_info "✅ 规则移除完成 (如果需要)。"
+            press_any_key
+            ;;
+        4)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                yes | ufw enable
+            else
+                systemctl enable firewalld
+                systemctl start firewalld
+            fi
+            log_info "✅ 防火墙已开启。"; sleep 1
+            ;;
+        5)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw disable
+            else
+                systemctl stop firewalld
+                systemctl disable firewalld
+            fi
+            log_info "✅ 防火墙已关闭。"; sleep 1
+            ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 # =================================================
 #                系统管理 (sys_manage_menu)
 # =================================================
@@ -277,7 +490,9 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 (增强)${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  12. ${CYAN}防火墙助手 (UFW/FirewallD)${NC}                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -296,6 +511,7 @@ sys_manage_menu() {
         9) manage_bbr ;;
         10) install_warp ;;
         11) utility_tools_menu ;;
+        12) firewall_helper_menu ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -5653,11 +5869,13 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. Docker 通用管理                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   8. ${GREEN}系统健康巡检 (推荐)${NC}                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -5676,7 +5894,8 @@ main_menu() {
         5) docker_manage_menu ;;
         6) docker_apps_menu ;;
         7) certificate_management_menu ;;
-        9) do_update_script ;;
+        7) certificate_management_menu ;;
+        9) system_health_check ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
