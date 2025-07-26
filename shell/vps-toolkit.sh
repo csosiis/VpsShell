@@ -2769,7 +2769,7 @@ _get_nginx_user() {
         echo "nginx"    # CentOS/RHEL 默认用户
     fi
 }
-# (V5 - 最终修复版，处理文件所有权和SELinux)
+# (V6 - 最终决定版, 主动询问开放端口，动态创建监听)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -2783,6 +2783,20 @@ generate_subscription_link() {
         return
     fi
 
+    # --- **核心修改 1: 主动询问一个已开放的端口** ---
+    local listen_port
+    while true; do
+        echo ""
+        read -p "请输入一个您确定已在防火墙/安全组中开放的端口 (例如 8080): " listen_port
+        if ! [[ "$listen_port" =~ ^[0-9]+$ ]] || [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
+            log_error "无效的端口号。请输入 1-65535 之间的数字。"
+        elif ss -tln | grep -q -E "(:|:::)$listen_port\b"; then
+            log_error "端口 $listen_port 已被本机其他服务占用，请更换一个。"
+        else
+            break
+        fi
+    done
+
     # 直接获取公网IP
     local host
     host=$(get_public_ip v4)
@@ -2792,41 +2806,54 @@ generate_subscription_link() {
         return
     fi
 
-    # 1. 在正确的 Web 根目录中创建文件
-    local web_root
-    web_root=$(_get_nginx_web_root)
+    # 在一个安全的临时目录中创建订阅文件
+    local temp_sub_dir="/tmp/vps-toolkit-subs"
+    mkdir -p "$temp_sub_dir"
     local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
-    local sub_filepath="${web_root}/${sub_filename}"
+    local sub_filepath="$temp_sub_dir/$sub_filename"
 
     register_temp_file "$sub_filepath"
+    register_temp_file "$temp_sub_dir"
 
-    # 2. 写入内容
+    # 写入内容
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
     local all_links_str=$(printf "%s\n" "${node_lines[@]}")
     local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
-
-    # --- **核心修复步骤** ---
-    # 3. 修正文件所有权
-    local nginx_user
-    nginx_user=$(_get_nginx_user)
-    log_info "修正文件权限，所有者 -> ${nginx_user}"
-    chown "${nginx_user}:${nginx_user}" "$sub_filepath"
     chmod 644 "$sub_filepath"
 
-    # 4. 修正 SELinux 安全上下文
-    if command -v sestatus &>/dev/null && sestatus | grep -q "SELinux status:\s*enabled"; then
-        log_info "检测到 SELinux 已启用，正在设置文件安全上下文..."
-        if command -v restorecon &>/dev/null; then
-            restorecon "$sub_filepath"
-        else
-            log_warn "未找到 restorecon 命令，无法自动设置 SELinux 上下文。"
-        fi
-    fi
-    # --- **修复结束** ---
+    # --- **核心修改 2: 动态创建只监听指定端口的 Nginx Server 配置** ---
+    local nginx_temp_conf="/etc/nginx/conf.d/vps-toolkit-temp-subs.conf"
 
-    # 5. 生成最终链接 (此方法无需重载 Nginx)
-    local sub_url="http://${host}/${sub_filename}"
+    log_info "正在创建 Nginx 临时配置以监听端口 ${listen_port}..."
+    cat > "$nginx_temp_conf" <<EOF
+# 由 vps-toolkit 自动生成，退出后会自动删除
+server {
+    listen ${listen_port};
+    listen [::]:${listen_port};
+    server_name _;
+
+    root ${temp_sub_dir};
+
+    location / {
+        try_files \$uri =404;
+    }
+}
+EOF
+    register_temp_file "$nginx_temp_conf"
+
+    # 测试并重载 Nginx
+    if ! nginx -t; then
+        log_error "Nginx 配置测试失败！请检查 Nginx 主配置。"
+        rm -f "$nginx_temp_conf"
+        press_any_key
+        return
+    fi
+    systemctl reload nginx
+    log_info "Nginx 配置已成功加载。"
+
+    # --- **核心修改 3: 生成包含指定端口的链接** ---
+    local sub_url="http://${host}:${listen_port}/${sub_filename}"
 
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
