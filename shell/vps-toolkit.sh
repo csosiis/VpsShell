@@ -2070,7 +2070,7 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#      函数：处理 REALITY 特定设置 (最终修复版)
+#      函数：处理 REALITY 特定设置 (V2 - 简化版)
 # =================================================
 _singbox_handle_reality_setup() {
     _ensure_time_accuracy
@@ -2082,80 +2082,61 @@ _singbox_handle_reality_setup() {
     local -n short_id_ref=$5
 
     clear
-    log_info "正在配置 VLESS + REALITY..."
+    log_info "正在自动配置 VLESS + REALITY (简化流程)..."
     if ! command -v sing-box &>/dev/null; then
         log_error "未找到 sing-box 命令，无法生成 REALITY 密钥对。"
         return 1
     fi
 
+    # 1. 自动生成密钥对
     log_info "正在生成 REALITY 密钥对..."
-
-    # --- 【核心修正】采用更健壮的方式捕获密钥对 ---
-    # 1. 将命令的输出保存到一个临时文件中，避免管道操作中变量作用域问题
     local key_pair_output_file="/tmp/reality_keys.txt"
     register_temp_file "$key_pair_output_file"
     sing-box generate reality-keypair > "$key_pair_output_file"
-
-    # 2. 从临时文件中精确地提取公钥和私钥
     private_key_ref=$(grep 'PrivateKey' "$key_pair_output_file" | awk '{print $2}')
     public_key_ref=$(grep 'PublicKey' "$key_pair_output_file" | awk '{print $2}')
-    # --- 修正结束 ---
-
     if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
         log_error "REALITY 密钥对生成或捕获失败！"
         return 1
     fi
-
-    # 增加调试输出，让用户可以确认密钥
     log_info "✅ 密钥对已生成并成功捕获！"
-    echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
-    echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
-    echo ""
 
-    # 选择连接地址 (IP)
+    # 2. 自动选择IP地址 (IPv4 优先)
+    log_info "正在自动选择公网IP地址..."
     local ipv4_addr=$(get_public_ip v4)
     local ipv6_addr=$(get_public_ip v6)
-    if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-        echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
-        read -p "请输入选项 (1-2): " ip_choice
-        if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
-    elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
-    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
-    else log_error "无法获取任何公网 IP 地址！"; return 1; fi
+    if [ -n "$ipv4_addr" ]; then
+        connect_addr_ref="$ipv4_addr"
+        log_info "✅ 已自动选择 IPv4 地址: $ipv4_addr"
+    elif [ -n "$ipv6_addr" ]; then
+        connect_addr_ref="[$ipv6_addr]"
+        log_info "✅ 未找到 IPv4，已自动选择 IPv6 地址: $ipv6_addr"
+    else
+        log_error "无法获取任何公网 IP 地址！"; return 1;
+    fi
 
-    # 获取并验证伪装域名 (serverName)
-    while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.microsoft.com"}
+    # 3. 自动设置并测试伪装域名
+    server_name_ref="www.microsoft.com"
+    log_info "正在测试与默认伪装域名 ($server_name_ref) 的连通性..."
+    if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
+        log_info "✅ 连通性测试通过。"
+    else
+        log_error "无法从本机连接到默认伪装域名 $server_name_ref。"
+        log_warn "请检查服务器网络。如果需要更换域名，请手动修改本脚本的 _singbox_handle_reality_setup 函数。"
+        return 1
+    fi
 
-        log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
-        if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
-            log_info "✅ 连通性测试通过。"
-            break
-        else
-            log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
-            log_warn "请检查域名拼写，或更换一个可从本机访问的域名。"
-            echo ""
-        fi
-    done
+    # 4. 自动生成 short_id
+    short_id_ref=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
+    log_info "✅ 已自动生成 short_id: $short_id_ref"
 
-    # 自动生成并验证 short_id
-    while true; do
-        local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
-        echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
-        read short_id_input
-        short_id_input=${short_id_input:-$random_short_id}
-        if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
-            short_id_ref=${short_id_input}
-            break
-        else
-            log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
-        fi
-    done
-
-    log_info "REALITY 配置信息收集完毕。"
+    echo ""
+    log_info "✅ REALITY 自动化配置信息收集完毕。"
     return 0
 }
+# =================================================
+#      函数：处理证书设置 (V2 - 简化版)
+# =================================================
 _singbox_handle_certificate_setup() {
     local -n cert_path_ref=$1
     local -n key_path_ref=$2
@@ -2184,15 +2165,20 @@ _singbox_handle_certificate_setup() {
         insecure_params_ref["hy2"]="&insecure=1"
         insecure_params_ref["tuic"]="&allow_insecure=1"
 
+        # --- 【核心修正】自动选择IP，不再询问 ---
+        log_info "正在自动选择公网IP地址 (IPv4 优先)..."
         local ipv4_addr=$(get_public_ip v4)
         local ipv6_addr=$(get_public_ip v6)
-        if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-            echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
-            read -p "请输入选项 (1-2): " ip_choice
-            if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
-        elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
-        elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
-        else log_error "无法获取任何公网 IP 地址！"; return 1; fi
+        if [ -n "$ipv4_addr" ]; then
+            connect_addr_ref="$ipv4_addr"
+            log_info "✅ 已自动选择 IPv4 地址: $ipv4_addr"
+        elif [ -n "$ipv6_addr" ]; then
+            connect_addr_ref="[$ipv6_addr]"
+            log_info "✅ 未找到 IPv4，已自动选择 IPv6 地址: $ipv6_addr"
+        else
+            log_error "无法获取任何公网 IP 地址！"; return 1;
+        fi
+        # --- 修正结束 ---
 
         read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
         sni_domain_ref=${sni_input:-"www.microsoft.com"}
