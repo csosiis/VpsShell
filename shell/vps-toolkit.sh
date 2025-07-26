@@ -3500,20 +3500,6 @@ uninstall_nezha_agent_v0() {
     press_any_key
 }
 
-uninstall_nezha_agent_v1() {
-    if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
-    else
-        log_info "正在停止并禁用 nezha-agent-v1 服务..."
-        systemctl stop nezha-agent-v1.service &>/dev/null
-        systemctl disable nezha-agent-v1.service &>/dev/null
-        rm -f /etc/systemd/system/nezha-agent-v1.service
-        rm -rf /opt/nezha/agent-v1
-        systemctl daemon-reload
-        log_info "✅ Nezha V1 探针已成功卸载。"
-    fi
-    press_any_key
-}
 
 uninstall_nezha_agent_phoenix() {
     if ! is_nezha_agent_phoenix_installed; then
@@ -3638,11 +3624,6 @@ install_nezha_agent_v0() {
 
     install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
-
-install_nezha_agent_v1() {
-    _nezha_v1_style_installer "v1" "London V1" "nz.ssong.eu.org:8008" "Pln0X91X18urAudToiwDGVlZhkpUb0Qv"
-}
-
 install_nezha_agent_phoenix() {
     _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.chat.nyc.mn:8008" "XuqVRw4XcOtDDFwz8ipJN9v7HcQZe7M3"
 }
@@ -3680,21 +3661,15 @@ nezha_agent_menu() {
         local phoenix_status
         if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
 
-        echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 $v0_status         $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 $v1_status           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 London V1 探针$NC                         $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. $RED卸载 NEZHA V0 探针$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V1 探针 $phoenix_status          $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V1 探针$NC                        $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. $RED卸载 NEZHA V1 探针$NC                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3706,10 +3681,8 @@ nezha_agent_menu() {
         case $choice in
         1) install_nezha_agent_v0 ;;
         2) uninstall_nezha_agent_v0 ;;
-        3) install_nezha_agent_v1 ;;
-        4) uninstall_nezha_agent_v1 ;;
-        5) install_nezha_agent_phoenix ;;
-        6) uninstall_nezha_agent_phoenix ;;
+        3) install_nezha_agent_phoenix ;;
+        4) uninstall_nezha_agent_phoenix ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
