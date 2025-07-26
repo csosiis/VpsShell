@@ -3076,16 +3076,11 @@ substore_do_install() {
 
     # 步骤4: 创建 .env 和 docker-compose.yml 文件
     log_info "正在创建配置文件..."
-    # 使用 .env 文件管理环境变量，这是 Docker Compose 的最佳实践
     cat > .env <<EOF
 # Sub-Store 环境变量
-# API 密钥，用于后端路径
 API_KEY=${api_key}
-# 前端访问端口
 FRONTEND_PORT=${frontend_port}
-# 后端 API 端口 (容器内部，无需修改)
 BACKEND_PORT=3001
-# CRON 表达式 (默认每天凌晨执行)
 CRON_EXPRESSION="0 0 * * *"
 EOF
 
@@ -3094,31 +3089,24 @@ EOF
     cat > docker-compose.yml <<'EOF'
 services:
   sub-store:
-    # [修复] 已将镜像地址更新为官方推荐的 GitHub Container Registry 地址
-    image: ghcr.io/sub-store-org/sub-store:latest
+    # [修复] 已将镜像地址更新为访问更友好的社区镜像 (Docker Hub)
+    image: jonathanstar/sub-store:latest
     container_name: sub-store
     restart: always
     ports:
-      - "${FRONTEND_PORT}:${FRONTEND_PORT}" # 将 .env 中定义的端口映射到容器
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
     environment:
-      # --- 核心配置 ---
-      # 前端监听的端口 (容器内部)
       - SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}
-      # 后端 API 监听的端口 (容器内部)
       - SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}
-      # 后端 API 的访问路径 (组合成 /${API_KEY})
       - SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}
-      # --- 高级配置 ---
-      # 定时任务表达式
       - SUB_STORE_BACKEND_CRON=${CRON_EXPRESSION}
-      # 后端 API 监听地址 (容器内部，127.0.0.1 更安全)
       - SUB_STORE_BACKEND_API_HOST=127.0.0.1
     volumes:
-      - substore_data:/usr/src/app/data # 使用命名数据卷持久化数据
+      - substore_data:/usr/src/app/data
 
 volumes:
   substore_data:
-    name: substore_data # 显式命名数据卷
+    name: substore_data
 EOF
     # === 修改结束 ===
 
