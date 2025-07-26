@@ -77,7 +77,35 @@ press_any_key() {
     echo ""
     read -n 1 -s -r -p "按任意键返回..."
 }
+# --- 新增：配置文件路径定义 (放在全局常量区域) ---
+CONFIG_FILE="$HOME/.vps_toolkit.conf"
 
+# --- 新增：配置文件加载函数 ---
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        # 如果配置文件存在，则加载其中的变量
+        . "$CONFIG_FILE"
+    fi
+}
+
+# --- 新增：配置文件保存函数 ---
+# 用法: save_config "KEY_NAME" "value_to_save"
+save_config() {
+    local key="$1"
+    local value="$2"
+
+    # 确保配置文件目录存在
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    touch "$CONFIG_FILE"
+
+    # 如果键已存在，则替换旧值；否则，追加新键值对
+    if grep -q -E "^${key}=" "$CONFIG_FILE"; then
+        # 使用sed进行原地替换，-i.bak会创建一个备份
+        sed -i.bak "s|^${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE"
+    else
+        echo "${key}=\"${value}\"" >> "$CONFIG_FILE"
+    fi
+}
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         log_error "此脚本必须以 root 用户身份运行。"
@@ -181,6 +209,29 @@ install_packages() {
             ;;
         yum|dnf)
             "$PKG_MANAGER" install -y "${packages_to_install[@]}"
+            ;;
+        *)
+            log_error "未知的包管理器: $PKG_MANAGER"
+            return 1
+            ;;
+    esac
+}
+# 统一的包卸载函数
+remove_packages() {
+    local packages_to_remove=("$@")
+    if [ ${#packages_to_remove[@]} -eq 0 ]; then
+        return 0
+    fi
+    log_info "正在卸载包: ${packages_to_remove[*]}"
+    case "$PKG_MANAGER" in
+        apt)
+            # 使用 --purge 选项来同时删除配置文件
+            apt-get remove --purge -y "${packages_to_remove[@]}"
+            apt-get autoremove -y
+            ;;
+        yum|dnf)
+            "$PKG_MANAGER" remove -y "${packages_to_remove[@]}"
+            "$PKG_MANAGER" autoremove -y
             ;;
         *)
             log_error "未知的包管理器: $PKG_MANAGER"
@@ -1306,7 +1357,7 @@ EOF
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         # 使用变量动态显示状态和数据
-        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1365,11 +1416,12 @@ EOF
                 log_info "正在停止并卸载 Fail2Ban..."
                 systemctl stop fail2ban
                 systemctl disable fail2ban
-                if [ "$PKG_MANAGER" == "apt" ]; then
-                    apt-get remove --purge -y fail2ban
-                else
-                    "$PKG_MANAGER" remove -y fail2ban
-                fi
+                remove_packages "fail2ban" # <--- 调用新函数
+                rm -rf /etc/fail2ban
+                log_info "✅ Fail2Ban 已卸载。"
+                press_any_key
+                return
+            fi
                 rm -rf /etc/fail2ban
                 log_info "✅ Fail2Ban 已卸载。"
                 press_any_key
@@ -1702,7 +1754,7 @@ backup_directory() {
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
-    local full_backup_path="$backup_dest/$backup_filename"
+    local full_backup_path="${backup_dest}/${backup_filename}"
 
     log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
     if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
@@ -1765,7 +1817,7 @@ file_sharing_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  简易文件分享                   $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                  简易文件分享                    $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 启动临时 Web 服务器 (分享目录)              $CYAN║$NC"
@@ -2304,6 +2356,8 @@ _singbox_build_protocol_config_and_link() {
 # =================================================
 #           函数: 节点添加总指挥 (增强版)
 # =================================================
+
+# 这是完整的、修改后的 singbox_add_node_orchestrator 函数
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
@@ -2346,6 +2400,42 @@ singbox_add_node_orchestrator() {
     echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
     read custom_id
     custom_id=${custom_id:-$operator_name}
+
+    # --- 新增：操作前摘要与最终确认 ---
+    clear
+    log_warn "----------- 配置摘要与最终确认 -----------"
+    echo -e "$WHITE  即将创建以下协议的节点: ${YELLOW}${protocols_to_create[*]}$NC"
+
+    if [ -n "$reality_private_key" ]; then
+        echo -e "$WHITE  连接模式: ${GREEN}VLESS + REALITY${NC}"
+        echo -e "$WHITE    - 连接地址 (IP/Domain): ${YELLOW}$connect_addr${NC}"
+        echo -e "$WHITE    - 监听端口 (TCP): ${YELLOW}${ports['VLESS-REALITY']}${NC}"
+        echo -e "$WHITE    - 伪装域名 (SNI): ${YELLOW}$sni_domain${NC}"
+        echo -e "$WHITE    - Short ID: ${YELLOW}$reality_short_id${NC}"
+    else
+        local cert_type="Let's Encrypt"
+        if [ ${#insecure_params[@]} -gt 0 ]; then
+             cert_type="自签名证书 (IP直连)"
+        fi
+        echo -e "$WHITE  连接模式: ${GREEN}WebSocket + TLS${NC}"
+        echo -e "$WHITE    - 连接地址 (Domain/IP): ${YELLOW}$connect_addr${NC}"
+        echo -e "$WHITE    - 证书类型: ${YELLOW}$cert_type${NC}"
+        echo -e "$WHITE    - 伪装域名 (SNI): ${YELLOW}$sni_domain${NC}"
+        for p in "${protocols_to_create[@]}"; do
+             local protocol_type="TCP"
+             if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then protocol_type="UDP"; fi
+             echo -e "$WHITE    - ${p} 端口 (${protocol_type}): ${YELLOW}${ports[$p]}${NC}"
+        done
+    fi
+    log_warn "-------------------------------------------"
+    read -p "请确认以上信息无误，是否继续执行？(y/N): " final_confirm
+    if [[ ! "$final_confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"
+        press_any_key
+        return
+    fi
+    # --- 摘要结束 ---
+
 
     local success_count=0
     local final_node_link=""
@@ -2408,7 +2498,6 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
-            # --- **核心优化**：增加 REALITY 和其他协议的最终提醒 ---
             if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
                 echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
                 log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
@@ -2447,13 +2536,11 @@ singbox_add_node_orchestrator() {
                 done
                 echo -e "$YELLOW==============================================================$NC"
             fi
-            # --- **优化结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
             log_error "Sing-Box 重启失败！您的新配置可能存在问题。"
             log_error "旧的配置文件已自动恢复。请使用 'journalctl -u sing-box -f' 查看详细日志。"
-            # 回滚操作
             mv "$SINGBOX_CONFIG_FILE.bak" "$SINGBOX_CONFIG_FILE"
             press_any_key
         fi
@@ -2640,7 +2727,7 @@ delete_nodes() {
     done
     press_any_key
 }
-
+# 这是完整的、修改后的 push_to_sub_store 函数
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
     if [ ! -s "$SINGBOX_NODE_LINKS_FILE" ]; then
@@ -2686,19 +2773,19 @@ push_to_sub_store() {
         return
     fi
 
-    local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
+    # --- 核心修改：使用并保存Sub-Store订阅标识 ---
     local sub_store_subs
-    if [ -f "$sub_store_config_file" ]; then
-        sub_store_subs=$(grep "sub_store_subs=" "$sub_store_config_file" | cut -d'=' -f2)
-    fi
-    echo ""
-    read -p "请输入 Sub-Store 的订阅标识 (name) [默认: $sub_store_subs]: " input_subs
-    sub_store_subs=${input_subs:-$sub_store_subs}
+    read -p "请输入 Sub-Store 的订阅标识 (name) [默认: ${SUB_STORE_NAME:-<无>}]: " input_subs
+    sub_store_subs=${input_subs:-$SUB_STORE_NAME}
+
     if [ -z "$sub_store_subs" ]; then
         log_error "Sub-Store 订阅标识不能为空！"
         press_any_key
         return
     fi
+    # 将新的有效值保存到配置文件
+    save_config "SUB_STORE_NAME" "$sub_store_subs"
+    # --- 核心修改结束 ---
 
     echo ""
     local action
@@ -2725,7 +2812,8 @@ push_to_sub_store() {
         -d "$node_json")
 
     if echo "$response" | jq -e '.success' >/dev/null; then
-        echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
+        # 脚本不再需要独立的 sub-store-config.txt 文件了
+        # echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
         local success_message
         success_message=$(echo "$response" | jq -r '.message')
@@ -2769,7 +2857,7 @@ _get_nginx_user() {
         echo "nginx"    # CentOS/RHEL 默认用户
     fi
 }
-# (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
+
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -3033,51 +3121,106 @@ is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
 
+# (这是经过优化的“裸机”安装版本)
 substore_do_install() {
-    ensure_dependencies "curl" "unzip" "git"
+    # 确保核心依赖已安装
+    if ! ensure_dependencies "curl" "unzip" "git"; then
+        log_error "基础依赖安装失败，无法继续。"
+        press_any_key
+        return
+    fi
 
-    log_info "开始执行 Sub-Store 安装流程..."
-    set -e
+    log_info "开始执行 Sub-Store [健壮版] 安装流程..."
 
-    log_info "正在安装 FNM (Node.js 版本管理器)..."
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
+    # [优化1] 使用变量定义 FNM 的安装目录和路径，便于未来修改。
+    local FNM_DIR="/root/.fnm"
+    local FNM_PATH="$FNM_DIR/fnm"
 
-    export PATH="/root/.fnm:$PATH"
-    eval "$(fnm env)"
-    log_info "FNM 安装完成。"
+    # 安装 FNM (Node.js 版本管理器)
+    if [ ! -f "$FNM_PATH" ]; then
+        log_info "正在安装 FNM (Node.js 版本管理器)..."
+        if ! curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell; then
+            log_error "FNM 安装脚本执行失败！"
+            press_any_key
+            return
+        fi
+    else
+        log_info "FNM 已安装，跳过。"
+    fi
 
+    # 设置当前 shell 的 FNM 环境
+    export PATH="$FNM_DIR:$PATH"
+    eval "$($FNM_PATH env)"
+
+    # 使用 FNM 安装并使用指定的 Node.js 版本
     log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
-    fnm install lts/iron
-    fnm use lts/iron
+    if ! $FNM_PATH install lts/iron; then
+        log_error "Node.js (lts/iron) 安装失败！"
+        press_any_key
+        return
+    fi
+    $FNM_PATH use lts/iron
 
-    log_info "正在安装 pnpm..."
-    curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"
-    export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 PNPM 环境准备就绪。"
+    # [优化2] 获取 Node.js 的绝对路径，这是本次优化的核心！
+    local NODE_EXEC_PATH
+    NODE_EXEC_PATH=$(which node)
+    if [ -z "$NODE_EXEC_PATH" ] || [ ! -f "$NODE_EXEC_PATH" ]; then
+        log_error "无法找到由 FNM 安装的 Node.js 可执行文件路径！安装中止。"
+        press_any_key
+        return
+    fi
+    log_info "成功定位到 Node.js 的绝对路径: $NODE_EXEC_PATH"
 
+    # 安装 pnpm
+    if ! command -v pnpm &>/dev/null; then
+        log_info "正在安装 pnpm..."
+        if ! curl -fsSL https://get.pnpm.io/install.sh | sh -; then
+            log_error "pnpm 安装失败！"
+            press_any_key
+            return
+        fi
+        # 设置 pnpm 环境变量
+        export PNPM_HOME="$HOME/.local/share/pnpm"
+        export PATH="$PNPM_HOME:$PATH"
+    fi
+
+    # 下载和设置 Sub-Store 项目文件
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"
     cd "$SUBSTORE_INSTALL_DIR" || exit 1
-    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+
+    # [优化4] 为关键下载步骤增加了错误检查
+    log_info "正在下载后端文件: sub-store.bundle.js"
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js; then
+        log_error "下载 sub-store.bundle.js 失败！请检查网络。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在下载前端文件: dist.zip"
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip; then
+        log_error "下载 dist.zip 失败！请检查网络。"
+        press_any_key
+        return
+    fi
+
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务...\n"
 
+    # 收集用户配置
+    log_info "开始配置系统服务...\n"
     local API_KEY
-    local random_api_key
-    random_api_key=$(generate_random_password)
     read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
+    API_KEY=${user_api_key:-$(generate_random_password)}
     log_info "最终使用的 API 密钥为: ${API_KEY}\n"
+
     local FRONTEND_PORT
     while true; do
         read -p "请输入前端访问端口 [默认: 3000]: " port_input
         FRONTEND_PORT=${port_input:-"3000"}
         if check_port "$FRONTEND_PORT"; then break; fi
     done
+
     local BACKEND_PORT
     while true; do
         echo ""
@@ -3088,11 +3231,14 @@ substore_do_install() {
         fi
     done
 
+    # [优化3] 创建 systemd 服务文件，直接使用 Node.js 的绝对路径
+    log_info "正在创建 systemd 服务文件..."
     cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
@@ -3102,36 +3248,39 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+# 直接使用 Node.js 的绝对路径，不再依赖 FNM
+ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
 Restart=on-failure
 RestartSec=5s
-LimitNOFILE=32767
-ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal
-StandardError=journal
+LimitNOFILE=65535
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # 启动服务
     log_info "正在启动并启用 sub-store 服务..."
     systemctl daemon-reload
     systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
     systemctl start "$SUBSTORE_SERVICE_NAME"
     log_info "正在检测服务状态 (等待 5 秒)..."
     sleep 5
-    set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 服务状态正常 (active)。"
         substore_view_access_link
     else
-        log_error "服务启动失败！请使用日志功能排查。"
+        log_error "服务启动失败！请使用 'journalctl -u $SUBSTORE_SERVICE_NAME -f' 查看日志排查。"
     fi
 
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        substore_setup_reverse_proxy
+    else
+        press_any_key
+    fi
 }
 
 substore_do_uninstall() {
@@ -3421,7 +3570,6 @@ substore_main_menu() {
 # =================================================
 
 is_nezha_agent_v0_installed() { [ -f "/etc/systemd/system/nezha-agent-v0.service" ]; }
-is_nezha_agent_v1_installed() { [ -f "/etc/systemd/system/nezha-agent-v1.service" ]; }
 is_nezha_agent_phoenix_installed() { [ -f "/etc/systemd/system/nezha-agent-phoenix.service" ]; }
 
 uninstall_nezha_agent_v0() {
@@ -3439,20 +3587,6 @@ uninstall_nezha_agent_v0() {
     press_any_key
 }
 
-uninstall_nezha_agent_v1() {
-    if ! is_nezha_agent_v1_installed; then
-        log_warn "Nezha V1 探针未安装，无需卸载。"
-    else
-        log_info "正在停止并禁用 nezha-agent-v1 服务..."
-        systemctl stop nezha-agent-v1.service &>/dev/null
-        systemctl disable nezha-agent-v1.service &>/dev/null
-        rm -f /etc/systemd/system/nezha-agent-v1.service
-        rm -rf /opt/nezha/agent-v1
-        systemctl daemon-reload
-        log_info "✅ Nezha V1 探针已成功卸载。"
-    fi
-    press_any_key
-}
 
 uninstall_nezha_agent_phoenix() {
     if ! is_nezha_agent_phoenix_installed; then
@@ -3577,11 +3711,6 @@ install_nezha_agent_v0() {
 
     install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
-
-install_nezha_agent_v1() {
-    _nezha_v1_style_installer "v1" "London V1" "nz.ssong.eu.org:8008" "Pln0X91X18urAudToiwDGVlZhkpUb0Qv"
-}
-
 install_nezha_agent_phoenix() {
     _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.chat.nyc.mn:8008" "XuqVRw4XcOtDDFwz8ipJN9v7HcQZe7M3"
 }
@@ -3614,27 +3743,27 @@ nezha_agent_menu() {
 
         local v0_status
         if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
-        local v1_status
-        if is_nezha_agent_v1_installed; then v1_status="${GREEN}(已安装)$NC"; else v1_status="${YELLOW}(未安装)$NC"; fi
         local phoenix_status
         if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
 
-        echo -e "$CYAN║$NC   1. 安装/重装 San Jose V0 探针 $v0_status         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. $RED卸载 San Jose V0 探针$NC                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
+        if is_nezha_agent_v0_installed; then
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   xz0. $RED卸载 NEZHA V0 探针$NC                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        fi
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 安装/重装 London V1 探针 $v1_status           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. $RED卸载 London V1 探针$NC                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装/重装 Phoenix V1 探针 $phoenix_status          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. $RED卸载 Phoenix V1 探针$NC                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
+        if is_nezha_agent_phoenix_installed; then
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   xz1. $RED卸载 NEZHA V1 探针$NC                        $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        else
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        fi
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
@@ -3644,11 +3773,9 @@ nezha_agent_menu() {
         read -p "请输入选项: " choice
         case $choice in
         1) install_nezha_agent_v0 ;;
-        2) uninstall_nezha_agent_v0 ;;
-        3) install_nezha_agent_v1 ;;
-        4) uninstall_nezha_agent_v1 ;;
-        5) install_nezha_agent_phoenix ;;
-        6) uninstall_nezha_agent_phoenix ;;
+        xz0) uninstall_nezha_agent_v0 ;;
+        2) install_nezha_agent_phoenix ;;
+        xz1) uninstall_nezha_agent_phoenix ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -5002,94 +5129,151 @@ ui_panels_menu() {
         esac
     done
 }
-
 # =================================================
-#           证书 & 反代 (certificate_management_menu)
+#           证书 & 反代 (V2.0 增强版)
+#
+#   - 新增：域名解析预检查，防止 Certbot 因解析错误而失败。
+#   - 新增：“仅申请证书”功能，满足非反代需求。
+#   - 新增：对 Caddy 反代配置的清理功能，使删除操作更完整。
+#   - 优化：删除证书时使用数字菜单选择，避免手动输入错误。
+#   - 优化：反代设置流程，增加操作前摘要确认，防止误操作。
+#   - 优化：为 Nginx 配置添加 HSTS 头，增强安全性。
+#   - 优化：申请证书时可自定义邮箱。
 # =================================================
 
-list_certificates() {
-    if ! command -v certbot &>/dev/null; then
-        log_error "Certbot 未安装，无法管理证书。"
+# --- (新增) 辅助函数：预检查域名DNS解析 ---
+_precheck_domain_dns() {
+    local domain_to_check="$1"
+    log_info "正在对域名 [$domain_to_check] 进行DNS解析预检查..."
+    ensure_dependencies "dnsutils" # BIND's dig command
+
+    local server_ipv4
+    server_ipv4=$(get_public_ip v4)
+    if [ -z "$server_ipv4" ]; then
+        log_warn "未能获取到本机 IPv4 地址，跳过预检查。"
+        return 0 # 无法检查时，默认通过
+    fi
+
+    local resolved_ips
+    resolved_ips=$(dig +short "$domain_to_check" A)
+    if [ -z "$resolved_ips" ]; then
+        log_error "DNS预检失败：无法解析到任何A记录！"
+        log_warn "请确保您的域名 [$domain_to_check] 已正确设置A记录指向本机IP: $server_ipv4"
         return 1
     fi
 
-    log_info "正在获取所有证书列表..."
-    local certs_output
-    certs_output=$(certbot certificates 2>/dev/null)
+    local match=false
+    for ip in $resolved_ips; do
+        if [ "$ip" == "$server_ipv4" ]; then
+            log_info "✅ DNS预检通过：域名解析正确指向本机IP ($server_ipv4)。"
+            match=true
+            break
+        fi
+    done
 
-    if [[ -z "$certs_output" || ! "$certs_output" =~ "Found the following certs:" ]]; then
-        log_warn "未找到任何由 Certbot 管理的证书。"
-        return 2
+    if ! $match; then
+        log_error "DNS预检失败：域名解析的IP ["$resolved_ips"] 与本机IP [$server_ipv4] 不匹配！"
+        log_warn "请检查您的DNS设置。Certbot将因此无法完成验证。"
+        return 1
     fi
 
-    echo "$certs_output" | awk '
-        /Certificate Name:/ {
-            cert_name = $3
-        }
-        /Domains:/ {
-            domains = $2
-            for (i=3; i<=NF; i++) domains = domains " " $i
-        }
-        /Expiry Date:/ {
-            expiry_date = $3 " " $4 " " $5
-            gsub(/\(.*\)/, "", expiry_date)
-            gsub(/^[ \t]+|[ \t]+$/, "", expiry_date)
-
-            status = ""
-            if (index($0, "VALID")) {
-                status = "\033[0;32m(VALID)\033[0m"
-            } else if (index($0, "EXPIRED")) {
-                status = "\033[0;31m(EXPIRED)\033[0m"
-            }
-
-            printf "\n  - 证书名称: \033[1;37m%s\033[0m\n", cert_name
-            printf "    域名: \033[0;33m%s\033[0m\n", domains
-            printf "    到期时间: %s %s\n", expiry_date, status
-        }
-    '
-    echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
     return 0
 }
 
+
+# --- (新增) 辅助函数：清理Caddyfile中的反代配置 ---
+_cleanup_caddy_proxy_config() {
+    local domain="$1"
+    local caddyfile="/etc/caddy/Caddyfile"
+
+    if [ ! -f "$caddyfile" ]; then
+        return
+    fi
+    log_info "正在清理 Caddyfile 中关于 [$domain] 的配置..."
+    # 使用sed删除从包含域名的行开始，到下一个'}'结束的块
+    # 使用-i.bak创建备份，更安全
+    sed -i.bak "/^$domain {/,/}/d" "$caddyfile"
+    # 同时删除可能存在的自动生成注释
+    sed -i.bak "/# Auto-generated by vps-toolkit for $domain/d" "$caddyfile"
+
+    log_info "正在重载 Caddy 服务..."
+    if systemctl reload caddy; then
+        log_info "✅ Caddy 服务已重载。"
+    else
+        log_warn "Caddy 服务重载失败，请手动检查配置。"
+    fi
+}
+
+# --- (重写) 交互更友好，并支持清理 Caddy 配置 ---
 delete_certificate_and_proxy() {
     clear
     log_info "准备删除证书及其关联配置..."
 
-    if ! list_certificates; then
-        press_any_key
-        return
+    if ! command -v certbot &>/dev/null; then
+        log_error "Certbot 未安装，无法执行操作。"; press_any_key; return;
     fi
 
-    read -p "请输入要删除的证书名称 (Certificate Name): " cert_name
-    if [ -z "$cert_name" ]; then
-        log_error "证书名称不能为空！"
-        press_any_key
-        return
+    # 从 certbot 获取原始数据
+    local certs_data
+    certs_data=$(certbot certificates 2>/dev/null)
+    if [[ ! "$certs_data" =~ "Found the following certs:" ]]; then
+        log_warn "未找到任何由 Certbot 管理的证书。"; press_any_key; return;
     fi
 
-    read -p "警告：这将永久删除证书 '$cert_name' 及其相关的 Nginx 配置文件。此操作不可逆！是否继续？(y/N): " confirm
+    # 构建选择菜单
+    local cert_names=()
+    local display_options=()
+    local i=1
+    while read -r line; do
+        if [[ $line =~ "Certificate Name:" ]]; then
+            local name=$(echo "$line" | awk '{print $3}')
+            local domains=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
+            cert_names+=("$name")
+            display_options+=("$i. $name ($domains)")
+            ((i++))
+        fi
+    done <<< "$certs_data"
+
+    log_info "请选择要删除的证书:\n"
+    for option in "${display_options[@]}"; do
+        echo "  $option"
+    done
+    echo -e "\n  0. 返回\n"
+
+    read -p "请输入选项: " choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 0 ] || [ "$choice" -gt ${#cert_names[@]} ]; then
+        log_error "无效选项！"; press_any_key; return
+    fi
+    if [ "$choice" -eq 0 ]; then return; fi
+
+    local cert_to_delete=${cert_names[$((choice-1))]}
+
+    read -p "警告：这将永久删除证书 '$cert_to_delete' 及其相关的 Web 服务器配置。此操作不可逆！是否继续？(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
+        log_info "操作已取消。"; press_any_key; return
     fi
 
-    log_info "正在执行删除操作..."
-    set -e
+    log_info "正在执行 Certbot 删除操作..."
+    if ! certbot delete --cert-name "$cert_to_delete" --non-interactive; then
+        log_error "Certbot 删除证书失败，但仍将尝试清理Web服务器配置。"
+    fi
 
-    certbot delete --cert-name "$cert_name" --non-interactive
-
-    local nginx_conf="/etc/nginx/sites-available/$cert_name.conf"
+    # 清理 Nginx
+    local nginx_conf="/etc/nginx/sites-available/$cert_to_delete.conf"
     if [ -f "$nginx_conf" ]; then
-        log_warn "检测到残留的 Nginx 配置文件，正在清理..."
-        rm -f "/etc/nginx/sites-enabled/$cert_name.conf"
+        log_warn "检测到关联的 Nginx 配置文件，正在清理..."
+        rm -f "/etc/nginx/sites-enabled/$cert_to_delete.conf"
         rm -f "$nginx_conf"
-        nginx -t && systemctl reload nginx
-        log_info "✅ Nginx 残留配置已清理。"
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx
+            log_info "✅ Nginx 残留配置已清理。"
+        fi
     fi
 
-    set +e
-    log_info "✅ 证书 '$cert_name' 已成功删除。"
+    # 清理 Caddy
+    _cleanup_caddy_proxy_config "$cert_to_delete"
+
+    log_info "✅ 清理流程完成。"
     press_any_key
 }
 
@@ -5108,10 +5292,12 @@ renew_certificates() {
 }
 
 _handle_caddy_cert() {
-    log_error "脚本的自动证书功能与 Caddy 冲突。请手动配置 Caddyfile。"
+    log_error "此自动证书功能旨在与Nginx配合使用。"
+    log_warn "Caddy 会自动管理证书，您只需在 Caddyfile 中配置好域名即可。"
     return 1
 }
 
+# --- (优化) 增加用户输入邮箱的交互 ---
 _handle_nginx_cert() {
     local domain_name="$1"
     log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
@@ -5144,8 +5330,21 @@ EOF
     else
         log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
     fi
+
+    # --- 新增邮箱输入 ---
+    local email
+    echo ""
+    read -p "请输入您的邮箱地址 (用于接收Let's Encrypt续期提醒) [回车则跳过]: " email
+    local email_arg
+    if [ -n "$email" ]; then
+        email_arg="--email $email"
+    else
+        email_arg="--register-unsafely-without-email"
+    fi
+
     log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
-    certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email "temp@$domain_name" --redirect
+    certbot --nginx -d "$domain_name" --non-interactive --agree-tos $email_arg --redirect
+
     if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
         log_info "✅ Nginx 模式证书申请成功！"
         return 0
@@ -5154,38 +5353,70 @@ EOF
         return 1
     fi
 }
-
-apply_ssl_certificate() {
+# 这是完整的、修改后的 _handle_nginx_cert 函数
+_handle_nginx_cert() {
     local domain_name="$1"
-    local cert_dir="/etc/letsencrypt/live/$domain_name"
-    if [ -d "$cert_dir" ]; then
-        log_info "检测到域名 $domain_name 的证书已存在，跳过申请流程。"
-        return 0
+    log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
+    if ! systemctl is-active --quiet nginx; then
+        log_info "Nginx 服务未运行，正在启动..."
+        systemctl start nginx
     fi
-    log_info "证书不存在，开始智能检测环境并为 $domain_name 申请新证书..."
-
-    local certbot_dep="certbot"
-    if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
-        # On RHEL/CentOS, it's better to install from EPEL
-        log_warn "在 RHEL/CentOS 上, Certbot 通常位于 EPEL 仓库。"
-        log_warn "如果安装失败，请先手动安装 epel-release 包。"
-    fi
-    ensure_dependencies "$certbot_dep"
-
-    if command -v caddy &>/dev/null; then
-        _handle_caddy_cert
-    else
-        log_info "未检测到 Caddy，将默认使用 Nginx 模式。"
-        local nginx_certbot_dep="python3-certbot-nginx"
-        if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
-            nginx_certbot_dep="python3-certbot-nginx"
-        fi
-        ensure_dependencies "nginx" "$nginx_certbot_dep"
-        _handle_nginx_cert "$domain_name"
-    fi
-    return $?
+    local NGINX_CONF_PATH="/etc/nginx/sites-available/$domain_name.conf"
+    if [ ! -f "$NGINX_CONF_PATH" ]; then
+        log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."
+        cat <<EOF >"$NGINX_CONF_PATH"
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain_name;
+    root /var/www/html;
+    index index.html index.htm;
 }
+EOF
+        if [ ! -L "/etc/nginx/sites-enabled/$domain_name.conf" ]; then
+            ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
+        fi
+        log_info "正在重载 Nginx 以应用临时配置..."
+        if ! nginx -t; then
+            log_error "Nginx 临时配置测试失败！请检查 Nginx 状态。"
+            rm -f "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/$domain_name.conf"
+            return 1
+        fi
+        systemctl reload nginx
+    else
+        log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
+    fi
 
+    # --- 新增邮箱输入逻辑 (核心修改) ---
+    local email
+    # 如果配置文件中有 CERTBOT_EMAIL，则将其作为默认值
+    read -p "请输入您的邮箱地址 (用于Let's Encrypt提醒) [默认: ${CERTBOT_EMAIL:-<无>}]: " email_input
+    # 如果用户没有输入新值，则使用配置文件中的值；否则使用新值
+    email=${email_input:-$CERTBOT_EMAIL}
+
+    local email_arg
+    if [ -n "$email" ]; then
+        # 如果最终email值非空，则保存到配置文件并用于命令
+        save_config "CERTBOT_EMAIL" "$email"
+        email_arg="--email $email"
+    else
+        # 如果最终email值为空，则不使用邮箱注册
+        email_arg="--register-unsafely-without-email"
+    fi
+    # --- 核心修改结束 ---
+
+    log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
+    certbot --nginx -d "$domain_name" --non-interactive --agree-tos $email_arg --redirect
+
+    if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
+        log_info "✅ Nginx 模式证书申请成功！"
+        return 0
+    else
+        log_error "Nginx 模式证书申请失败！"
+        return 1
+    fi
+}
+# --- (优化) 增加HSTS头 ---
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
@@ -5214,6 +5445,9 @@ server {
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
+
+    # --- (新增) HSTS 头，增强安全性 ---
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     client_max_body_size 512M;
 
@@ -5252,7 +5486,7 @@ _configure_caddy_proxy() {
         log_info "请手动检查您的 Caddyfile 文件。"
         return 0
     fi
-    # 【修正】将这里的非标准空格替换为标准空格
+    # 使用标准空格，确保格式正确
     echo -e "\n# Auto-generated by vps-toolkit for $domain\n$domain {\n    reverse_proxy 127.0.0.1:$port\n}" >>"$caddyfile"
     log_info "正在重载 Caddy 服务..."
     if ! caddy fmt --overwrite "$caddyfile"; then
@@ -5266,12 +5500,16 @@ _configure_caddy_proxy() {
     return 0
 }
 
+# --- (重写) 增加端口检查、操作前确认、Web服务器选择 ---
 setup_auto_reverse_proxy() {
     local domain_input="$1"
     local local_port="$2"
+    local web_server_choice=""
+
     clear
     log_info "欢迎使用通用反向代理设置向导。\n"
 
+    # --- 收集和验证输入 ---
     if [ -z "$domain_input" ]; then
         while true; do
             read -p "请输入您要设置反代的域名: " domain_input
@@ -5280,20 +5518,64 @@ setup_auto_reverse_proxy() {
     else
         log_info "将为预设域名 $domain_input 进行操作。\n"
     fi
+
     if [ -z "$local_port" ]; then
         while true; do
             read -p "请输入要代理到的本地端口 (例如 8080): " local_port
-            if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then log_error "端口号必须是 1-65535 之间的数字。"; else break; fi
+            if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then
+                log_error "端口号必须是 1-65535 之间的数字。"
+            elif ! check_port "$local_port"; then
+                # check_port 失败时会自己打印错误，这里不用重复
+                :
+            else
+                break
+            fi
         done
     else
         log_info "将代理到预设的本地端口: $local_port"
     fi
 
+    # --- (新增) Web服务器选择逻辑 ---
+    local has_nginx=$(command -v nginx &>/dev/null)
+    local has_caddy=$(command -v caddy &>/dev/null)
+
+    if [ -n "$has_nginx" ] && [ -n "$has_caddy" ]; then
+        echo -e "\n检测到您同时安装了 Nginx 和 Caddy，请选择使用哪一个：\n  1. Nginx\n  2. Caddy\n"
+        read -p "请输入选项: " server_choice_num
+        if [ "$server_choice_num" == "2" ]; then web_server_choice="caddy"; else web_server_choice="nginx"; fi
+    elif [ -n "$has_nginx" ]; then
+        web_server_choice="nginx"
+    elif [ -n "$has_caddy" ]; then
+        web_server_choice="caddy"
+    else
+        log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
+        ensure_dependencies "nginx"
+        if command -v nginx &>/dev/null; then web_server_choice="nginx"; else
+            log_error "Nginx 安装失败，无法继续。"
+            press_any_key
+            return 1
+        fi
+    fi
+    log_info "将使用 [$web_server_choice] 进行反向代理配置。"
+
+    # --- (新增) 操作前确认 ---
+    echo ""
+    log_warn "----------- 操作确认 -----------"
+    log_warn "  域名: $domain_input"
+    log_warn "  本地端口: $local_port"
+    log_warn "  Web 服务器: $web_server_choice"
+    log_warn "--------------------------------"
+    read -p "请确认以上信息无误，是否继续执行？(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"; press_any_key; return;
+    fi
+
+    # --- 执行核心逻辑 ---
     local status=1
-    if command -v caddy &>/dev/null; then
+    if [ "$web_server_choice" == "caddy" ]; then
         _configure_caddy_proxy "$domain_input" "$local_port"
         status=$?
-    elif command -v nginx &>/dev/null; then
+    elif [ "$web_server_choice" == "nginx" ]; then
         if ! apply_ssl_certificate "$domain_input"; then
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             status=1
@@ -5301,38 +5583,50 @@ setup_auto_reverse_proxy() {
             _configure_nginx_proxy "$domain_input" "$local_port"
             status=$?
         fi
-    else
-        log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
-        ensure_dependencies "nginx"
-        if command -v nginx &>/dev/null; then
-            setup_auto_reverse_proxy "$domain_input" "$local_port"
-            status=$?
-        else
-            log_error "Nginx 安装失败，无法继续。"
-            status=1
-        fi
     fi
 
+    # 如果是独立调用此函数，则需要暂停
     if [ -z "$1" ]; then
         press_any_key
     fi
     return $status
 }
 
+# --- (新增) 仅申请证书的工作流函数 ---
+apply_ssl_certificate_only_workflow() {
+    clear
+    log_info "欢迎使用独立证书申请工具。\n"
+    local domain
+    while true; do
+        read -p "请输入要申请证书的域名: " domain
+        if [[ -z "$domain" ]]; then log_error "域名不能为空！\n"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。\n"; else break; fi
+    done
+
+    if apply_ssl_certificate "$domain"; then
+        log_info "✅ 证书申请流程执行完毕，已成功为域名 [$domain] 获取证书。"
+    else
+        log_error "证书申请流程失败，请检查之前的错误日志。"
+    fi
+    press_any_key
+}
+
+# --- (重写) 采用新的菜单结构 ---
 certificate_management_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE               证书管理 & 网站反代                $CYAN║$NC"
+        echo -e "$CYAN║$WHITE             证书管理 & 网站反代 (v2.0)           $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 新建网站反代 (自动申请证书)                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 查看/列出所有证书                           $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}仅为域名申请证书${NC}                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 手动续签所有证书                            $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. 查看/列出所有证书                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${RED}删除证书 (并清理反代配置)${NC}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 手动续签所有证书                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${RED}删除证书 (并清理反代配置)${NC}                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -5342,24 +5636,31 @@ certificate_management_menu() {
 
         read -p "请输入选项: " choice
         case $choice in
-        1) setup_auto_reverse_proxy ;;
-        2) clear; list_certificates; press_any_key ;;
-        3) renew_certificates ;;
-        4) delete_certificate_and_proxy ;;
+        1) setup_auto_reverse_proxy "" "" ;; # 传递空参数以启动完整交互流程
+        2) apply_ssl_certificate_only_workflow ;;
+        3) clear; list_certificates; press_any_key ;;
+        4) renew_certificates ;;
+        5) delete_certificate_and_proxy ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
 # =================================================
 #           脚本初始化 & 主入口
 # =================================================
 
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
-    local temp_script="/tmp/vps_tool_new.sh"
-    register_temp_file "$temp_script"
+    # 使用 mktemp 创建一个安全的临时文件
+    local temp_script
+    temp_script=$(mktemp /tmp/vps_tool_new.XXXXXX.sh)
+    if [ $? -ne 0 ]; then
+        log_error "无法创建安全的临时文件，更新中止。"
+        press_any_key
+        return 1
+    fi
+    register_temp_file "$temp_script" # 注册以便自动清理
 
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
         log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
@@ -5407,8 +5708,61 @@ initial_setup_check() {
 main_menu() {
     while true; do
         clear
+
+        # 获取 IP 地址以供显示
+        local ipv4
+        ipv4=$(get_public_ip v4)
+        local ipv6
+        ipv6=$(get_public_ip v6)
+
+        # --- 以下是菜单的绘制 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        # --- IP 显示逻辑 (精确对齐版) ---
+        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
+            # 情况1: IPv4 和 IPv6 都存在，换行显示
+
+            # 处理 IPv4 行
+            local text1="  IPv4: ${ipv4}"
+            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            local len1=${#text1}
+            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
+            local space1
+            space1=$(printf "%${pad1}s")
+            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
+
+            # 处理 IPv6 行
+            local text2="  IPv6: ${ipv6}"
+            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            local len2=${#text2}
+            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
+            local space2
+            space2=$(printf "%${pad2}s")
+            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
+
+        else
+            # 情况2: 只有一个IP或都没有，显示单行
+            local text=""
+            local display=""
+            if [ -n "$ipv4" ]; then
+                text="  IPv4: ${ipv4}"
+                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            elif [ -n "$ipv6" ]; then
+                text="  IPv6: ${ipv6}"
+                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            else
+                text="  IP: 获取失败"
+                display="  ${RED}IP: 获取失败${CYAN}"
+            fi
+            local len=${#text}
+            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
+            local space
+            space=$(printf "%${pad}s")
+            echo -e "$CYAN║${display}${space}$CYAN║$NC"
+        fi
+
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
@@ -5453,5 +5807,6 @@ main_menu() {
 # --- 脚本执行入口 ---
 check_root
 detect_os_and_package_manager
+load_config # <--- 在这里添加加载函数
 initial_setup_check
 main_menu

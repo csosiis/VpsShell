@@ -1306,7 +1306,7 @@ EOF
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         # 使用变量动态显示状态和数据
-        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                   $CYAN║$NC"
+        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                       $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -1765,7 +1765,7 @@ file_sharing_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  简易文件分享                   $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                  简易文件分享                    $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 启动临时 Web 服务器 (分享目录)              $CYAN║$NC"
