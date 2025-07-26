@@ -3434,45 +3434,212 @@ substore_manage_menu() {
         esac
     done
 }
+# (新增) 使用 xream/sub-store 镜像通过 Docker Compose 安装
+substore_do_install_xream_docker() {
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续。"
+        press_any_key
+        return
+    fi
+    clear
+    log_info "开始使用 Docker Compose (xream/sub-store 镜像) 部署 Sub-Store..."
 
+    local project_dir="/root/sub-store-xream"
+    local data_dir="/root/sub-store-data" # 这是 docker-compose.yml 中定义的数据目录
+
+    # 检查是否已存在
+    if [ -f "$project_dir/docker-compose.yml" ]; then
+        log_error "错误：目录 \"$project_dir\" 下已存在一个 Sub-Store (xream版) 实例！"
+        log_warn "如需重新安装，请先从卸载菜单中选择它进行卸载。"
+        press_any_key
+        return
+    fi
+
+    # 创建项目和数据目录
+    mkdir -p "$project_dir"
+    mkdir -p "$data_dir"
+    cd "$project_dir" || exit 1
+
+    # [修改] 增加端口输入和验证环节
+    local local_port
+    while true; do
+        read -p "请输入 Sub-Store 要绑定的本地端口 [默认: 3000]: " port_input
+        local_port=${port_input:-"3000"}
+        # 验证端口是否被 127.0.0.1 上的服务占用
+        if ss -tln | grep -q "127.0.0.1:$local_port\b"; then
+             log_error "端口 $local_port 已被本机其他服务占用，请更换一个。"
+        else
+             break
+        fi
+    done
+    log_info "最终使用的本地端口为: $local_port"
+
+    # 生成随机API密钥
+    local api_key
+    api_key=$(generate_random_password)
+    log_info "已为您随机生成后端加密字符串 (API Key): $api_key"
+
+    # 创建 docker-compose.yml
+    log_info "正在创建 docker-compose.yml 文件..."
+    # [修改] 将端口号动态写入配置文件
+    cat > docker-compose.yml <<EOF
+version: "3.8"
+services:
+  sub-store:
+    image: xream/sub-store:latest
+    container_name: sub-store-xream
+    restart: always
+    volumes:
+      - ${data_dir}:/opt/app/data
+    environment:
+      - SUB_STORE_FRONTEND_BACKEND_PATH=/${api_key}
+    ports:
+      - 127.0.0.1:${local_port}:3000
+    stdin_open: true
+    tty: true
+EOF
+
+    log_info "正在拉取镜像并启动服务..."
+    log_warn "首次启动需要下载镜像，可能需要一些时间，请耐心等待..."
+    if docker compose up -d; then
+        log_info "✅ Sub-Store (xream版) 服务已成功启动！"
+        # 记录关键信息，供其他函数使用
+        echo "$api_key" > .api_key
+        echo "$local_port" > .local_port # [修改] 记录正确的端口
+
+        echo
+        log_warn "========================= 重要提醒 ========================="
+        # [修改] 显示正确的端口信息
+        log_warn "此版本仅在服务器内部 (127.0.0.1:${local_port}) 运行，"
+        log_warn "您【必须】设置反向代理才能从外部访问它。"
+        log_warn "============================================================"
+        echo
+
+        read -p "是否立即为其设置反向代理? (Y/n): " choice
+        if [[ ! "$choice" =~ ^[Nn]$ ]]; then
+            # 直接调用通用的反代函数
+            local domain
+            while true; do
+                read -p "请输入您已解析到本机的域名: " domain
+                if [[ -z "$domain" ]]; then log_error "域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
+            done
+            # [修改] 将正确的端口传递给反代函数
+            if setup_auto_reverse_proxy "$domain" "$local_port"; then
+                 echo "$domain" > .proxy_domain # 在项目目录中记录反代域名
+                 local backend_url="https://$domain/$api_key"
+                 local final_url="https://$domain/?api=$backend_url"
+                 echo
+                 log_info "✅ 反代设置成功！请使用以下链接访问："
+                 echo -e "\n  $YELLOW$final_url$NC\n"
+            else
+                log_error "反向代理配置失败，请检查之前的错误信息。"
+            fi
+        fi
+    else
+        log_error "Sub-Store (xream版) 启动失败！请使用 'docker compose logs' 查看错误日志。"
+    fi
+    press_any_key
+}
+# (这是修改后的主菜单，提供了安装选项)
 substore_main_menu() {
+    # 定义一个临时的安装子菜单函数
+    _show_install_menu() {
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                  选择 Sub-Store 安装方式         $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC 1. ${YELLOW}裸机安装 (传统方式，不依赖 Docker)${NC}            $CYAN║$NC"
+        echo -e "$CYAN║$NC    (适合无法使用 Docker 或网络不佳的环境)         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC 2. ${GREEN}Docker Compose 安装 (tindy2013 镜像)${NC}       $CYAN║$NC"
+        echo -e "$CYAN║$NC    (推荐，最稳定可靠的社区镜像)                   $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC 3. ${GREEN}Docker Compose 安装 (xream 镜像)${NC}            $CYAN║$NC"
+        echo -e "$CYAN║$NC    (安全，强制反代，数据目录易于管理)             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC 0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        read -p "请输入选项: " install_choice
+        case $install_choice in
+            1) substore_do_install ;; # 调用你已有的裸机安装函数
+            2)
+               log_info "即将为您安装 tindy2013/sub-store 镜像..."
+               # 注意：这里需要你将之前我们最终确定的 tindy2013 版本的安装函数
+               # 命名为 substore_do_install_tindy_docker 并放在脚本里
+               substore_do_install_tindy_docker
+               ;;
+            3) substore_do_install_xream_docker ;; # 调用我们刚新增的函数
+            0) return ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    }
+
+    # 主循环逻辑
     while true; do
         clear
+
+        # --- 更智能的状态检测 ---
+        local installed_type="未安装"
+        local status_color="$YELLOW"
+        if [ -f "$SUBSTORE_SERVICE_FILE" ]; then
+            installed_type="裸机版"
+            status_color="$GREEN"
+        elif [ -f "/root/sub-store/docker-compose.yml" ]; then # 假设 tindy2013 版在这里
+            installed_type="Docker版 (tindy)"
+            status_color="$GREEN"
+        elif [ -f "/root/sub-store-xream/docker-compose.yml" ]; then
+            installed_type="Docker版 (xream)"
+            status_color="$GREEN"
+        fi
+
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
+
+        if [ "$installed_type" != "未安装" ]; then
+            # --- 已安装的菜单 ---
+            echo -e "$CYAN║$NC  当前状态: ${status_color}● $installed_type 已安装${NC}                  $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 管理已安装的 Sub-Store                    $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. ${RED}卸载已安装的 Sub-Store${NC}                    $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1)
+                # 这里可以进一步扩展，根据 $installed_type 调用不同的管理菜单
+                log_warn "管理功能正在开发中，将适配所有版本。"
+                press_any_key
+                # substore_manage_menu
+                ;;
+            2)
+                # 这里可以进一步扩展，根据 $installed_type 调用不同的卸载函数
+                log_warn "卸载功能正在开发中，将适配所有版本。"
+                press_any_key
+                # substore_do_uninstall
+                ;;
+            0) break ;;
+            *) log_warn "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            # --- 未安装的菜单 ---
+            echo -e "$CYAN║$NC  当前状态: ${status_color}● 未安装${NC}                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store${NC}                              $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) _show_install_menu ;; # 显示安装选项子菜单
+            0) break ;;
+            *) log_warn "无效选项！"; sleep 1 ;;
             esac
         fi
     done
