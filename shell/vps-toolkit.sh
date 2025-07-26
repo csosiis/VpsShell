@@ -3033,51 +3033,106 @@ is_substore_installed() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
 
+# (这是经过优化的“裸机”安装版本)
 substore_do_install() {
-    ensure_dependencies "curl" "unzip" "git"
+    # 确保核心依赖已安装
+    if ! ensure_dependencies "curl" "unzip" "git"; then
+        log_error "基础依赖安装失败，无法继续。"
+        press_any_key
+        return
+    fi
 
-    log_info "开始执行 Sub-Store 安装流程..."
-    set -e
+    log_info "开始执行 Sub-Store [健壮版] 安装流程..."
 
-    log_info "正在安装 FNM (Node.js 版本管理器)..."
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
+    # [优化1] 使用变量定义 FNM 的安装目录和路径，便于未来修改。
+    local FNM_DIR="/root/.fnm"
+    local FNM_PATH="$FNM_DIR/fnm"
 
-    export PATH="/root/.fnm:$PATH"
-    eval "$(fnm env)"
-    log_info "FNM 安装完成。"
+    # 安装 FNM (Node.js 版本管理器)
+    if [ ! -f "$FNM_PATH" ]; then
+        log_info "正在安装 FNM (Node.js 版本管理器)..."
+        if ! curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell; then
+            log_error "FNM 安装脚本执行失败！"
+            press_any_key
+            return
+        fi
+    else
+        log_info "FNM 已安装，跳过。"
+    fi
 
+    # 设置当前 shell 的 FNM 环境
+    export PATH="$FNM_DIR:$PATH"
+    eval "$($FNM_PATH env)"
+
+    # 使用 FNM 安装并使用指定的 Node.js 版本
     log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
-    fnm install lts/iron
-    fnm use lts/iron
+    if ! $FNM_PATH install lts/iron; then
+        log_error "Node.js (lts/iron) 安装失败！"
+        press_any_key
+        return
+    fi
+    $FNM_PATH use lts/iron
 
-    log_info "正在安装 pnpm..."
-    curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"
-    export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 PNPM 环境准备就绪。"
+    # [优化2] 获取 Node.js 的绝对路径，这是本次优化的核心！
+    local NODE_EXEC_PATH
+    NODE_EXEC_PATH=$(which node)
+    if [ -z "$NODE_EXEC_PATH" ] || [ ! -f "$NODE_EXEC_PATH" ]; then
+        log_error "无法找到由 FNM 安装的 Node.js 可执行文件路径！安装中止。"
+        press_any_key
+        return
+    fi
+    log_info "成功定位到 Node.js 的绝对路径: $NODE_EXEC_PATH"
 
+    # 安装 pnpm
+    if ! command -v pnpm &>/dev/null; then
+        log_info "正在安装 pnpm..."
+        if ! curl -fsSL https://get.pnpm.io/install.sh | sh -; then
+            log_error "pnpm 安装失败！"
+            press_any_key
+            return
+        fi
+        # 设置 pnpm 环境变量
+        export PNPM_HOME="$HOME/.local/share/pnpm"
+        export PATH="$PNPM_HOME:$PATH"
+    fi
+
+    # 下载和设置 Sub-Store 项目文件
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"
     cd "$SUBSTORE_INSTALL_DIR" || exit 1
-    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
+
+    # [优化4] 为关键下载步骤增加了错误检查
+    log_info "正在下载后端文件: sub-store.bundle.js"
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js; then
+        log_error "下载 sub-store.bundle.js 失败！请检查网络。"
+        press_any_key
+        return
+    fi
+
+    log_info "正在下载前端文件: dist.zip"
+    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip; then
+        log_error "下载 dist.zip 失败！请检查网络。"
+        press_any_key
+        return
+    fi
+
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务...\n"
 
+    # 收集用户配置
+    log_info "开始配置系统服务...\n"
     local API_KEY
-    local random_api_key
-    random_api_key=$(generate_random_password)
     read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
+    API_KEY=${user_api_key:-$(generate_random_password)}
     log_info "最终使用的 API 密钥为: ${API_KEY}\n"
+
     local FRONTEND_PORT
     while true; do
         read -p "请输入前端访问端口 [默认: 3000]: " port_input
         FRONTEND_PORT=${port_input:-"3000"}
         if check_port "$FRONTEND_PORT"; then break; fi
     done
+
     local BACKEND_PORT
     while true; do
         echo ""
@@ -3088,11 +3143,14 @@ substore_do_install() {
         fi
     done
 
+    # [优化3] 创建 systemd 服务文件，直接使用 Node.js 的绝对路径
+    log_info "正在创建 systemd 服务文件..."
     cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
 Description=Sub-Store Service
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
 Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
@@ -3102,36 +3160,39 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
+# 直接使用 Node.js 的绝对路径，不再依赖 FNM
+ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
 Group=root
 Restart=on-failure
 RestartSec=5s
-LimitNOFILE=32767
-ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal
-StandardError=journal
+LimitNOFILE=65535
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # 启动服务
     log_info "正在启动并启用 sub-store 服务..."
     systemctl daemon-reload
     systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
     systemctl start "$SUBSTORE_SERVICE_NAME"
     log_info "正在检测服务状态 (等待 5 秒)..."
     sleep 5
-    set +e
     if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
         log_info "✅ 服务状态正常 (active)。"
         substore_view_access_link
     else
-        log_error "服务启动失败！请使用日志功能排查。"
+        log_error "服务启动失败！请使用 'journalctl -u $SUBSTORE_SERVICE_NAME -f' 查看日志排查。"
     fi
 
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        substore_setup_reverse_proxy
+    else
+        press_any_key
+    fi
 }
 
 substore_do_uninstall() {
