@@ -1834,65 +1834,55 @@ is_singbox_installed() {
 }
 
 singbox_do_install() {
-    ensure_dependencies "curl" "openssl"
+    ensure_dependencies "curl" "openssl" "jq"
     if is_singbox_installed; then
-        log_warn "Sing-Box 已经安装，建议先卸载再使用此方法安装特定内核。"
+        log_warn "Sing-Box 已经安装，建议先卸载再重新安装以确保内核版本统一。"
         press_any_key
         return
     fi
-    log_info "正在安装特定版本的 Sing-Box 内核..."
+    log_info "正在安装与旧配置兼容的 Sing-Box 内核..."
 
-    # --- **修正核心之三**：采用与成功脚本相同的内核下载和安装方式 ---
     local ARCH_RAW=$(uname -m)
     local ARCH
     case "${ARCH_RAW}" in
         'x86_64') ARCH='amd64' ;;
         'aarch64' | 'arm64') ARCH='arm64' ;;
-        *) log_error "不支持的架构: ${ARCH_RAW}, 无法安装特定内核。"; press_any_key; return 1 ;;
+        *) log_error "不支持的架构: ${ARCH_RAW}"; press_any_key; return 1 ;;
     esac
 
     log_info "正在从特定源下载 sing-box 内核 for $ARCH..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR" # 使用一个已定义的目录变量
     if ! curl -sLo "/usr/local/bin/sing-box" "https://$ARCH.ssss.nyc.mn/sbx"; then
-        log_error "特定内核下载失败！"
+        log_error "内核下载失败！"
         press_any_key
         return 1
     fi
     chmod +x "/usr/local/bin/sing-box"
 
-    # 手动创建 systemd 服务文件
     log_info "正在创建 systemd 服务文件..."
-    cat > /etc/systemd/system/sing-box.service << EOF
+    cat > /etc/systemd/system/sing-box.service << 'EOF'
 [Unit]
 Description=sing-box service
 Documentation=https://sing-box.sagernet.org
 After=network.target nss-lookup.target
-
 [Service]
 User=root
 WorkingDirectory=/etc/sing-box
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
-ExecReload=/bin/kill -HUP \$MAINPID
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=infinity
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # 创建基础配置文件
     mkdir -p /etc/sing-box
     if [ ! -f "$SINGBOX_CONFIG_FILE" ]; then
         log_info "正在创建兼容的默认配置文件..."
-        cat >"$SINGBOX_CONFIG_FILE" <<EOL
-{
-  "log": { "level": "info", "timestamp": true },
-  "inbounds": [],
-  "outbounds": [ { "type": "direct", "tag": "direct" } ]
-}
+        cat >"$SINGBOX_CONFIG_FILE" <<'EOL'
+{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOL
     fi
 
@@ -1900,10 +1890,9 @@ EOL
     systemctl daemon-reload
     systemctl enable sing-box.service
     systemctl start sing-box
-
     sleep 2
     if systemctl is-active --quiet sing-box; then
-        log_info "✅ 特定版本 Sing-Box 安装并启动成功！"
+        log_info "✅ Sing-Box (兼容版) 安装并启动成功！"
     else
         log_error "Sing-Box 服务启动失败！请使用 'journalctl -u sing-box -f' 查看日志。"
     fi
@@ -2245,7 +2234,7 @@ _singbox_prompt_for_ports() {
     fi
 }
 # =================================================
-#      函数：构建配置和链接 (WSS 结构最终修复版)
+#      函数：构建配置和链接 (混合语法最终版)
 # =================================================
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
@@ -2261,51 +2250,47 @@ _singbox_build_protocol_config_and_link() {
     local sni_domain=${args_ref[sni_domain]}
     local cert_path=${args_ref[cert_path]}
     local key_path=${args_ref[key_path]}
+
+    # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
     local short_id=${args_ref[short_id]}
 
-    # --- 【核心修正】重新定义配置块，将 WSS 的 TLS 移入 transport 内部 ---
-    # 1. 为 WSS 协议创建一个完整的 transport 配置块
-    local wss_transport_config="{\"type\":\"ws\",\"path\":\"/\",\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}}"
+    # --- 为 WSS/UDP 协议定义“旧语法”的 TLS 配置 ---
+    local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
+    local tls_config_udp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
-    # 2. 为 UDP 协议 (Hysteria2/TUIC) 创建独立的 TLS 配置块
-    local udp_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-
-    # 3. 为 REALITY 创建独立的 TLS 配置块
+    # --- 为 REALITY 协议定义“新语法”的 TLS 配置 ---
     local reality_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
 
     case $protocol in
-    "VLESS")
-        # VLESS+WSS 不再有顶层的 tls，而是直接使用 wss_transport_config
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"transport\":$wss_transport_config}"
-        link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision#$tag"
-        ;;
-    "VMess")
-        # VMess+WSS 同上
-        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"alterId\":0}],\"transport\":$wss_transport_config}"
-        local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
-        link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
-        ;;
-    "Trojan")
-        # Trojan+WSS 同上
-        config_ref="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"transport\":$wss_transport_config}"
-        # 修正 Trojan 链接中 path 参数的 bug
-        link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
+    "VLESS" | "VMess" | "Trojan")
+        # --- 沿用你成功的“旧语法”来构建 WSS 节点 ---
+        config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
+            [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
+        then echo "{\"uuid\":\"$uuid\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+
+        # 链接生成逻辑保持不变
+        if [[ "$protocol" == "VLESS" ]]; then
+            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F#$tag"
+        elif [[ "$protocol" == "VMess" ]]; then
+            local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
+        else
+            link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
+        fi
         ;;
     "VLESS-REALITY")
-        # REALITY 是顶层 TLS，保持不变
+        # --- 使用我们之前完善的“新语法”来构建 REALITY 节点 ---
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$reality_tls_config}"
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
-        # UDP 协议是顶层 TLS，使用 udp_tls_config
-        config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$udp_tls_config,\"up_mbps\":100,\"down_mbps\":1000}"
+        config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
         link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
         ;;
     "TUIC")
-        # UDP 协议是顶层 TLS，使用 udp_tls_config
-        config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$udp_tls_config}"
+        config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
         link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
         ;;
     esac
