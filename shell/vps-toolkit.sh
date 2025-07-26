@@ -2244,13 +2244,15 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
+# =================================================
+#      函数：构建配置和链接 (flow 参数位置修正版)
+# =================================================
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
     local -n config_ref=$3
     local -n link_ref=$4
 
-    # --- 从参数数组中提取变量，增加可读性 ---
     local tag=${args_ref[tag]}
     local current_port=${args_ref[port]}
     local uuid=${args_ref[uuid]}
@@ -2259,49 +2261,43 @@ _singbox_build_protocol_config_and_link() {
     local sni_domain=${args_ref[sni_domain]}
     local cert_path=${args_ref[cert_path]}
     local key_path=${args_ref[key_path]}
-    local insecure_ws=${args_ref[insecure_ws]}
-    local insecure_vmess=${args_ref[insecure_vmess]}
-    local insecure_hy2=${args_ref[insecure_hy2]}
-    local insecure_tuic=${args_ref[insecure_tuic]}
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
     local short_id=${args_ref[short_id]}
 
-    # --- 定义通用 TLS 配置块 ---
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-    local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
-
-    # --- 定义 REALITY 的 TLS 配置块 ---
-    local reality_tls_config="{\"enabled\":true,\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
-
+    local tls_config_udp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+    local reality_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
 
     case $protocol in
-    "VLESS" | "VMess" | "Trojan")
-        config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
-            [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
-        then echo "{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}"; else echo "{\"password\":\"$password\"}"; fi)],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
-
-        if [[ "$protocol" == "VLESS" ]]; then
-            link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision${insecure_ws}#$tag"
-        elif [[ "$protocol" == "VMess" ]]; then
-            local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"${insecure_vmess}}"
-            link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
-        else
-            link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/${insecure_ws}#$tag"
-        fi
+    "VLESS")
+        # --- 【核心修正】将 "flow" 移出 "users" 对象 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision#$tag"
+        ;;
+    "VMess")
+        # VMess 没有 flow 参数，保持不变
+        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
+        link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
+        ;;
+    "Trojan")
+        # Trojan 没有 flow 参数，保持不变
+        config_ref="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
         ;;
     "VLESS-REALITY")
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
-        # --- 【最终修复 V2】 将 sid= 改为 shortId= ---
+        # --- 【核心修正】将 "flow" 移出 "users" 对象 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$reality_tls_config}"
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
         config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
-        link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3${insecure_hy2}#$tag"
+        link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
         ;;
     "TUIC")
         config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
-        link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr${insecure_tuic}#$tag"
+        link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
         ;;
     esac
 }
