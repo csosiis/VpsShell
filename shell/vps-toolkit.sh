@@ -5464,67 +5464,103 @@ initial_setup_check() {
         sleep 2
     fi
 }
-# =================================================
-#           通用菜单打印函数 (新增)
-# =================================================
 
-# --- 打印带边框和自动填充的菜单项 ---
-# 使用方法: print_menu_item "要显示的文本内容"
-print_menu_item() {
-    local display_text="$1"
-    local total_width=50
+main_menu() {
+    while true; do
+        clear
 
-    # 移除文本中的颜色代码，以便精确计算其显示长度
-    local plain_text
-    plain_text=$(echo -e "$display_text" | sed 's/\\033\[[0-9;]*m//g')
-    local text_len=${#plain_text}
+        # 获取 IP 地址以供显示
+        local ipv4
+        ipv4=$(get_public_ip v4)
+        local ipv6
+        ipv6=$(get_public_ip v6)
 
-    # 计算需要填充的空格数
-    local padding_len=$((total_width - text_len))
-    if [ $padding_len -lt 0 ]; then
-        padding_len=0
-    fi
-    local padding_space
-    padding_space=$(printf "%${padding_len}s")
+        # --- 以下是菜单的绘制 ---
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # 打印最终格式化的行
-    echo -e "$CYAN║${display_text}${padding_space}$CYAN║$NC"
-}
+        # --- IP 显示逻辑 (精确对齐版) ---
+        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
+            # 情况1: IPv4 和 IPv6 都存在，换行显示
 
-# --- 打印菜单中的空白行 ---
-print_menu_blank_line() {
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-}
-# =================================================
-#           通用菜单打印函数 (新增)
-# =================================================
+            # 处理 IPv4 行
+            local text1="  IPv4: ${ipv4}"
+            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            local len1=${#text1}
+            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
+            local space1
+            space1=$(printf "%${pad1}s")
+            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
 
-# --- 打印带边框和自动填充的菜单项 ---
-# 使用方法: print_menu_item "要显示的文本内容"
-print_menu_item() {
-    local display_text="$1"
-    local total_width=50
+            # 处理 IPv6 行
+            local text2="  IPv6: ${ipv6}"
+            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            local len2=${#text2}
+            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
+            local space2
+            space2=$(printf "%${pad2}s")
+            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
 
-    # 移除文本中的颜色代码，以便精确计算其显示长度
-    local plain_text
-    plain_text=$(echo -e "$display_text" | sed 's/\\033\[[0-9;]*m//g')
-    local text_len=${#plain_text}
+        else
+            # 情况2: 只有一个IP或都没有，显示单行
+            local text=""
+            local display=""
+            if [ -n "$ipv4" ]; then
+                text="  IPv4: ${ipv4}"
+                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            elif [ -n "$ipv6" ]; then
+                text="  IPv6: ${ipv6}"
+                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            else
+                text="  IP: 获取失败"
+                display="  ${RED}IP: 获取失败${CYAN}"
+            fi
+            local len=${#text}
+            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
+            local space
+            space=$(printf "%${pad}s")
+            echo -e "$CYAN║${display}${space}$CYAN║$NC"
+        fi
 
-    # 计算需要填充的空格数
-    local padding_len=$((total_width - text_len))
-    if [ $padding_len -lt 0 ]; then
-        padding_len=0
-    fi
-    local padding_space
-    padding_space=$(printf "%${padding_len}s")
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-    # 打印最终格式化的行
-    echo -e "$CYAN║${display_text}${padding_space}$CYAN║$NC"
-}
-
-# --- 打印菜单中的空白行 ---
-print_menu_blank_line() {
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        read -p "请输入选项: " choice
+        case $choice in
+        1) sys_manage_menu ;;
+        2) singbox_main_menu ;;
+        3) substore_main_menu ;;
+        4) nezha_main_menu ;;
+        5) docker_manage_menu ;;
+        6) docker_apps_menu ;;
+        7) certificate_management_menu ;;
+        9) do_update_script ;;
+        0) exit 0 ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
 }
 
 
