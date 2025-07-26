@@ -2245,7 +2245,7 @@ _singbox_prompt_for_ports() {
     fi
 }
 # =================================================
-#      函数：构建配置和链接 (flow 参数位置修正版)
+#      函数：构建配置和链接 (VMess 修正最终版)
 # =================================================
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
@@ -2271,23 +2271,20 @@ _singbox_build_protocol_config_and_link() {
 
     case $protocol in
     "VLESS")
-        # --- 【核心修正】将 "flow" 移出 "users" 对象 ---
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
         link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision#$tag"
         ;;
     "VMess")
-        # VMess 没有 flow 参数，保持不变
-        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        # --- 【核心修正】为 VMess 的 users 对象添加 alterId 字段 ---
+        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"alterId\":0}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
         local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
         link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         ;;
     "Trojan")
-        # Trojan 没有 flow 参数，保持不变
         config_ref="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
         link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
         ;;
     "VLESS-REALITY")
-        # --- 【核心修正】将 "flow" 移出 "users" 对象 ---
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$reality_tls_config}"
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
