@@ -2070,13 +2070,11 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#           函数：处理 REALITY 特定设置 (增强版)
+#      函数：处理 REALITY 特定设置 (最终修复版)
 # =================================================
 _singbox_handle_reality_setup() {
-    # --- 确保时间准确 (此函数调用保持不变) ---
     _ensure_time_accuracy
 
-    # 声明-n类型的变量，以引用的方式修改外部变量的值
     local -n private_key_ref=$1
     local -n public_key_ref=$2
     local -n connect_addr_ref=$3
@@ -2091,16 +2089,25 @@ _singbox_handle_reality_setup() {
     fi
 
     log_info "正在生成 REALITY 密钥对..."
-    local key_pair
-    key_pair=$(sing-box generate reality-keypair)
-    private_key_ref=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}')
-    public_key_ref=$(echo "$key_pair" | awk '/PublicKey/ {print $2}')
+
+    # --- 【核心修正】采用更健壮的方式捕获密钥对 ---
+    # 1. 将命令的输出保存到一个临时文件中，避免管道操作中变量作用域问题
+    local key_pair_output_file="/tmp/reality_keys.txt"
+    register_temp_file "$key_pair_output_file"
+    sing-box generate reality-keypair > "$key_pair_output_file"
+
+    # 2. 从临时文件中精确地提取公钥和私钥
+    private_key_ref=$(grep 'PrivateKey' "$key_pair_output_file" | awk '{print $2}')
+    public_key_ref=$(grep 'PublicKey' "$key_pair_output_file" | awk '{print $2}')
+    # --- 修正结束 ---
 
     if [ -z "$private_key_ref" ] || [ -z "$public_key_ref" ]; then
-        log_error "REALITY 密钥对生成失败！"
+        log_error "REALITY 密钥对生成或捕获失败！"
         return 1
     fi
-    log_info "✅ 密钥对生成成功！"
+
+    # 增加调试输出，让用户可以确认密钥
+    log_info "✅ 密钥对已生成并成功捕获！"
     echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
     echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
     echo ""
@@ -2111,29 +2118,26 @@ _singbox_handle_reality_setup() {
     if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
         echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
         read -p "请输入选项 (1-2): " ip_choice
-        if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
+        if [ "$ip_choice" == "2" ]; then connect_addr_ref="[$ipv6_addr]"; else connect_addr_ref="$ipv4_addr"; fi
     elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
     elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
+    # 获取并验证伪装域名 (serverName)
     while true; do
         read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
         server_name_ref=${server_name_input:-"www.microsoft.com"}
 
         log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
-        # 使用curl测试HTTPS连接，-m 5设置5秒超时
-        # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
         if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
             log_info "✅ 连通性测试通过。"
             break
         else
             log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
-            log_warn "请检查域名拼写，或更换一个可从本机访问的域名 (如 www.apple.com, www.microsoft.com)。"
+            log_warn "请检查域名拼写，或更换一个可从本机访问的域名。"
             echo ""
         fi
     done
-    # --- **修改结束** ---
 
     # 自动生成并验证 short_id
     while true; do
