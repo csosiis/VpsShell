@@ -3529,7 +3529,19 @@ install_nezha_agent() {
     read -p "请输入面板的端口: " NZ_PORT
     read -p "请输入探针密钥: " NZ_CLIENT_SECRET
     read -p "是否启用TLS/SSL加密 (y/N): " use_tls
-    [[ "$use_tls" =~ ^[Yy]$ ]] && NZ_TLS="--tls" || NZ_TLS=""
+
+    # --- 【核心修正】根据探针版本决定是否添加 --tls 参数 ---
+    if [[ "$use_tls" =~ ^[Yy]$ ]] && [[ "$version_id" != "v0" ]]; then
+        NZ_TLS="--tls"
+        log_info "将为 $friendly_name 添加 --tls 参数。"
+    else
+        NZ_TLS=""
+    fi
+    # 如果是为V0探针启用TLS，虽然我们不加--tls参数，但可以给用户一个提示
+    if [[ "$use_tls" =~ ^[Yy]$ ]] && [[ "$version_id" == "v0" ]]; then
+        log_warn "您为 V0 探针开启了 TLS，将通过连接本身实现加密，不会添加 --tls 参数。"
+    fi
+    # --- 修正结束 ---
 
     if [ -z "$NZ_SERVER" ] || [ -z "$NZ_PORT" ] || [ -z "$NZ_CLIENT_SECRET" ]; then
         log_error "服务器、端口和密钥均不能为空！安装中止。"
