@@ -2245,7 +2245,7 @@ _singbox_prompt_for_ports() {
     fi
 }
 # =================================================
-#      函数：构建配置和链接 (VMess 修正最终版)
+#      函数：构建配置和链接 (WSS 结构最终修复版)
 # =================================================
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
@@ -2265,35 +2265,47 @@ _singbox_build_protocol_config_and_link() {
     local public_key=${args_ref[public_key]}
     local short_id=${args_ref[short_id]}
 
-    local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
-    local tls_config_udp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+    # --- 【核心修正】重新定义配置块，将 WSS 的 TLS 移入 transport 内部 ---
+    # 1. 为 WSS 协议创建一个完整的 transport 配置块
+    local wss_transport_config="{\"type\":\"ws\",\"path\":\"/\",\"tls\":{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}}"
+
+    # 2. 为 UDP 协议 (Hysteria2/TUIC) 创建独立的 TLS 配置块
+    local udp_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
+
+    # 3. 为 REALITY 创建独立的 TLS 配置块
     local reality_tls_config="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni_domain\",\"server_port\":443},\"private_key\":\"$private_key\",\"short_id\":[\"$short_id\"]}}"
 
     case $protocol in
     "VLESS")
-        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        # VLESS+WSS 不再有顶层的 tls，而是直接使用 wss_transport_config
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"transport\":$wss_transport_config}"
         link_ref="vless://$uuid@$connect_addr:$current_port?type=ws&security=tls&sni=$sni_domain&host=$sni_domain&path=%2F&flow=xtls-rprx-vision#$tag"
         ;;
     "VMess")
-        # --- 【核心修正】为 VMess 的 users 对象添加 alterId 字段 ---
-        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"alterId\":0}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        # VMess+WSS 同上
+        config_ref="{\"type\":\"vmess\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"alterId\":0}],\"transport\":$wss_transport_config}"
         local vmess_json="{\"v\":\"2\",\"ps\":\"$tag\",\"add\":\"$connect_addr\",\"port\":\"$current_port\",\"id\":\"$uuid\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$sni_domain\",\"path\":\"/\",\"tls\":\"tls\"}"
         link_ref="vmess://$(echo -n "$vmess_json" | base64 -w0)"
         ;;
     "Trojan")
-        config_ref="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_tcp,\"transport\":{\"type\":\"ws\",\"path\":\"/\"}}"
+        # Trojan+WSS 同上
+        config_ref="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"transport\":$wss_transport_config}"
+        # 修正 Trojan 链接中 path 参数的 bug
         link_ref="trojan://$password@$connect_addr:$current_port?security=tls&sni=$sni_domain&type=ws&host=$sni_domain&path=/#$tag"
         ;;
     "VLESS-REALITY")
+        # REALITY 是顶层 TLS，保持不变
         config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"flow\":\"xtls-rprx-vision\",\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":$reality_tls_config}"
         link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&publicKey=$public_key&shortId=$short_id&flow=xtls-rprx-vision&type=tcp#$tag"
         ;;
     "Hysteria2")
-        config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$tls_config_udp,\"up_mbps\":100,\"down_mbps\":1000}"
+        # UDP 协议是顶层 TLS，使用 udp_tls_config
+        config_ref="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"password\":\"$password\"}],\"tls\":$udp_tls_config,\"up_mbps\":100,\"down_mbps\":1000}"
         link_ref="hysteria2://$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3#$tag"
         ;;
     "TUIC")
-        config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$tls_config_udp}"
+        # UDP 协议是顶层 TLS，使用 udp_tls_config
+        config_ref="{\"type\":\"tuic\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"password\":\"$password\"}],\"tls\":$udp_tls_config}"
         link_ref="tuic://$uuid:$password@$connect_addr:$current_port?sni=$sni_domain&alpn=h3&congestion_control=bbr#$tag"
         ;;
     esac
