@@ -261,65 +261,149 @@ _check_service_status() {
     # 使用printf进行格式化对齐
     printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "$display_name" "$status_text"
 }
+# =================================================
+#           修正版：系统健康巡检辅助函数
+# =================================================
+# 修正说明：
+# 1. 不在函数内直接打印，而是返回状态文本和颜色变量。
+# 2. 这种方式将格式化(printf)与内容生成(此函数)分离，避免了对齐问题。
+_get_service_status() {
+    local service_name="$1"
+    # 使用-n声明，可以直接修改外部同名变量的值
+    local -n status_text_ref=$2
+    local -n status_color_ref=$3
 
+    if systemctl is-active --quiet "$service_name"; then
+        status_text_ref="● 运行中"
+        status_color_ref=$GREEN
+    else
+        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text_ref="● 不活动"
+            status_color_ref=$RED
+        else
+            status_text_ref="○ 未安装"
+            status_color_ref=$YELLOW
+        fi
+    fi
+}
 # =================================================
-#           新增：系统健康巡检主函数
+#    新增：高级菜单行打印函数 (支持自动换行和填充)
 # =================================================
+# 参数1: 要打印的文本内容
+_print_menu_line() {
+    local text_content="$1"
+    local menu_width=50
+
+    # 核心：使用 sed 去除颜色代码，以便准确计算可见字符的长度
+    local visible_text
+    visible_text=$(echo -e "$text_content" | sed 's/\x1B\[[0-9;]*[mK]//g')
+    local visible_len=${#visible_text}
+
+    # --- 打印内容行 ---
+    if [ "$visible_len" -le "$menu_width" ]; then
+        # 情况1：内容没有超长，直接填充空格
+        local padding_len=$((menu_width - visible_len))
+        local padding_spaces
+        padding_spaces=$(printf "%${padding_len}s")
+        echo -e "$CYAN║$NC $text_content${padding_spaces} $CYAN║$NC"
+    else
+        # 情况2：内容超长，需要换行处理
+        # 注意：为了可靠换行，超长文本的颜色会被去除
+        echo "$visible_text" | fold -s -w "$menu_width" | while IFS= read -r line; do
+            printf "$CYAN║$NC %-50s $CYAN║$NC\n" "$line"
+        done
+    fi
+
+    # --- 打印每个菜单项下面的空行，增加间距 ---
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+}
+# =================================================
+#           最终版：系统健康巡检主函数 (V3)
+# =================================================
+# 理念：
+# 1. 所有的标题、分隔线、内容行，全部交由 _print_menu_line 函数处理，以保证格式绝对统一。
+# 2. 对于“标签: 值”这样的两列内容，先用 printf 格式化成一个字符串变量 line_content。
+# 3. 再把这个 line_content 传递给 _print_menu_line，由它来负责边框、填充、换行和空行间距。
+# 4. SSL证书这类可能超长的行，直接拼接成一个长字符串交给 _print_menu_line，它会自动处理换行。
+
 system_health_check() {
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE                   系统健康巡检报告                 $CYAN║$NC"
-    echo -e "$CYAN╟─────────────── $WHITE核心服务状态$CYAN ───────────────────╢$NC"
-    _check_service_status "docker" "Docker 服务"
-    _check_service_status "nginx" "Nginx 服务"
-    _check_service_status "caddy" "Caddy 服务"
-    _check_service_status "sing-box" "Sing-Box 服务"
-    _check_service_status "fail2ban" "Fail2Ban 服务"
-    echo -e "$CYAN╟─────────────── $WHITE系统资源使用$CYAN ───────────────────╢$NC"
 
-    # 磁盘空间
-    local disk_usage_percent
+    # --- 核心服务状态 ---
+    _print_menu_line "╟─────────────── ${WHITE}核心服务状态${CYAN} ───────────────────╢"
+
+    local status_text status_color line_content
+    _get_service_status "docker" status_text status_color
+    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Docker 服务" "$status_text")
+    _print_menu_line "$line_content"
+
+    _get_service_status "nginx" status_text status_color
+    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Nginx 服务" "$status_text")
+    _print_menu_line "$line_content"
+
+    _get_service_status "caddy" status_text status_color
+    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Caddy 服务" "$status_text")
+    _print_menu_line "$line_content"
+
+    _get_service_status "sing-box" status_text status_color
+    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Sing-Box 服务" "$status_text")
+    _print_menu_line "$line_content"
+
+    _get_service_status "fail2ban" status_text status_color
+    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Fail2Ban 服务" "$status_text")
+    _print_menu_line "$line_content"
+
+    # --- 系统资源使用 ---
+    _print_menu_line "╟─────────────── ${WHITE}系统资源使用${CYAN} ───────────────────╢"
+
+    local disk_usage_percent disk_status_color disk_info
     disk_usage_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
-    local disk_status_color
-    if [ "$disk_usage_percent" -gt 85 ]; then
-        disk_status_color="$RED"
-    elif [ "$disk_usage_percent" -gt 65 ]; then
-        disk_status_color="$YELLOW"
-    else
-        disk_status_color="$GREEN"
-    fi
-    local disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
-    printf "$CYAN║$NC  %-16s: ${disk_status_color}%-29s${NC} $CYAN║$NC\n" "根目录磁盘" "$disk_info"
+    if [ "$disk_usage_percent" -gt 85 ]; then disk_status_color="$RED";
+    elif [ "$disk_usage_percent" -gt 65 ]; then disk_status_color="$YELLOW";
+    else disk_status_color="$GREEN"; fi
+    disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
+    line_content=$(printf "  %-12s: ${disk_status_color}%s${NC}" "根目录磁盘" "$disk_info")
+    _print_menu_line "$line_content"
 
-    # 内存使用
-    local mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
-    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "内存使用" "$mem_info"
+    local mem_info
+    mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
+    line_content=$(printf "  %-12s: ${WHITE}%s${NC}" "内存使用" "$mem_info")
+    _print_menu_line "$line_content"
 
-    # Docker 容器状态
+    # --- Docker 容器状态 ---
     if command -v docker &>/dev/null; then
-        echo -e "$CYAN╟─────────────── $WHITEDocker 容器概览$CYAN ──────────────────╢$NC"
-        local total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
-        local running_containers=$(docker ps --format '{{.Names}}' | wc -l)
-        local restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
+        _print_menu_line "╟─────────────── ${WHITE}Docker 容器概览${CYAN} ──────────────────╢"
+        local total_containers running_containers restarting_containers
+        total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
+        running_containers=$(docker ps --format '{{.Names}}' | wc -l)
+        restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
 
-        printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "总容器数" "$total_containers"
-        printf "$CYAN║$NC  %-16s: ${GREEN}%-29s${NC} $CYAN║$NC\n" "运行中" "$running_containers"
+        line_content=$(printf "  %-12s: ${WHITE}%s${NC}" "总容器数" "$total_containers")
+        _print_menu_line "$line_content"
+
+        line_content=$(printf "  %-12s: ${GREEN}%s${NC}" "运行中" "$running_containers")
+        _print_menu_line "$line_content"
+
         if [ -n "$restarting_containers" ]; then
-             printf "$CYAN║$NC  %-16s: ${RED}%-29s${NC} $CYAN║$NC\n" "异常(重启中)" "$restarting_containers"
+             line_content=$(printf "  %-12s: ${RED}%s${NC}" "异常(重启中)" "$restarting_containers")
+             _print_menu_line "$line_content"
         fi
     fi
 
-    # SSL 证书状态
+    # --- SSL 证书状态 ---
     if command -v certbot &>/dev/null; then
-        echo -e "$CYAN╟─────────────── $WHITESSL 证书有效期$CYAN ──────────────────╢$NC"
+        _print_menu_line "╟─────────────── ${WHITE}SSL 证书有效期${CYAN} ──────────────────╢"
         local cert_info
         cert_info=$(certbot certificates 2>/dev/null)
         if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
-            printf "$CYAN║$NC  %-46s $CYAN║$NC\n" "未发现任何 Certbot 证书"
+            _print_menu_line "  未发现任何 Certbot 证书"
         else
-            # 解析并显示证书信息
-            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Domains:/ {domains=$0; sub(/Domains: /,"",domains)} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(.*\)/,""); printf "%-20s -> %s\n", name, expiry}' | while read -r line; do
-                printf "$CYAN║$NC  ${YELLOW}%-46s${NC} $CYAN║$NC\n" "$line"
+            # 将证书名和有效期拼接成一个长字符串，让 _print_menu_line 自动处理换行
+            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID/," (VALID"); printf "%s|%s\n", name, expiry}' | while IFS='|' read -r cert_name expiry_date; do
+                line_content="  ${YELLOW}${cert_name}${NC} -> ${GREEN}${expiry_date}${NC}"
+                _print_menu_line "$line_content"
             done
         fi
     fi
@@ -492,7 +576,7 @@ sys_manage_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  12. ${CYAN}防火墙助手 (UFW/FirewallD)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC  12. ${CYAN}防火墙助手 (UFW/FirewallD)${NC}                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -5895,7 +5979,7 @@ main_menu() {
         6) docker_apps_menu ;;
         7) certificate_management_menu ;;
         8) system_health_check ;;
-        9) system_health_check ;;
+        9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
