@@ -287,43 +287,8 @@ _get_service_status() {
     fi
 }
 # =================================================
-#    新增：高级菜单行打印函数 (支持自动换行和填充)
-# =================================================
-# 参数1: 要打印的文本内容
-_print_menu_line() {
-    local text_content="$1"
-    local menu_width=50
-
-    # 核心：使用 sed 去除颜色代码，以便准确计算可见字符的长度
-    local visible_text
-    visible_text=$(echo -e "$text_content" | sed 's/\x1B\[[0-9;]*[mK]//g')
-    local visible_len=${#visible_text}
-
-    # --- 打印内容行 ---
-    if [ "$visible_len" -le "$menu_width" ]; then
-        # 情况1：内容没有超长，直接填充空格
-        local padding_len=$((menu_width - visible_len))
-        local padding_spaces
-        padding_spaces=$(printf "%${padding_len}s")
-        echo -e "$CYAN║$NC $text_content${padding_spaces} $CYAN║$NC"
-    else
-        # 情况2：内容超长，需要换行处理
-        # 注意：为了可靠换行，超长文本的颜色会被去除
-        echo "$visible_text" | fold -s -w "$menu_width" | while IFS= read -r line; do
-            printf "$CYAN║$NC %-50s $CYAN║$NC\n" "$line"
-        done
-    fi
-
-    # --- 打印每个菜单项下面的空行，增加间距 ---
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-}
-# =================================================
 #    最终版：两列对齐报告打印函数
 # =================================================
-# 功能: 打印格式为 "标签: 值" 的行，并确保所有"值"在垂直方向上严格对齐。
-# 参数1: 标签 (Label)
-# 参数2: 值 (Value)
-# 参数3: 值的颜色 (可选, 默认为白色)
 _print_aligned_line() {
     local label="$1"
     local value="$2"
@@ -554,35 +519,27 @@ sys_manage_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 修改 SSH 端口                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. DNS 工具箱 (优化/备份/恢复)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  12. ${CYAN}防火墙助手 (UFW/FirewallD)${NC}                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检报告${NC}                      $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
         read -p "请输入选项: " choice
@@ -599,6 +556,7 @@ sys_manage_menu() {
         10) install_warp ;;
         11) utility_tools_menu ;;
         12) firewall_helper_menu ;;
+        13) system_health_check ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -5962,8 +5920,6 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${GREEN}系统健康巡检 (推荐)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
@@ -5981,7 +5937,6 @@ main_menu() {
         5) docker_manage_menu ;;
         6) docker_apps_menu ;;
         7) certificate_management_menu ;;
-        8) system_health_check ;;
         9) do_update_script ;;
         0) exit 0 ;;
         *) log_error "无效选项！"; sleep 1 ;;
