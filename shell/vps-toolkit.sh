@@ -5111,62 +5111,6 @@ list_certificates() {
     echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
     return 0
 }
-
-delete_certificate_and_proxy() {
-    clear
-    log_info "准备删除证书及其关联配置..."
-
-    if ! list_certificates; then
-        press_any_key
-        return
-    fi
-
-    read -p "请输入要删除的证书名称 (Certificate Name): " cert_name
-    if [ -z "$cert_name" ]; then
-        log_error "证书名称不能为空！"
-        press_any_key
-        return
-    fi
-
-    read -p "警告：这将永久删除证书 '$cert_name' 及其相关的 Nginx 配置文件。此操作不可逆！是否继续？(y/N): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
-    fi
-
-    log_info "正在执行删除操作..."
-    set -e
-
-    certbot delete --cert-name "$cert_name" --non-interactive
-
-    local nginx_conf="/etc/nginx/sites-available/$cert_name.conf"
-    if [ -f "$nginx_conf" ]; then
-        log_warn "检测到残留的 Nginx 配置文件，正在清理..."
-        rm -f "/etc/nginx/sites-enabled/$cert_name.conf"
-        rm -f "$nginx_conf"
-        nginx -t && systemctl reload nginx
-        log_info "✅ Nginx 残留配置已清理。"
-    fi
-
-    set +e
-    log_info "✅ 证书 '$cert_name' 已成功删除。"
-    press_any_key
-}
-
-renew_certificates() {
-    if ! command -v certbot &>/dev/null; then
-        log_error "Certbot 未安装，无法续签。"
-        press_any_key
-        return
-    fi
-
-    log_info "正在尝试为所有证书续期..."
-    log_warn "Certbot 会自动跳过那些距离到期日还很长的证书。"
-    certbot renew
-    log_info "✅ 证书续期检查完成。"
-    press_any_key
-}
 # =================================================
 #           证书 & 反代 (V2.0 增强版)
 #
@@ -5241,52 +5185,6 @@ _cleanup_caddy_proxy_config() {
         log_warn "Caddy 服务重载失败，请手动检查配置。"
     fi
 }
-
-
-list_certificates() {
-    if ! command -v certbot &>/dev/null; then
-        log_error "Certbot 未安装，无法管理证书。"
-        return 1
-    fi
-
-    log_info "正在获取所有证书列表..."
-    local certs_output
-    certs_output=$(certbot certificates 2>/dev/null)
-
-    if [[ -z "$certs_output" || ! "$certs_output" =~ "Found the following certs:" ]]; then
-        log_warn "未找到任何由 Certbot 管理的证书。"
-        return 2
-    fi
-
-    echo "$certs_output" | awk '
-        /Certificate Name:/ {
-            cert_name = $3
-        }
-        /Domains:/ {
-            domains = $2
-            for (i=3; i<=NF; i++) domains = domains " " $i
-        }
-        /Expiry Date:/ {
-            expiry_date = $3 " " $4 " " $5
-            gsub(/\(.*\)/, "", expiry_date)
-            gsub(/^[ \t]+|[ \t]+$/, "", expiry_date)
-
-            status = ""
-            if (index($0, "VALID")) {
-                status = "\033[0;32m(VALID)\033[0m"
-            } else if (index($0, "EXPIRED")) {
-                status = "\033[0;31m(EXPIRED)\033[0m"
-            }
-
-            printf "\n  - 证书名称: \033[1;37m%s\033[0m\n", cert_name
-            printf "    域名: \033[0;33m%s\033[0m\n", domains
-            printf "    到期时间: %s %s\n", expiry_date, status
-        }
-    '
-    echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
-    return 0
-}
-
 
 # --- (重写) 交互更友好，并支持清理 Caddy 配置 ---
 delete_certificate_and_proxy() {
@@ -5679,7 +5577,7 @@ certificate_management_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 新建网站反代 (自动申请证书)                 $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}仅为域名申请证书${NC}                           $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}仅为域名申请证书${NC}                            $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 查看/列出所有证书                           $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
