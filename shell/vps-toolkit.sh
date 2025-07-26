@@ -5469,37 +5469,58 @@ main_menu() {
     while true; do
         clear
 
-        # 获取 IP 地址以供显示，函数内部有缓存机制，不会重复请求
+        # 获取 IP 地址以供显示
         local ipv4
         ipv4=$(get_public_ip v4)
         local ipv6
         ipv6=$(get_public_ip v6)
-
-        # 构建要显示的 IP 字符串
-        local ip_display_line="  当前IP: "
-        if [ -n "$ipv4" ]; then
-            ip_display_line+="${WHITE}IPv4: ${ipv4}${CYAN}"
-        else
-            ip_display_line+="${RED}IPv4: N/A${CYAN}"
-        fi
-        if [ -n "$ipv6" ]; then
-            ip_display_line+=" | ${WHITE}IPv6: ${ipv6}${CYAN}"
-        fi
 
         # --- 以下是菜单的绘制 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-        # --- 新增的 IP 显示行 ---
-        # 为了美观，计算右侧需要填充的空格数
-        local content_len
-        content_len=$(echo -e "$ip_display_line" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
-        local padding_len=$((52 - content_len))
-        [ $padding_len -lt 0 ] && padding_len=0
-        local padding_space
-        padding_space=$(printf "%${padding_len}s")
-        echo -e "$CYAN║$ip_display_line$padding_space$CYAN║$NC"
+        # --- IP 显示逻辑 ---
+        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
+            # 情况1: IPv4 和 IPv6 都存在，换行显示
+            local line1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            local len1
+            len1=$(echo -e "$line1" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len1=$((len1 - 1))
+            local pad1=$((50 - len1))
+            [ $pad1 -lt 0 ] && pad1=0
+            local space1
+            space1=$(printf "%${pad1}s")
+            echo -e "$CYAN║$line1$space1$CYAN║$NC"
+
+            local line2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            local len2
+            len2=$(echo -e "$line2" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len2=$((len2 - 1))
+            local pad2=$((50 - len2))
+            [ $pad2 -lt 0 ] && pad2=0
+            local space2
+            space2=$(printf "%${pad2}s")
+            echo -e "$CYAN║$line2$space2$CYAN║$NC"
+        else
+            # 情况2: 只有一个IP或都没有
+            local line="  " # 行首预留2个空格
+            if [ -n "$ipv4" ]; then
+                line+="${WHITE}IPv4: ${ipv4}${CYAN}"
+            elif [ -n "$ipv6" ]; then
+                line+="${WHITE}IPv6: ${ipv6}${CYAN}"
+            else
+                line+="${RED}IP: 获取失败${CYAN}"
+            fi
+            local len
+            len=$(echo -e "$line" | sed 's/\\033\[[0-9;]*m//g' | wc -c)
+            len=$((len - 1))
+            local pad=$((50 - len))
+            [ $pad -lt 0 ] && pad=0
+            local space
+            space=$(printf "%${pad}s")
+            echo -e "$CYAN║$line$space$CYAN║$NC"
+        fi
 
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
