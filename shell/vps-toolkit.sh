@@ -3089,13 +3089,13 @@ BACKEND_PORT=3001
 CRON_EXPRESSION="0 0 * * *"
 EOF
 
+    # === 这里是关键的修改 ===
     # 创建 docker-compose.yml
     cat > docker-compose.yml <<'EOF'
-version: '3.8'
-
 services:
   sub-store:
-    image: substore/sub-store:latest
+    # [修复] 已将镜像地址更新为官方推荐的 GitHub Container Registry 地址
+    image: ghcr.io/sub-store-org/sub-store:latest
     container_name: sub-store
     restart: always
     ports:
@@ -3120,6 +3120,8 @@ volumes:
   substore_data:
     name: substore_data # 显式命名数据卷
 EOF
+    # === 修改结束 ===
+
 
     # 步骤5: 启动服务
     log_info "正在拉取 Sub-Store 镜像并启动服务..."
