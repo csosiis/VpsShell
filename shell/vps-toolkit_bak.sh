@@ -1982,35 +1982,36 @@ _singbox_prompt_for_protocols() {
     echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. VLESS + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VMess + WSS                                 $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. Trojan + WSS                                $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Hysteria2 (UDP)                             $CYAN║$NC"
+    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. TUIC v5 (UDP)                               $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $GREEN一键生成以上全部 5 种协议节点$NC               $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     read -p "请输入选项: " protocol_choice
 
     case $protocol_choice in
-    1) protocols_ref=("VLESS") ;;
-    2) protocols_ref=("VMess") ;;
-    3) protocols_ref=("Trojan") ;;
-    4) protocols_ref=("Hysteria2") ;;
-    5) protocols_ref=("TUIC") ;;
-    6)
+    1) protocols_ref=("VLESS-REALITY") ;;
+    2) protocols_ref=("VLESS") ;;
+    3) protocols_ref=("VMess") ;;
+    4) protocols_ref=("Trojan") ;;
+    5) protocols_ref=("Hysteria2") ;;
+    6) protocols_ref=("TUIC") ;;
+    7)
         protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
         is_one_click_ref=true
         ;;
@@ -2067,11 +2068,8 @@ _ensure_time_accuracy() {
     fi
     return 0
 }
-# =================================================
-#           函数：处理 REALITY 特定设置 (增强版)
-# =================================================
 _singbox_handle_reality_setup() {
-    # --- 确保时间准确 (此函数调用保持不变) ---
+    # --- 确保时间准确 ---
     _ensure_time_accuracy
 
     # 声明-n类型的变量，以引用的方式修改外部变量的值
@@ -2114,7 +2112,7 @@ _singbox_handle_reality_setup() {
     elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
     else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-    # --- **修改核心**：获取并验证伪装域名 (serverName) ---
+    # --- **核心优化**：获取并验证伪装域名 (serverName) ---
     while true; do
         read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
         server_name_ref=${server_name_input:-"www.bing.com"}
@@ -2131,7 +2129,7 @@ _singbox_handle_reality_setup() {
             echo ""
         fi
     done
-    # --- **修改结束** ---
+    # --- **优化结束** ---
 
     # 自动生成并验证 short_id
     while true; do
@@ -2199,12 +2197,16 @@ _singbox_handle_certificate_setup() {
     log_info "证书处理完毕。"
     return 0
 }
-
 _singbox_prompt_for_ports() {
     local -n protocols_ref=$1
     local -n ports_ref=$2
     local -n used_ports_this_run_ref=$3
     local is_one_click=$4
+
+    # 针对 REALITY 的端口特殊提示
+    if [[ " ${protocols_ref[*]} " =~ " VLESS-REALITY " ]]; then
+         log_info "\nREALITY 协议需要一个 TCP 端口进行连接。"
+    fi
 
     if $is_one_click; then
         log_info "您已选择一键模式，请为每个协议指定端口。"
@@ -2238,7 +2240,6 @@ _singbox_prompt_for_ports() {
         done
     fi
 }
-
 _singbox_build_protocol_config_and_link() {
     local protocol=$1
     local -n args_ref=$2
@@ -2261,13 +2262,21 @@ _singbox_build_protocol_config_and_link() {
     # REALITY 专属参数
     local private_key=${args_ref[private_key]}
     local public_key=${args_ref[public_key]}
-    local short_id=${args_ref[short_id]} # 注意：虽然我们接收了这个变量，但在下面的新配置中不再使用它
+    local short_id=${args_ref[short_id]}
 
 
     local tls_config_tcp="{\"enabled\":true,\"server_name\":\"$sni_domain\",\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\"}"
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
     case $protocol in
+    "VLESS-REALITY")
+        local reality_tls_config="{\"enabled\": true, \"server_name\": \"$sni_domain\", \"reality\": {\"enabled\": true, \"handshake\": {\"server\": \"$sni_domain\", \"server_port\": 443}, \"private_key\": \"$private_key\", \"short_id\": [\"$short_id\"]}}"
+
+        # --- **核心修正**：移除了错误的 "transport" 字段 ---
+        config_ref="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":$reality_tls_config}"
+
+        link_ref="vless://$uuid@$connect_addr:$current_port?security=reality&sni=$sni_domain&flow=xtls-rprx-vision&publicKey=$public_key&shortId=$short_id#$tag"
+        ;;
     "VLESS" | "VMess" | "Trojan")
         config_ref="{\"type\":\"${protocol,,}\",\"tag\":\"$tag\",\"listen\":\"::\",\"listen_port\":$current_port,\"users\":[$(if
             [[ "$protocol" == "VLESS" || "$protocol" == "VMess" ]]
@@ -2306,13 +2315,15 @@ singbox_add_node_orchestrator() {
     declare -A insecure_params
     local reality_private_key reality_public_key reality_short_id
 
+    # --- 核心逻辑分支：判断是配置 REALITY 还是其他 TLS 协议 ---
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        # 注意：这里我们调用的是上面修改过的 _singbox_handle_reality_setup 函数
+        # 调用 REALITY 专属配置函数
         if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
             press_any_key
             return
         fi
     else
+        # 调用基于证书的 TLS 配置函数
         if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
             press_any_key
             return
@@ -2328,7 +2339,6 @@ singbox_add_node_orchestrator() {
     geo_info_json=$(curl -s ip-api.com/json)
 
     local city operator_name
-    local country_code=$(echo "$geo_info_json" | jq -r '.countryCode // "N/A"')
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
@@ -2382,6 +2392,8 @@ singbox_add_node_orchestrator() {
 
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
+        # 备份旧配置，以防新配置导致启动失败
+        cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.bak"
         systemctl restart sing-box
         sleep 2
         if systemctl is-active --quiet sing-box; then
@@ -2396,37 +2408,53 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
-            # --- **修改核心**：增加 REALITY 和其他协议的最终提醒 ---
+            # --- **核心优化**：增加 REALITY 和其他协议的最终提醒 ---
             if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
                 echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
                 log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
-                log_warn "已经放行了此节点使用的 TCP 和 UDP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
+                log_warn "已经放行了此节点使用的 TCP 端口: ${GREEN}${ports['VLESS-REALITY']}${NC}"
                 log_warn "否则，客户端将无法连接！"
                 echo -e "$YELLOW==============================================================$NC"
             fi
 
             if [ ${#protocols_with_self_signed[@]} -gt 0 ]; then
-                echo -e "\n$YELLOW========================= 重要操作提示 =========================$NC"
+                echo -e "\n$YELLOW====================== IP直连节点重要提示 ====================$NC"
+                log_warn "您使用了IP直连方式(自签名证书)，部分客户端需要特殊设置："
                 for p in "${protocols_with_self_signed[@]}"; do
                     if [[ "$p" == "VMess" ]]; then
                         echo -e "\n${YELLOW}[VMess 节点]$NC"
                         log_warn "如果连接不通, 请在 Clash Verge 等客户端中, 手动找到该"
                         log_warn "节点的编辑页面, 勾选 ${GREEN}'跳过证书验证' (Skip Cert Verify)${YELLOW} 选项。"
                     fi
-                    if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
-                        echo -e "\n${YELLOW}[$p 节点]$NC"
-                        log_warn "这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
-                        log_warn "已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
-                    fi
                 done
-                echo -e "\n$YELLOW==============================================================$NC"
+                echo -e "\n${YELLOW}[通用提示]$NC"
+                log_warn "对于 VLESS, Trojan 等协议，请确保客户端配置中"
+                log_warn "与“允许不安全连接”或“跳过证书验证”相关的选项已开启。"
+                echo -e "$YELLOW==============================================================$NC"
             fi
-            # --- **修改结束** ---
+
+            local udp_protocols_created=()
+            for p in "${protocols_to_create[@]}"; do
+                if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then
+                    udp_protocols_created+=("$p")
+                fi
+            done
+            if [ ${#udp_protocols_created[@]} -gt 0 ]; then
+                echo -e "\n$YELLOW======================= UDP 协议重要提示 =======================$NC"
+                for p in "${udp_protocols_created[@]}"; do
+                    log_warn "[$p 节点] 这是一个 UDP 协议节点, 请务必确保您服务器的防火墙"
+                    log_warn "(及云服务商安全组) 已经放行了此节点使用的 UDP 端口: ${GREEN}${ports[$p]}${NC}"
+                done
+                echo -e "$YELLOW==============================================================$NC"
+            fi
+            # --- **优化结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
-            log_error "Sing-Box 重启失败！请使用 'journalctl -u sing-box -f' 查看详细日志。"
-            log_warn "配置文件可能出错，旧的配置文件已备份为 $SINGBOX_CONFIG_FILE.tmp"
+            log_error "Sing-Box 重启失败！您的新配置可能存在问题。"
+            log_error "旧的配置文件已自动恢复。请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            # 回滚操作
+            mv "$SINGBOX_CONFIG_FILE.bak" "$SINGBOX_CONFIG_FILE"
             press_any_key
         fi
     else
@@ -2487,7 +2515,7 @@ view_node_info() {
             echo -e "\n${CYAN}--------------------------------------------------------------${NC}"
         done
 
-        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接 (需Nginx)${NC}  5. ${BLUE}生成TUIC客户端配置(开发中)${NC}\n\n0. 返回上一级菜单\n"
+        echo -e "\n1. 新增节点  2. 删除节点  3. 推送节点  4. ${YELLOW}生成临时订阅链接${NC}  5. 生成TUIC客户端配置    0. ${GREEN}返回上一级菜单${NC}\n"
         read -p "请输入选项: " choice
 
         case $choice in
@@ -2709,11 +2737,43 @@ push_to_sub_store() {
     fi
     press_any_key
 }
+# (V5辅助函数) 智能获取 Nginx 的 Web 根目录
+_get_nginx_web_root() {
+    if [ -d "/var/www/html" ]; then
+        echo "/var/www/html"
+    elif [ -d "/usr/share/nginx/html" ]; then
+        echo "/usr/share/nginx/html"
+    else
+        log_warn "无法检测到标准的 Nginx Web 根目录，将默认使用 /var/www/html"
+        mkdir -p /var/www/html
+        echo "/var/www/html"
+    fi
+}
 
+# (V5辅助函数) 智能获取 Nginx 的运行用户
+_get_nginx_user() {
+    # 尝试从 Nginx 主配置文件中解析 user 指令
+    if [ -f /etc/nginx/nginx.conf ]; then
+        # grep 查找以 'user' 开头（可能前面有空格）的行，排除注释行
+        # awk 提取最后一个字段（用户名），然后 sed 去掉分号
+        local user=$(grep -E '^\s*user\s+' /etc/nginx/nginx.conf | grep -v '#' | awk '{print $NF}' | sed 's/;//')
+        if [ -n "$user" ]; then
+            echo "$user"
+            return
+        fi
+    fi
+    # 如果找不到，则根据系统类型猜测
+    if [ "$PKG_MANAGER" == "apt" ]; then
+        echo "www-data" # Debian/Ubuntu 默认用户
+    else
+        echo "nginx"    # CentOS/RHEL 默认用户
+    fi
+}
+# (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
-        log_error "Nginx 未安装，无法生成可访问的订阅链接。"
+        log_error "Nginx 未安装，无法执行此功能。"
         press_any_key
         return
     fi
@@ -2722,36 +2782,86 @@ generate_subscription_link() {
         press_any_key
         return
     fi
-    local host=""
-    if is_substore_installed && grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-        host=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $3}' | tr -d '"')
-        log_info "检测到 Sub-Store 已配置域名，将使用: $host"
-    fi
+
+    # 1. 主动询问一个您确定已在防火墙/安全组中开放的端口
+    local listen_port
+    while true; do
+        echo ""
+        read -p "请输入一个您确定已在防火墙/安全组中开放的TCP端口: " listen_port
+        if ! [[ "$listen_port" =~ ^[0-9]+$ ]] || [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
+            log_error "无效的端口号。请输入 1-65535 之间的数字。"
+        elif ss -tln | grep -q -E "(:|:::)$listen_port\b"; then
+            log_error "端口 $listen_port 已被本机其他服务占用，请更换一个。"
+        else
+            break
+        fi
+    done
+
+    local host
+    host=$(get_public_ip v4)
     if [ -z "$host" ]; then
-        host=$(get_public_ip v4)
-        log_info "未检测到配置的域名，将使用公网 IP: $host"
-    fi
-    if [ -z "$host" ]; then
-        log_error "无法确定主机地址 (域名或IP)，操作中止。"
+        log_error "无法获取服务器的公网IPv4地址，操作中止。"
         press_any_key
         return
     fi
-    local sub_dir="/var/www/html"
-    mkdir -p "$sub_dir"
-    local sub_filename
-    sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
-    local sub_filepath="$sub_dir/$sub_filename"
 
-    # 注册临时文件以便自动删除
+    # 2. 在 Nginx 自己的工作目录中创建临时文件，避免一切权限问题
+    local temp_sub_dir="/var/lib/nginx/vps-toolkit-subs"
+    mkdir -p "$temp_sub_dir"
+    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filepath="$temp_sub_dir/$sub_filename"
+
     register_temp_file "$sub_filepath"
+    register_temp_file "$temp_sub_dir"
 
     mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
-    local all_links_str
-    all_links_str=$(printf "%s\n" "${node_lines[@]}")
-    local base64_content
-    base64_content=$(echo -n "$all_links_str" | base64 -w0)
+    local all_links_str=$(printf "%s\n" "${node_lines[@]}")
+    local base64_content=$(echo -n "$all_links_str" | base64 -w0)
     echo "$base64_content" >"$sub_filepath"
-    local sub_url="http://$host/$sub_filename"
+
+    # 确保 Nginx 用户可以读取
+    if command -v chown &>/dev/null; then
+        local nginx_user="www-data"
+        if [ "$PKG_MANAGER" != "apt" ]; then
+           nginx_user="nginx"
+        fi
+        chown -R ${nginx_user}:${nginx_user} "$temp_sub_dir"
+    fi
+    chmod 644 "$sub_filepath"
+
+
+    # 3. 创建一个极其精简、无冲突的 Nginx 临时配置
+    local nginx_temp_conf="/etc/nginx/conf.d/000-vps-toolkit-temp.conf"
+
+    log_info "正在创建 Nginx 临时配置以监听端口 ${listen_port}..."
+    cat > "$nginx_temp_conf" <<EOF
+# 由 vps-toolkit 自动生成，退出后会自动删除
+server {
+    listen ${listen_port} default_server;
+    listen [::]:${listen_port} default_server;
+
+    # 直接将根路径映射到我们创建的临时文件上
+    location /${sub_filename} {
+        alias ${sub_filepath};
+        default_type text/plain;
+    }
+}
+EOF
+    register_temp_file "$nginx_temp_conf"
+
+    # 测试并重载 Nginx
+    if ! nginx -t; then
+        log_error "Nginx 配置测试失败！您的 Nginx 主配置可能存在问题。"
+        rm -f "$nginx_temp_conf"
+        press_any_key
+        return
+    fi
+    systemctl reload nginx
+    log_info "Nginx 配置已成功加载。"
+
+    # 生成最终链接
+    local sub_url="http://${host}:${listen_port}/${sub_filename}"
+
     clear
     log_info "已生成临时订阅链接，请立即复制使用！"
     log_warn "此链接将在您退出脚本后被自动删除。"
@@ -2760,11 +2870,98 @@ generate_subscription_link() {
     echo -e "$CYAN--------------------------------------------------------------$NC"
     press_any_key
 }
-
+# (已完善)
 generate_tuic_client_config() {
+    ensure_dependencies "jq"
     clear
-    log_warn "TUIC 客户端配置生成功能正在开发中..."
-    log_info "此功能旨在为您选择的 TUIC 节点生成一个可以直接在客户端使用的 config.json 文件。"
+
+    if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
+        log_warn "没有找到任何已配置的节点。"
+        press_any_key
+        return
+    fi
+
+    # 1. 查找所有 TUIC 节点
+    mapfile -t tuic_nodes < <(grep "^tuic://" "$SINGBOX_NODE_LINKS_FILE")
+
+    if [ ${#tuic_nodes[@]} -eq 0 ]; then
+        log_warn "在当前配置中没有找到任何 TUIC v5 节点。"
+        press_any_key
+        return
+    fi
+
+    local selected_node
+    # 2. 如果多于一个，让用户选择
+    if [ ${#tuic_nodes[@]} -gt 1 ]; then
+        log_info "检测到多个 TUIC 节点，请选择一个以生成配置：\n"
+        for i in "${!tuic_nodes[@]}"; do
+            local node_name=$(echo "${tuic_nodes[$i]}" | sed 's/.*#\(.*\)/\1/')
+            echo " $((i+1)). $node_name"
+        done
+        echo ""
+        read -p "请输入选项: " choice
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#tuic_nodes[@]} ]; then
+            log_error "无效选项！"
+            press_any_key
+            return
+        fi
+        selected_node=${tuic_nodes[$((choice-1))]}
+    else
+        selected_node=${tuic_nodes[0]}
+        log_info "检测到唯一的 TUIC 节点，将为其生成配置。"
+    fi
+
+    # 3. 解析分享链接
+    log_info "正在解析节点参数..."
+    local url_without_prefix=${selected_node#tuic://}
+    local creds_and_server=${url_without_prefix%%\?*}
+    local query_params=${url_without_prefix#*\?}
+
+    local uuid=$(echo "$creds_and_server" | cut -d: -f1)
+    local password=$(echo "$creds_and_server" | cut -d: -f2 | cut -d@ -f1)
+    local server_part=$(echo "$creds_and_server" | cut -d@ -f2)
+    local server_address=$(echo "$server_part" | rev | cut -d: -f2- | rev)
+    local server_port=$(echo "$server_part" | rev | cut -d: -f1 | rev)
+
+    local sni=$(echo "$query_params" | grep -o -E 'sni=[^&]+' | cut -d= -f2)
+    local alpn=$(echo "$query_params" | grep -o -E 'alpn=[^&]+' | cut -d= -f2)
+    local allow_insecure=$(echo "$query_params" | grep -q 'allow_insecure=1' && echo "true" || echo "false")
+
+    # 4. 动态生成 JSON
+    log_info "正在生成客户端 config.json..."
+    local client_config
+    client_config=$(jq -n \
+        --arg server "$server_address:$server_port" \
+        --arg uuid "$uuid" \
+        --arg password "$password" \
+        --arg sni "$sni" \
+        --argjson alpn "[\"$alpn\"]" \
+        --argjson insecure "$allow_insecure" \
+    '{
+        "relay": {
+            "server": $server,
+            "uuid": $uuid,
+            "password": $password,
+            "udp_relay_mode": "native",
+            "congestion_control": "bbr",
+            "alpn": $alpn,
+            "tls": {
+                "sni": $sni,
+                "insecure_skip_verify": $insecure
+            }
+        },
+        "local": {
+            "server": "127.0.0.1:1080"
+        }
+    }')
+
+    # 5. 清晰展示
+    clear
+    log_info "✅ TUIC 客户端配置已生成！"
+    echo "您可以将以下内容保存为 \`config.json\` 文件，并使用 \`tuic-client -c config.json\` 命令来启动客户端。"
+    echo -e "${CYAN}--------------------------------------------------------------------${NC}"
+    echo -e "${YELLOW}${client_config}${NC}"
+    echo -e "${CYAN}--------------------------------------------------------------------${NC}"
     press_any_key
 }
 

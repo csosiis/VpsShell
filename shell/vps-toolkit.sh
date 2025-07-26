@@ -3026,202 +3026,175 @@ singbox_main_menu() {
     done
 }
 # =================================================
-#                Sub-Store 管理
+#                Sub-Store 管理 (V2 - Docker 版)
 # =================================================
 
+# 检查 Sub-Store (Docker 版) 是否已安装
 is_substore_installed() {
-    if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
+    # 通过检查特定的 Docker Compose 文件来判断是否安装
+    if [ -f "/root/sub-store/docker-compose.yml" ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
+# (核心重构) 使用 Docker Compose 安装 Sub-Store
 substore_do_install() {
-    ensure_dependencies "curl" "unzip" "git"
+    # 步骤1: 确保 Docker 环境就绪
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续安装 Sub-Store。"
+        press_any_key
+        return
+    fi
+    clear
+    log_info "开始使用 Docker Compose 部署 Sub-Store..."
 
-    log_info "开始执行 Sub-Store 安装流程..."
-    set -e
+    # 步骤2: 设置项目目录和基本配置
+    local project_dir="/root/sub-store"
+    if [ -f "$project_dir/docker-compose.yml" ]; then
+        log_error "错误：目录 \"$project_dir\" 下已存在一个 Sub-Store 实例！"
+        log_warn "如需重新安装，请先从主菜单选择【卸载】。"
+        press_any_key
+        return
+    fi
+    mkdir -p "$project_dir"
+    cd "$project_dir" || exit 1
 
-    log_info "正在安装 FNM (Node.js 版本管理器)..."
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /root/.fnm --skip-shell
+    # 步骤3: 收集用户配置 (API 密钥和端口)
+    local api_key
+    read -p "请输入 Sub-Store 的 API 密钥 (用于后端通信) [回车则随机生成]: " user_api_key
+    api_key=${user_api_key:-$(generate_random_password)}
+    log_info "API 密钥已设置为: $api_key"
 
-    export PATH="/root/.fnm:$PATH"
-    eval "$(fnm env)"
-    log_info "FNM 安装完成。"
-
-    log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
-    fnm install lts/iron
-    fnm use lts/iron
-
-    log_info "正在安装 pnpm..."
-    curl -fsSL https://get.pnpm.io/install.sh | sh -
-    export PNPM_HOME="$HOME/.local/share/pnpm"
-    export PATH="$PNPM_HOME:$PATH"
-    log_info "Node.js 和 PNPM 环境准备就绪。"
-
-    log_info "正在下载并设置 Sub-Store 项目文件..."
-    mkdir -p "$SUBSTORE_INSTALL_DIR"
-    cd "$SUBSTORE_INSTALL_DIR" || exit 1
-    curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js
-    curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip
-    unzip -q -o dist.zip && mv dist frontend && rm dist.zip
-    log_info "Sub-Store 项目文件准备就绪。"
-    log_info "开始配置系统服务...\n"
-
-    local API_KEY
-    local random_api_key
-    random_api_key=$(generate_random_password)
-    read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
-    API_KEY=${user_api_key:-$random_api_key}
-    if [ -z "$API_KEY" ]; then API_KEY=$(generate_random_password); fi
-    log_info "最终使用的 API 密钥为: ${API_KEY}\n"
-    local FRONTEND_PORT
+    local frontend_port
     while true; do
-        read -p "请输入前端访问端口 [默认: 3000]: " port_input
-        FRONTEND_PORT=${port_input:-"3000"}
-        if check_port "$FRONTEND_PORT"; then break; fi
-    done
-    local BACKEND_PORT
-    while true; do
-        echo ""
-        read -p "请输入后端 API 端口 [默认: 3001]: " backend_port_input
-        BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$BACKEND_PORT" == "$FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$BACKEND_PORT"; then break; fi
-        fi
+        read -p "请输入 Sub-Store 的外部访问端口 [默认: 3000]: " port_input
+        frontend_port=${port_input:-"3000"}
+        if check_port "$frontend_port"; then break; fi
     done
 
-    cat <<EOF >"$SUBSTORE_SERVICE_FILE"
-[Unit]
-Description=Sub-Store Service
-After=network-online.target
-Wants=network-online.target
-[Service]
-Environment="SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}"
-Environment="SUB_STORE_BACKEND_CRON=0 0 * * *"
-Environment="SUB_STORE_FRONTEND_PATH=${SUBSTORE_INSTALL_DIR}/frontend"
-Environment="SUB_STORE_FRONTEND_HOST=::"
-Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
-Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
-Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
-Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-ExecStart=/root/.fnm/fnm exec --using lts/iron node ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
-Type=simple
-User=root
-Group=root
-Restart=on-failure
-RestartSec=5s
-LimitNOFILE=32767
-ExecStartPre=/bin/sh -c "ulimit -n 51200"
-StandardOutput=journal
-StandardError=journal
-[Install]
-WantedBy=multi-user.target
+    # 步骤4: 创建 .env 和 docker-compose.yml 文件
+    log_info "正在创建配置文件..."
+    # 使用 .env 文件管理环境变量，这是 Docker Compose 的最佳实践
+    cat > .env <<EOF
+# Sub-Store 环境变量
+# API 密钥，用于后端路径
+API_KEY=${api_key}
+# 前端访问端口
+FRONTEND_PORT=${frontend_port}
+# 后端 API 端口 (容器内部，无需修改)
+BACKEND_PORT=3001
+# CRON 表达式 (默认每天凌晨执行)
+CRON_EXPRESSION="0 0 * * *"
 EOF
 
-    log_info "正在启动并启用 sub-store 服务..."
-    systemctl daemon-reload
-    systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
-    systemctl start "$SUBSTORE_SERVICE_NAME"
-    log_info "正在检测服务状态 (等待 5 秒)..."
-    sleep 5
-    set +e
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ 服务状态正常 (active)。"
-        substore_view_access_link
+    # 创建 docker-compose.yml
+    cat > docker-compose.yml <<'EOF'
+version: '3.8'
+
+services:
+  sub-store:
+    image: substore/sub-store:latest
+    container_name: sub-store
+    restart: always
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}" # 将 .env 中定义的端口映射到容器
+    environment:
+      # --- 核心配置 ---
+      # 前端监听的端口 (容器内部)
+      - SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}
+      # 后端 API 监听的端口 (容器内部)
+      - SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}
+      # 后端 API 的访问路径 (组合成 /${API_KEY})
+      - SUB_STORE_FRONTEND_BACKEND_PATH=/${API_KEY}
+      # --- 高级配置 ---
+      # 定时任务表达式
+      - SUB_STORE_BACKEND_CRON=${CRON_EXPRESSION}
+      # 后端 API 监听地址 (容器内部，127.0.0.1 更安全)
+      - SUB_STORE_BACKEND_API_HOST=127.0.0.1
+    volumes:
+      - substore_data:/usr/src/app/data # 使用命名数据卷持久化数据
+
+volumes:
+  substore_data:
+    name: substore_data # 显式命名数据卷
+EOF
+
+    # 步骤5: 启动服务
+    log_info "正在拉取 Sub-Store 镜像并启动服务..."
+    log_warn "首次启动需要下载镜像，可能需要一些时间，请耐心等待..."
+    if docker compose up -d; then
+        log_info "✅ Sub-Store 服务已成功启动！"
+        substore_view_access_link # 显示访问链接
     else
-        log_error "服务启动失败！请使用日志功能排查。"
+        log_error "Sub-Store 启动失败！请使用 'docker compose logs' 查看错误日志。"
     fi
 
+    # 步骤6: 询问是否设置反代
     read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then substore_setup_reverse_proxy; else press_any_key; fi
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        substore_setup_reverse_proxy
+    else
+        press_any_key
+    fi
 }
 
+# (重构) 卸载 Docker 版 Sub-Store
 substore_do_uninstall() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无需卸载。"
-        press_any_key
-        return
-    fi
-
-    read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
-    fi
-    set -e
-    log_info "正在停止并禁用 Sub-Store 服务..."
-    systemctl stop "$SUBSTORE_SERVICE_NAME"
-    systemctl disable "$SUBSTORE_SERVICE_NAME"
-    log_info "正在删除服务文件..."
-    rm -f "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    log_info "正在删除 Sub-Store 安装目录..."
-    rm -rf "$SUBSTORE_INSTALL_DIR"
-    set +e
-    log_info "✅ Sub-Store 已成功卸载。"
+    # 直接调用通用的 Docker Compose 项目卸载函数
+    uninstall_docker_compose_project "Sub-Store" "/root/sub-store"
     press_any_key
 }
 
+# (重构) 更新 Docker 版 Sub-Store
 update_sub_store_app() {
     if ! is_substore_installed; then
         log_warn "Sub-Store 未安装，无法更新。"
         press_any_key
         return
     fi
-    log_info "正在准备更新 Sub-Store..."
-    cd "$SUBSTORE_INSTALL_DIR" || { log_error "无法进入安装目录: $SUBSTORE_INSTALL_DIR"; return; }
+    local project_dir="/root/sub-store"
+    cd "$project_dir" || { log_error "无法进入安装目录: $project_dir"; return; }
 
-    log_info "正在下载最新的后端 bundle..."
-    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new; then
-        log_error "下载后端文件失败！"
-        rm -f sub-store.bundle.js.new
+    log_info "正在拉取最新的 Sub-Store 镜像..."
+    if ! docker compose pull; then
+        log_error "镜像拉取失败！请检查网络或 Docker Hub 连接。"
         press_any_key
         return
     fi
 
-    log_info "正在下载最新的前端资源..."
-    if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip.new; then
-        log_error "下载前端资源失败！"
-        rm -f dist.zip.new sub-store.bundle.js.new
-        press_any_key
-        return
-    fi
-
-    log_info "正在备份旧文件并应用更新..."
-    mv sub-store.bundle.js sub-store.bundle.js.bak
-    mv sub-store.bundle.js.new sub-store.bundle.js
-
-    rm -rf frontend.bak
-    mv frontend frontend.bak
-    unzip -q -o dist.zip.new && mv dist frontend && rm dist.zip.new
-
-    log_info "文件更新完毕，正在重启服务..."
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    sleep 3
-    if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-        log_info "✅ Sub-Store 更新成功并已重启！"
+    log_info "镜像更新完毕，正在重新创建容器以应用更新..."
+    if docker compose up -d; then
+        log_info "✅ Sub-Store 已成功更新并重启！"
     else
-        log_error "服务重启失败，请使用日志功能排查问题。"
+        log_error "服务重启失败，请使用 'docker compose logs' 查看问题。"
     fi
     press_any_key
 }
 
+# (重构) 查看访问链接
 substore_view_access_link() {
     if ! is_substore_installed; then
         log_warn "Sub-Store 未安装，无法查看链接。"
         return
     fi
     clear
-    local frontend_port
-    frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local api_key
-    api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local ipv4_addr
-    ipv4_addr=$(get_public_ip v4)
-    local proxy_domain
-    proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local project_dir="/root/sub-store"
+
+    # 从 .env 文件读取配置
+    local frontend_port=$(grep 'FRONTEND_PORT' "$project_dir/.env" | cut -d'=' -f2)
+    local api_key_path=$(grep 'API_KEY' "$project_dir/.env" | cut -d'=' -f2)
+    local api_key="/${api_key_path}"
+    local ipv4_addr=$(get_public_ip v4)
+    local proxy_domain=""
+    if [ -f "$project_dir/.proxy_domain" ]; then
+        proxy_domain=$(cat "$project_dir/.proxy_domain")
+    fi
 
     echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
 
+    # 优先显示反代链接
     if [ -n "$proxy_domain" ]; then
         log_info "检测到反向代理域名，请使用以下链接访问："
         local backend_url="https://$proxy_domain$api_key"
@@ -3230,6 +3203,7 @@ substore_view_access_link() {
         echo -e "$CYAN-----------------------------------------------------------$NC"
     fi
 
+    # 提供 IP 访问链接作为备用
     log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
     local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
     local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
@@ -3237,11 +3211,12 @@ substore_view_access_link() {
     echo -e "$CYAN-----------------------------------------------------------$NC"
 }
 
+# (重构) 设置反向代理
 substore_setup_reverse_proxy() {
     if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
 
-    local frontend_port
-    frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local project_dir="/root/sub-store"
+    local frontend_port=$(grep 'FRONTEND_PORT' "$project_dir/.env" | cut -d'=' -f2)
     local domain
 
     log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
@@ -3254,16 +3229,10 @@ substore_setup_reverse_proxy() {
         return
     fi
 
-    setup_auto_reverse_proxy "$domain" "$frontend_port"
-
-    if [ $? -eq 0 ]; then
-        log_info "正在将域名保存到服务配置中以供显示..."
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
-            sed -i.bak "s|SUB_STORE_REVERSE_PROXY_DOMAIN=.*|SUB_STORE_REVERSE_PROXY_DOMAIN=\"$domain\"|" "$SUBSTORE_SERVICE_FILE"
-        else
-            sed -i.bak "/^\[Service\]/a Environment=\"SUB_STORE_REVERSE_PROXY_DOMAIN=$domain\"" "$SUBSTORE_SERVICE_FILE"
-        fi
-        systemctl daemon-reload
+    # 调用通用反代函数
+    if setup_auto_reverse_proxy "$domain" "$frontend_port"; then
+        # 将域名记录在项目目录中，而不是服务文件里
+        echo "$domain" > "$project_dir/.proxy_domain"
         log_info "✅ Sub-Store 反向代理设置完成！"
         log_info "正在显示最新的访问链接..."
         sleep 1
@@ -3275,60 +3244,89 @@ substore_setup_reverse_proxy() {
     press_any_key
 }
 
+# (通用) 修改 .env 文件并重启 Docker Compose 项目
+_update_env_and_restart_compose() {
+    local project_dir="$1"
+    local key_to_update="$2"
+    local new_value="$3"
+
+    cd "$project_dir" || return 1
+    # 使用 sed 安全地替换或追加键值对
+    if grep -q "^${key_to_update}=" .env; then
+        sed -i "s|^${key_to_update}=.*|${key_to_update}=${new_value}|" .env
+    else
+        echo "${key_to_update}=${new_value}" >> .env
+    fi
+
+    log_info "配置已更新，正在重启服务以应用更改..."
+    if docker compose up -d; then
+        log_info "✅ 服务已重启。"
+        return 0
+    else
+        log_error "服务重启失败！"
+        return 1
+    fi
+}
+
+
+# (重构) 重置端口
 substore_reset_ports() {
     if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    local project_dir="/root/sub-store"
     log_info "准备重置 Sub-Store 端口..."
-    local NEW_FRONTEND_PORT
+
+    local new_frontend_port
     while true; do
         read -p "请输入新的前端访问端口 [默认: 3000]: " port_input
-        NEW_FRONTEND_PORT=${port_input:-"3000"}
-        if check_port "$NEW_FRONTEND_PORT"; then break; fi
-    done
-    local NEW_BACKEND_PORT
-    while true; do
-        read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input
-        NEW_BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$NEW_BACKEND_PORT"; then break; fi
-        fi
+        new_frontend_port=${port_input:-"3000"}
+        if check_port "$new_frontend_port"; then break; fi
     done
 
-    sed -i.bak "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    sed -i.bak "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"
+    if _update_env_and_restart_compose "$project_dir" "FRONTEND_PORT" "$new_frontend_port"; then
+        log_info "新的前端端口为: $new_frontend_port"
+        # 如果存在反代，需要提醒用户手动处理
+        if [ -f "$project_dir/.proxy_domain" ]; then
+            log_warn "注意：您已重置端口，但反向代理配置仍指向旧端口。"
+            log_warn "您需要手动编辑反代配置文件，或删除后重新设置反代。"
+        fi
+    fi
     press_any_key
 }
 
+# (重构) 重置 API 密钥
 substore_reset_api_key() {
     if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
+    local project_dir="/root/sub-store"
     log_info "准备重置 API 密钥..."
-    local NEW_API_KEY
-    read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
-    NEW_API_KEY=${user_api_key:-$(generate_random_password)}
 
-    sed -i.bak "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ API 密钥已更新，服务已重启。"
-    log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
+    local new_api_key
+    read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
+    new_api_key=${user_api_key:-$(generate_random_password)}
+
+    if _update_env_and_restart_compose "$project_dir" "API_KEY" "$new_api_key"; then
+         log_info "新的 API 密钥是: $YELLOW$new_api_key$NC"
+         substore_view_access_link # 重置后立即显示新链接
+    fi
     press_any_key
 }
 
+# (重构) Sub-Store 管理菜单
 substore_manage_menu() {
     while true; do
         clear
+        local project_dir="/root/sub-store"
+
         local rp_menu_text="设置反向代理 (推荐)"
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
+        if [ -f "$project_dir/.proxy_domain" ]; then
             rp_menu_text="更换反代域名"
         fi
 
         local STATUS_COLOR
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+        # 通过 docker compose ps 命令检查状态
+        if docker compose -f "$project_dir/docker-compose.yml" ps 2>/dev/null | grep -q "Up"; then
             STATUS_COLOR="$GREEN● 活动$NC"
         else
-            STATUS_COLOR="$RED● 不活动$NC"
+            STATUS_COLOR="$RED● 不活动/错误$NC"
         fi
 
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
@@ -3358,12 +3356,14 @@ substore_manage_menu() {
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
         read -p "请输入选项: " choice
+        # 在执行 docker compose 命令前，先切换到项目目录
+        cd "$project_dir" || { log_error "无法进入项目目录!"; press_any_key; break; }
         case $choice in
-        1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key ;;
-        5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager ;;
+        1) docker compose up -d; log_info "命令已发送"; sleep 1 ;;
+        2) docker compose stop; log_info "命令已发送"; sleep 1 ;;
+        3) docker compose restart; log_info "命令已发送"; sleep 1 ;;
+        4) clear; docker compose ps; press_any_key ;;
+        5) clear; docker compose logs -f --tail 50 ;;
         6) substore_view_access_link; press_any_key ;;
         7) substore_reset_ports ;;
         8) substore_reset_api_key ;;
@@ -3374,21 +3374,29 @@ substore_manage_menu() {
     done
 }
 
+# (重构) Sub-Store 主菜单
 substore_main_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
+        echo -e "$CYAN║$WHITE             Sub-Store 管理 (Docker 版)           $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
+
         if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            local project_dir="/root/sub-store"
+            local STATUS_COLOR
+            if docker compose -f "$project_dir/docker-compose.yml" ps 2>/dev/null | grep -q "Up"; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动/错误$NC"
+            fi
+
             echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store (拉取最新镜像)$NC               $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3397,21 +3405,26 @@ substore_main_menu() {
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) substore_manage_menu ;;
+            2) update_sub_store_app ;;
+            3) substore_do_uninstall ;;
+            0) break ;;
+            *) log_warn "无效选项！"; sleep 1 ;;
             esac
         else
             echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
             echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. ${GREEN}安装 Sub-Store (Docker 方式)${NC}               $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
             read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+            1) substore_do_install ;;
+            0) break ;;
+            *) log_warn "无效选项！"; sleep 1 ;;
             esac
         fi
     done
