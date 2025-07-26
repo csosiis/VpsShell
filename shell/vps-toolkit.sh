@@ -318,45 +318,56 @@ _print_menu_line() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
 }
 # =================================================
-#           最终版：系统健康巡检主函数 (V3)
+#    最终版：两列对齐报告打印函数
 # =================================================
-# 理念：
-# 1. 所有的标题、分隔线、内容行，全部交由 _print_menu_line 函数处理，以保证格式绝对统一。
-# 2. 对于“标签: 值”这样的两列内容，先用 printf 格式化成一个字符串变量 line_content。
-# 3. 再把这个 line_content 传递给 _print_menu_line，由它来负责边框、填充、换行和空行间距。
-# 4. SSL证书这类可能超长的行，直接拼接成一个长字符串交给 _print_menu_line，它会自动处理换行。
+# 功能: 打印格式为 "标签: 值" 的行，并确保所有"值"在垂直方向上严格对齐。
+# 参数1: 标签 (Label)
+# 参数2: 值 (Value)
+# 参数3: 值的颜色 (可选, 默认为白色)
+_print_aligned_line() {
+    local label="$1"
+    local value="$2"
+    local color="${3:-$WHITE}" # 如果不提供颜色，则默认为白色
 
+    # 定义左边标签列的宽度(包含冒号和空格)
+    local label_width=16
+
+    # 定义右边值列的宽度
+    # 总宽度50 - 边框内外侧共4个空格 - 标签宽度16 = 30
+    local value_width=34
+
+    # 使用printf的强大格式化功能
+    # %-16s: 标签，左对齐，占据16个字符位
+    # ${color}..${NC}: 为值的部分包裹上颜色
+    # %-34s: 值，左对齐，占据34个字符位
+    printf "$CYAN║$NC  %-16s${color}%-${value_width}s${NC} $CYAN║$NC\n" "${label}:" "$value"
+}
+# =================================================
+#       最终版：系统健康巡检主函数 (V4 - 精确对齐)
+# =================================================
 system_health_check() {
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE                   系统健康巡检报告                 $CYAN║$NC"
+    echo -e "$CYAN╟─────────────── $WHITE核心服务状态$CYAN ───────────────────╢$NC"
 
-    # --- 核心服务状态 ---
-    _print_menu_line "╟─────────────── ${WHITE}核心服务状态${CYAN} ───────────────────╢"
-
-    local status_text status_color line_content
+    local status_text status_color
     _get_service_status "docker" status_text status_color
-    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Docker 服务" "$status_text")
-    _print_menu_line "$line_content"
+    _print_aligned_line "Docker 服务" "$status_text" "$status_color"
 
     _get_service_status "nginx" status_text status_color
-    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Nginx 服务" "$status_text")
-    _print_menu_line "$line_content"
+    _print_aligned_line "Nginx 服务" "$status_text" "$status_color"
 
     _get_service_status "caddy" status_text status_color
-    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Caddy 服务" "$status_text")
-    _print_menu_line "$line_content"
+    _print_aligned_line "Caddy 服务" "$status_text" "$status_color"
 
     _get_service_status "sing-box" status_text status_color
-    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Sing-Box 服务" "$status_text")
-    _print_menu_line "$line_content"
+    _print_aligned_line "Sing-Box 服务" "$status_text" "$status_color"
 
     _get_service_status "fail2ban" status_text status_color
-    line_content=$(printf "  %-12s: ${status_color}%s${NC}" "Fail2Ban 服务" "$status_text")
-    _print_menu_line "$line_content"
+    _print_aligned_line "Fail2Ban 服务" "$status_text" "$status_color"
 
-    # --- 系统资源使用 ---
-    _print_menu_line "╟─────────────── ${WHITE}系统资源使用${CYAN} ───────────────────╢"
+    echo -e "$CYAN╟─────────────── $WHITE系统资源使用$CYAN ───────────────────╢$NC"
 
     local disk_usage_percent disk_status_color disk_info
     disk_usage_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
@@ -364,46 +375,38 @@ system_health_check() {
     elif [ "$disk_usage_percent" -gt 65 ]; then disk_status_color="$YELLOW";
     else disk_status_color="$GREEN"; fi
     disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
-    line_content=$(printf "  %-12s: ${disk_status_color}%s${NC}" "根目录磁盘" "$disk_info")
-    _print_menu_line "$line_content"
+    _print_aligned_line "根目录磁盘" "$disk_info" "$disk_status_color"
 
     local mem_info
     mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
-    line_content=$(printf "  %-12s: ${WHITE}%s${NC}" "内存使用" "$mem_info")
-    _print_menu_line "$line_content"
+    _print_aligned_line "内存使用" "$mem_info" "$WHITE"
 
-    # --- Docker 容器状态 ---
     if command -v docker &>/dev/null; then
-        _print_menu_line "╟─────────────── ${WHITE}Docker 容器概览${CYAN} ──────────────────╢"
+        echo -e "$CYAN╟─────────────── $WHITEDocker 容器概览$CYAN ──────────────────╢$NC"
         local total_containers running_containers restarting_containers
         total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
         running_containers=$(docker ps --format '{{.Names}}' | wc -l)
         restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
 
-        line_content=$(printf "  %-12s: ${WHITE}%s${NC}" "总容器数" "$total_containers")
-        _print_menu_line "$line_content"
-
-        line_content=$(printf "  %-12s: ${GREEN}%s${NC}" "运行中" "$running_containers")
-        _print_menu_line "$line_content"
-
+        _print_aligned_line "总容器数" "$total_containers" "$WHITE"
+        _print_aligned_line "运行中" "$running_containers" "$GREEN"
         if [ -n "$restarting_containers" ]; then
-             line_content=$(printf "  %-12s: ${RED}%s${NC}" "异常(重启中)" "$restarting_containers")
-             _print_menu_line "$line_content"
+             _print_aligned_line "异常(重启中)" "$restarting_containers" "$RED"
         fi
     fi
 
-    # --- SSL 证书状态 ---
     if command -v certbot &>/dev/null; then
-        _print_menu_line "╟─────────────── ${WHITE}SSL 证书有效期${CYAN} ──────────────────╢"
+        echo -e "$CYAN╟─────────────── $WHITESSL 证书有效期$CYAN ──────────────────╢$NC"
         local cert_info
         cert_info=$(certbot certificates 2>/dev/null)
         if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
-            _print_menu_line "  未发现任何 Certbot 证书"
+            _print_aligned_line "未发现任何 Certbot 证书" "" "$YELLOW"
         else
-            # 将证书名和有效期拼接成一个长字符串，让 _print_menu_line 自动处理换行
-            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID/," (VALID"); printf "%s|%s\n", name, expiry}' | while IFS='|' read -r cert_name expiry_date; do
-                line_content="  ${YELLOW}${cert_name}${NC} -> ${GREEN}${expiry_date}${NC}"
-                _print_menu_line "$line_content"
+            # 对于SSL证书这种特殊多列格式，我们使用一个专用的printf来实现对齐
+            # %-24s: 域名，左对齐，占据24位
+            # %-26s: 日期，左对齐，占据26位 (24+26=50)
+            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID.*\)/," (VALID: " $NF " days)"); printf "%s|%s\n", name, expiry}' | while IFS='|' read -r cert_name expiry_date; do
+                printf "$CYAN║$NC  ${YELLOW}%-24s${NC} -> ${GREEN}%-22s${NC}  $CYAN║$NC\n" "$cert_name" "$expiry_date"
             done
         fi
     fi
