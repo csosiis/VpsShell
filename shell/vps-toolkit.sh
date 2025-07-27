@@ -241,17 +241,31 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：通用菜单绘制函数 (V13 - awk兼容性终极修正版)
+#           通用菜单绘制函数 (V15 - 智能默认版)
 # =================================================
 # 函数: 绘制一个标准的、完美对齐的菜单
 #
-# @param $1: 菜单标题 (字符串，可包含\n换行符)
+# @param $1: 菜单标题 (字符串)
 # @param $2: 用于接收用户选择的变量名 (引用)
-# @param $3+: 菜单选项数组
+# @param $3: (可选) 特殊指令 "exit"，用于主菜单显示 "退出脚本"
+# @param $...: 菜单选项数组
 _draw_menu() {
     local title_block="$1"
     local -n choice_ref=$2
-    shift 2
+    local exit_text
+
+    # --- 新增的智能判断逻辑 ---
+    if [[ "$3" == "exit" ]]; then
+        # 如果第三个参数是 "exit"，说明是主菜单调用
+        exit_text="${RED}退出脚本${NC}"
+        shift 3 # 跳过 title, choice_ref, 和 "exit" 指令
+    else
+        # 否则，就是普通的子菜单调用
+        exit_text="返回"
+        shift 2 # 只跳过 title 和 choice_ref，保留选项
+    fi
+    # --- 逻辑结束 ---
+
     local -a options=("$@")
 
     # --- 核心参数 ---
@@ -261,8 +275,6 @@ _draw_menu() {
 
     # --- 辅助函数：使用 awk -v 的安全方式计算视觉宽度 ---
     _get_visual_width() {
-        # 核心改动：使用 awk -v var="$1" 的方式传递变量，
-        # 这种方式能确保字符串内容不会干扰 awk 的源代码。
         awk -v text="$1" 'BEGIN {
             w=0;
             for(i=1; i<=length(text); i++) {
@@ -281,7 +293,6 @@ _draw_menu() {
     local title_line_num=0
     while IFS= read -r title_line; do
         if [ $title_line_num -eq 0 ]; then
-            # --- 主标题：居中对齐 ---
             local clean_title
             clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
             local title_width
@@ -290,7 +301,6 @@ _draw_menu() {
             local padding_right=$((menu_width - title_width - padding_left))
             printf "$CYAN%s%*s%b%*s%s$NC\n" "$border_char" "$padding_left" "" "$title_line" "$padding_right" "" "$border_char"
         else
-            # --- 状态行/副标题：左对齐 ---
             printf "$CYAN%s$NC  %b" "$border_char" "$title_line"
             printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
         fi
@@ -306,19 +316,18 @@ _draw_menu() {
         rendered_option=$(echo -e "$option_text")
         local prefix_text
         printf -v prefix_text "  %2d. " "$((i + 1))"
-        # 增加垂直间距
         printf "$CYAN%s" "$border_char"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-        # 打印内容行
         printf "$CYAN%s$NC%s%b" "$border_char" "$prefix_text" "$rendered_option"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     done
 
-    # 3. 打印结尾和 "返回" 选项
+    # 3. 打印结尾和 "0号选项"
     printf "$CYAN%s" "$border_char"
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    printf "$CYAN%s$NC   0. 返回" "$border_char"
+    # 使用 %b 来正确渲染带颜色的退出文本
+    printf "$CYAN%s$NC  0. %b" "$border_char" "$exit_text"
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
@@ -5993,11 +6002,10 @@ initial_setup_check() {
     fi
 }
 # =================================================
-#           脚本初始化 & 主入口 (最终优化版)
+#      脚本主入口 (main_menu) - 特殊指令版
 # =================================================
 main_menu() {
     while true; do
-        # 1. 动态获取IP地址
         local ipv4
         ipv4=$(get_public_ip v4)
         local ipv6
@@ -6005,11 +6013,8 @@ main_menu() {
         [ -z "$ipv4" ] && ipv4="N/A"
         [ -z "$ipv6" ] && ipv6="N/A"
 
-        # 2. 组合成一个多行的标题 (已移除多余的分割线)
-        local title
-        title="全功能 VPS & 应用管理脚本\n\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}\n"
+        local title="全功能 VPS & 应用管理脚本\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
 
-        # 3. 定义主菜单的所有选项
         local -a options=(
             "系统综合管理"
             "Sing-Box 管理"
@@ -6021,11 +6026,10 @@ main_menu() {
             "${GREEN}更新此脚本${NC}"
         )
 
-        # 4. 定义一个变量来接收用户的选择，并调用通用菜单函数
         local choice
-        _draw_menu "$title" choice "${options[@]}"
+        # <-- 核心改动：在这里传入 "exit" 作为特殊指令
+        _draw_menu "$title" choice "exit" "${options[@]}"
 
-        # 5. 根据用户的选择执行相应操作
         case $choice in
             1) sys_manage_menu ;;
             2) singbox_main_menu ;;
@@ -6035,7 +6039,7 @@ main_menu() {
             6) docker_apps_menu ;;
             7) certificate_management_menu ;;
             8) do_update_script ;;
-            0) exit 0 ;; # 0 号选项固定为退出脚本
+            0) exit 0 ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
