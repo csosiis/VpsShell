@@ -3556,7 +3556,7 @@ substore_do_install() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)               $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)             $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
@@ -3838,7 +3838,7 @@ substore_manage_menu() {
         install_type="宿主机版"
         is_baremetal=true
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            status_text="${GREEN}● 活动     ${NC}"
+            status_text="${GREEN}● 活动        ${NC}"
         fi
     fi
 
@@ -3906,12 +3906,12 @@ substore_main_menu() {
         elif is_substore_installed_baremetal; then
             install_type="宿主机版"
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-                STATUS_COLOR="$GREEN● 活动     $NC"
+                STATUS_COLOR="$GREEN● 活动        $NC"
             else
-                STATUS_COLOR="$RED● 不活动   $NC"
+                STATUS_COLOR="$RED● 不活动      $NC"
             fi
         else
-            STATUS_COLOR="$YELLOW● 未安装   $NC"
+            STATUS_COLOR="$YELLOW● 未安装     $NC"
         fi
 
         printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$STATUS_COLOR" "$install_type"
