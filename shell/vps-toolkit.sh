@@ -4072,76 +4072,45 @@ install_nezha_dashboard_v1() {
     press_any_key
 }
 
-nezha_agent_menu() {
+# =================================================
+#      哪吒监控主菜单 (nezha_main_menu) - 优化版
+# =================================================
+nezha_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        local title="哪吒监控管理"
+        local -a options=(
+            "Agent 管理 (本机探针)"
+            "Dashboard 管理 (服务器面板)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        local v0_status
-        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
-        local phoenix_status
-        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
-
-        echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
-        if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   xz0. $RED卸载 NEZHA V0 探针$NC                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        fi
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
-        if is_nezha_agent_phoenix_installed; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   xz1. $RED卸载 NEZHA V1 探针$NC                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        fi
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
         case $choice in
-        1) install_nezha_agent_v0 ;;
-        xz0) uninstall_nezha_agent_v0 ;;
-        2) install_nezha_agent_phoenix ;;
-        xz1) uninstall_nezha_agent_phoenix ;;
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
+# =================================================
+#      哪吒面板管理 (nezha_dashboard_menu) - 优化版
+# =================================================
 nezha_dashboard_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                哪吒面板 (Dashboard) 管理         $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装/管理 V0 面板 (by fscarmen)             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装/管理 V1 面板 (Official)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 将提示信息整合进多行标题
+        local title="哪吒面板 (Dashboard) 管理\n${YELLOW}面板脚本来自第三方,已集成管理/卸载功能\n如需管理,请再次运行对应的安装选项${NC}"
 
-        log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
-        log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
+        # 2. 定义选项
+        local -a options=(
+            "安装/管理 V0 面板 (by fscarmen)"
+            "安装/管理 V1 面板 (Official)"
+        )
 
-        read -p "请输入选项: " choice
+        # 3. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
         case $choice in
         1) install_nezha_dashboard_v0 ;;
         2) install_nezha_dashboard_v1 ;;
@@ -4150,31 +4119,51 @@ nezha_dashboard_menu() {
         esac
     done
 }
-
-nezha_main_menu() {
+# =================================================
+#      哪吒探针管理 (nezha_agent_menu) - 优化版
+# =================================================
+nezha_agent_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="哪吒探针 (Agent) 管理"
 
-        read -p "请输入选项: " choice
-        case $choice in
-        1) nezha_agent_menu ;;
-        2) nezha_dashboard_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
+        # 1. 动态构建选项数组
+        local -a options=()
+        local v0_status phoenix_status
+
+        # V0 探针选项
+        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
+        options+=("安装/重装 NEZHA V0 探针 $v0_status")
+        if is_nezha_agent_v0_installed; then
+            options+=("卸载 NEZHA V0 探针 (卸载)")
+        fi
+
+        # V1 探针选项
+        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
+        options+=("安装/重装 NEZHA V1 探针 $phoenix_status")
+        if is_nezha_agent_phoenix_installed; then
+            options+=("卸载 NEZHA V1 探针 (卸载)")
+        fi
+
+        # 2. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 3. 智能处理选择
+        #    因为选项是动态的，我们通过判断选项的文本内容来决定执行哪个操作
+        if [ -n "$choice" ] && [ "$choice" -ne 0 ]; then
+            local selected_option="${options[$((choice-1))]}"
+            case "$selected_option" in
+                *"安装/重装 NEZHA V0"*) install_nezha_agent_v0 ;;
+                *"卸载 NEZHA V0"*) uninstall_nezha_agent_v0 ;;
+                *"安装/重装 NEZHA V1"*) install_nezha_agent_phoenix ;;
+                *"卸载 NEZHA V1"*) uninstall_nezha_agent_phoenix ;;
+                *) log_error "无效的内部选项！" ; sleep 1 ;;
+            esac
+        elif [ "$choice" -eq 0 ]; then
+            break
+        else
+            log_error "无效输入！"; sleep 1
+        fi
     done
 }
 # =================================================
@@ -4495,37 +4484,24 @@ uninstall_docker() {
     sleep 3s
     docker_menu
 }
-
-# --- 子菜单定义 ---
-
+# =================================================
+#      容器管理 (docker_container_menu) - 优化版
+# =================================================
 docker_container_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     容器管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 启动一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 停止一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 重启一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 查看容器实时日志                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${YELLOW}删除已停止的容器$NC                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${RED}强制删除容器 (并清理数据)${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="容器管理"
+        local -a options=(
+            "列出所有容器"
+            "启动一个容器"
+            "停止一个容器"
+            "重启一个容器"
+            "查看容器实时日志"
+            "删除已停止的容器"
+            "强制删除容器 (并清理数据) (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) docker_list_containers ;;
         2) docker_start_container ;;
@@ -4539,25 +4515,20 @@ docker_container_menu() {
         esac
     done
 }
-
+# =================================================
+#      镜像管理 (docker_image_menu) - 优化版
+# =================================================
 docker_image_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     镜像管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有镜像                                $CYAN║$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${YELLOW}删除一个指定镜像$NC                            $CYAN║$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}清理所有未使用的镜像${NC}                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="镜像管理"
+        local -a options=(
+            "列出所有镜像"
+            "删除一个指定镜像"
+            "清理所有未使用的镜像 (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) docker_list_images ;;
         2) docker_remove_image ;;
@@ -4567,32 +4538,24 @@ docker_image_menu() {
         esac
     done
 }
-# --- 主管理菜单 (V2.0) ---
+# =================================================
+#      Docker 主菜单 (docker_manage_menu) - 优化版
+# =================================================
 docker_manage_menu() {
     while true; do
-        clear
-        # 核心逻辑：首先检查 'docker' 命令是否存在
+        local choice
+
         if ! command -v docker &>/dev/null; then
             # --- Docker 未安装时显示的菜单 ---
-            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}                $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            local title="Docker 通用管理\n\n  当前状态: ${YELLOW}● 未安装${NC}"
+            local -a options=("安装 Docker & Docker Compose")
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
             1)
-                # 调用脚本中已有的安装函数
                 _install_docker_and_compose
                 press_any_key
-                # 不跳出循环，安装后会自动刷新菜单
                 ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
@@ -4600,36 +4563,23 @@ docker_manage_menu() {
         else
             # --- Docker 已安装时显示的菜单 ---
             local DOCKER_STATUS_COLOR
-            # 检测 Docker 服务是否正在运行
             if systemctl is-active --quiet docker; then
                 DOCKER_STATUS_COLOR="$GREEN● 活动$NC"
             else
                 DOCKER_STATUS_COLOR="$RED● 不活动$NC"
             fi
 
-            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC  当前状态: $DOCKER_STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            local title="Docker 通用管理\n  当前状态: $DOCKER_STATUS_COLOR"
+            local -a options=(
+                "${GREEN}容器管理 (启停/删除/日志)${NC}"
+                "镜像管理 (删除/清理)"
+                "清理 Docker 系统 (释放空间)"
+                "安装 Portainer 图形化管理面板"
+                "${RED}完全卸载Docker (卸载)${NC}"
+            )
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
             1) docker_container_menu ;;
             2) docker_image_menu ;;
@@ -5292,9 +5242,9 @@ uninstall_1panel() {
     fi
     press_any_key
 }
-# =================================================================
-#           智能卸载菜单 (V2.0 - 增强检测版)
-# =================================================================
+# =================================================
+#      智能卸载菜单 (uninstall_panels_menu) - 优化版
+# =================================================
 uninstall_panels_menu() {
     while true; do
         clear
@@ -5303,7 +5253,7 @@ uninstall_panels_menu() {
         local installed_items=()
         local function_map=()
 
-        # --- Docker Compose 应用检测 (通过 docker-compose.yml) ---
+        # --- 检测逻辑 (保持不变) ---
         if [ -f "/root/wordpress/docker-compose.yml" ]; then
             installed_items+=("WordPress (位于 /root/wordpress)")
             function_map+=("uninstall_wordpress")
@@ -5316,8 +5266,6 @@ uninstall_panels_menu() {
             installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
             function_map+=("uninstall_uptime_kuma")
         fi
-
-        # --- 外部脚本安装检测 (通过特征命令或目录) ---
         if command -v 3x-ui &>/dev/null || [ -d "/usr/local/x-ui/" ]; then
             installed_items+=("3x-ui 面板")
             function_map+=("uninstall_3xui")
@@ -5334,50 +5282,27 @@ uninstall_panels_menu() {
             installed_items+=("1Panel 面板")
             function_map+=("uninstall_1panel")
         fi
+        # --- 检测逻辑结束 ---
 
-        # --- Docker 独立容器应用检测 (通过容器名) ---
-        if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
-            installed_items+=("Portainer (通用Docker面板)")
-            # 确保你有一个对应的 uninstall_portainer 函数
-            # 此处我们假设 uninstall_docker_compose_project 可以处理（如果它被改造得更通用）
-            # 或者你需要一个专门的 uninstall_portainer 函数。
-            # 为安全起见，我们暂时注释掉，除非你已创建该函数
-            # function_map+=("uninstall_portainer")
-        fi
-
-        # --- 检查是否有可卸载项 ---
         if [ ${#installed_items[@]} -eq 0 ]; then
             log_warn "未检测到任何通过本脚本安装且可识别的应用或面板。"
             press_any_key
             return
         fi
 
-        # --- 绘制菜单 ---
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 选择要卸载的应用或面板             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        # --- 改造核心：直接使用检测结果作为选项调用菜单函数 ---
+        local title="选择要卸载的应用或面板"
+        local choice
+        _draw_menu "$title" choice "${installed_items[@]}"
 
-        for i in "${!installed_items[@]}"; do
-            printf "$CYAN║$NC  %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
-        done
-
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        # --- 处理逻辑 (保持不变) ---
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 0 ] && [ "$choice" -le ${#installed_items[@]} ]; then
             if [ "$choice" -eq 0 ]; then
                 break
             else
                 local index=$((choice-1))
-                # 清屏并调用对应的卸载函数
                 clear
                 ${function_map[$index]}
-
-                # 卸载后暂停，以便用户可以再次进入此菜单查看结果
-                # press_any_key
-                # 注释掉press_any_key，因为卸载函数内部通常已经有了，避免重复按键
             fi
         else
             log_error "无效选项！"; sleep 1
@@ -5469,37 +5394,25 @@ _install_docker_compose_app() {
 
     press_any_key
 }
-# (这是被修改的函数, 全新的菜单结构)
+# =================================================
+#      应用 & 面板安装 (docker_apps_menu) - 优化版
+# =================================================
 docker_apps_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     应用 & 面板安装              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 搭建 WordPress                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 搭建苹果CMS影视站                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 安装 3x-ui (搭建节点-Xray)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 S-ui (搭建节点-SingBox)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 Uptime Kuma 监控面板                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装宝塔面板 (BT Panel)                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 安装 1Panel 面板                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${RED}卸载应用或面板${NC}                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="应用 & 面板安装"
+        local -a options=(
+            "${GREEN}搭建 WordPress${NC}"
+            "搭建苹果CMS影视站"
+            "安装 3x-ui (搭建节点-Xray)"
+            "安装 S-ui (搭建节点-SingBox)"
+            "安装 Uptime Kuma 监控面板"
+            "安装宝塔面板 (BT Panel)"
+            "安装 1Panel 面板"
+            "${RED}卸载应用或面板 (卸载)${NC}"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) install_wordpress ;;
         2) install_maccms ;;
@@ -5514,24 +5427,19 @@ docker_apps_menu() {
         esac
     done
 }
-
+# =================================================
+#      UI 面板安装选择 (ui_panels_menu) - 优化版
+# =================================================
 ui_panels_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        read -p "请输入选项: " choice
+        local title="UI 面板安装选择"
+        local -a options=(
+            "安装 S-ui 面板"
+            "安装 3X-ui 面板"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
         case $choice in
             1) install_sui; break ;;
             2) install_3xui; break ;;
@@ -5614,44 +5522,41 @@ _cleanup_caddy_proxy_config() {
         log_warn "Caddy 服务重载失败，请手动检查配置。"
     fi
 }
-
-# --- (重写) 交互更友好，并支持清理 Caddy 配置 ---
+# =================================================
+#      删除证书 (delete_certificate_and_proxy) - 优化版
+# =================================================
 delete_certificate_and_proxy() {
     clear
     log_info "准备删除证书及其关联配置..."
-
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法执行操作。"; press_any_key; return;
     fi
 
-    # 从 certbot 获取原始数据
     local certs_data
     certs_data=$(certbot certificates 2>/dev/null)
     if [[ ! "$certs_data" =~ "Found the following certs:" ]]; then
         log_warn "未找到任何由 Certbot 管理的证书。"; press_any_key; return;
     fi
 
-    # 构建选择菜单
+    # 1. 动态构建证书名称数组和菜单选项数组
     local cert_names=()
-    local display_options=()
-    local i=1
+    local options_for_menu=()
     while read -r line; do
         if [[ $line =~ "Certificate Name:" ]]; then
             local name=$(echo "$line" | awk '{print $3}')
-            local domains=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
+            # 从原始数据中提取与该证书相关的域名信息
+            local domains_line
+            domains_line=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
             cert_names+=("$name")
-            display_options+=("$i. $name ($domains)")
-            ((i++))
+            options_for_menu+=("$name ($domains_line)")
         fi
     done <<< "$certs_data"
 
-    log_info "请选择要删除的证书:\n"
-    for option in "${display_options[@]}"; do
-        echo "  $option"
-    done
-    echo -e "\n  0. 返回\n"
+    # 2. 调用通用菜单函数显示动态选项
+    local title="请选择要删除的证书"
+    local choice
+    _draw_menu "$title" choice "${options_for_menu[@]}"
 
-    read -p "请输入选项: " choice
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 0 ] || [ "$choice" -gt ${#cert_names[@]} ]; then
         log_error "无效选项！"; press_any_key; return
     fi
@@ -5659,6 +5564,7 @@ delete_certificate_and_proxy() {
 
     local cert_to_delete=${cert_names[$((choice-1))]}
 
+    # 3. 后续的确认和删除逻辑保持不变
     read -p "警告：这将永久删除证书 '$cert_to_delete' 及其相关的 Web 服务器配置。此操作不可逆！是否继续？(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         log_info "操作已取消。"; press_any_key; return
@@ -5675,10 +5581,7 @@ delete_certificate_and_proxy() {
         log_warn "检测到关联的 Nginx 配置文件，正在清理..."
         rm -f "/etc/nginx/sites-enabled/$cert_to_delete.conf"
         rm -f "$nginx_conf"
-        if nginx -t >/dev/null 2>&1; then
-            systemctl reload nginx
-            log_info "✅ Nginx 残留配置已清理。"
-        fi
+        if nginx -t >/dev/null 2>&1; then systemctl reload nginx; log_info "✅ Nginx 残留配置已清理."; fi
     fi
 
     # 清理 Caddy
@@ -5687,7 +5590,6 @@ delete_certificate_and_proxy() {
     log_info "✅ 清理流程完成。"
     press_any_key
 }
-
 renew_certificates() {
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法续签。"
@@ -6012,32 +5914,22 @@ apply_ssl_certificate_only_workflow() {
     fi
     press_any_key
 }
-
-# --- (重写) 采用新的菜单结构 ---
+# =================================================
+#      证书管理主菜单 (certificate_management_menu) - 优化版
+# =================================================
 certificate_management_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE             证书管理 & 网站反代 (v2.0)           $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 新建网站反代 (自动申请证书)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}仅为域名申请证书${NC}                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 查看/列出所有证书                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 手动续签所有证书                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}删除证书 (并清理反代配置)${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="证书管理 & 网站反代 (v2.0)"
+        local -a options=(
+            "新建网站反代 (自动申请证书)"
+            "仅为域名申请证书"
+            "查看/列出所有证书"
+            "手动续签所有证书"
+            "删除证书 (并清理反代配置) (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) setup_auto_reverse_proxy "" "" ;; # 传递空参数以启动完整交互流程
         2) apply_ssl_certificate_only_workflow ;;
