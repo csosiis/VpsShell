@@ -5979,7 +5979,7 @@ main_menu() {
         [ -z "$ipv4" ] && ipv4="N/A"
         [ -z "$ipv6" ] && ipv6="N/A"
 
-        local title="全功能 VPS & 应用管理脚本\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
+        local title="全功能 VPS & 应用管理脚本\n\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
 
         # 1. 从选项列表中移除 "更新此脚本"
         local -a options=(
