@@ -5751,7 +5751,7 @@ _handle_caddy_cert() {
     return 1
 }
 
-# --- (优化) 增加用户输入邮箱的交互 ---
+# --- (优化) 自动处理 Nginx 证书申请，无需输入邮箱 ---
 _handle_nginx_cert() {
     local domain_name="$1"
     log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
@@ -5785,18 +5785,15 @@ EOF
         log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
     fi
 
-    # --- 新增邮箱输入 ---
-    local email
-    echo ""
-    read -p "请输入您的邮箱地址 (用于接收Let's Encrypt续期提醒) [回车则跳过]: " email
-    local email_arg
-    if [ -n "$email" ]; then
-        email_arg="--email $email"
-    else
-        email_arg="--register-unsafely-without-email"
-    fi
+    # --- 这里是核心修改 ---
+    # 移除了所有询问邮箱的交互代码
+    # 直接定义使用“无邮箱”参数
+    log_info "将使用 --register-unsafely-without-email 参数，自动跳过邮箱输入。"
+    local email_arg="--register-unsafely-without-email"
+    # --- 修改结束 ---
 
     log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
+    # 在 certbot 命令中直接使用定义好的 $email_arg
     certbot --nginx -d "$domain_name" --non-interactive --agree-tos $email_arg --redirect
 
     if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
@@ -5807,7 +5804,6 @@ EOF
         return 1
     fi
 }
-
 # --- (优化) 调用DNS预检查 ---
 apply_ssl_certificate() {
     local domain_name="$1"
