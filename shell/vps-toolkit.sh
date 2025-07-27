@@ -287,35 +287,65 @@ _get_service_status() {
     fi
 }
 # =================================================
-#    最终修正版：两列对齐报告打印函数 (V2 - 冒号对齐)
+#    最终版：两列对齐报告打印函数 (V3 - 视觉宽度对齐)
 # =================================================
-# 功能: 打印格式为 "标签: 值" 的行，并确保所有"冒号"在垂直方向上严格对齐。
+# 功能: 智能计算中英文混合文本的视觉宽度，确保冒号和值完美对齐。
 # 参数1: 标签 (Label)
 # 参数2: 值 (Value)
 # 参数3: 值的颜色 (可选, 默认为白色)
 _print_aligned_line() {
     local label="$1"
     local value="$2"
-    local color="${3:-$WHITE}" # 如果不提供颜色，则默认为白色
+    local color="${3:-$WHITE}"
 
-    # --- 核心修改在这里 ---
-    # 1. 定义一个固定的标签宽度，这次不包含冒号
-    local label_width=15
-    # 2. 重新计算值的宽度
-    # 总宽度50 - 边框内外4个空格 - 标签宽度15 - 冒号和它后面的空格(2个) = 29
-    local value_width=29
+    # 目标：让冒号出现在第20个视觉宽度的位置
+    local target_label_width=18
 
-    # 3. 在printf格式中，将冒号独立出来，保证其位置恒定
-    # %-15s: 标签，左对齐，占据15位
-    # :      : 打印一个固定的冒号和空格
-    # %-29s  : 值，左对齐，占据29位
-    printf "$CYAN║$NC  %-${label_width}s: ${color}%-${value_width}s${NC} $CYAN║$NC\n" "$label" "$value"
+    # 核心：计算标签的视觉宽度 (英文/数字计1，其他字符计2)
+    local visible_width=0
+    for (( i=0; i<${#label}; i++ )); do
+        local char="${label:$i:1}"
+        if [[ "$char" =~ [a-zA-Z0-9] ]]; then
+            visible_width=$((visible_width + 1))
+        else
+            visible_width=$((visible_width + 2))
+        fi
+    done
+
+    # 计算需要填充的空格数
+    local padding_needed=$((target_label_width - visible_width))
+    local padding=""
+    if [ $padding_needed -gt 0 ]; then
+        padding=$(printf "%${padding_needed}s")
+    fi
+
+    # 拼接并打印
+    local full_label="${label}${padding}"
+    # 值的宽度 = 总宽度50 - 边框内外空格4 - 标签宽度18 - 冒号空格2 = 26
+    printf "$CYAN║$NC  %s: ${color}%-26s${NC}   $CYAN║$NC\n" "$full_label" "$value"
 }
 # =================================================
-#       最终版：系统健康巡检主函数 (V4 - 精确对齐)
+#       最终版：系统健康巡检主函数 (V5 - 视觉宽度对齐)
 # =================================================
 system_health_check() {
     clear
+    # 辅助函数：用于获取服务状态，但不打印
+    _get_service_status() {
+        local service_name="$1"
+        local -n status_text_ref=$2
+        local -n status_color_ref=$3
+        if systemctl is-active --quiet "$service_name"; then
+            status_text_ref="● 运行中"
+            status_color_ref=$GREEN
+        elif systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text_ref="● 不活动"
+            status_color_ref=$RED
+        else
+            status_text_ref="○ 未安装"
+            status_color_ref=$YELLOW
+        fi
+    }
+
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     echo -e "$CYAN║$WHITE                   系统健康巡检报告                 $CYAN║$NC"
     echo -e "$CYAN╟─────────────── $WHITE核心服务状态$CYAN ───────────────────╢$NC"
@@ -371,9 +401,6 @@ system_health_check() {
         if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
             _print_aligned_line "未发现任何 Certbot 证书" "" "$YELLOW"
         else
-            # 对于SSL证书这种特殊多列格式，我们使用一个专用的printf来实现对齐
-            # %-24s: 域名，左对齐，占据24位
-            # %-26s: 日期，左对齐，占据26位 (24+26=50)
             echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID.*\)/," (VALID: " $NF " days)"); printf "%s|%s\n", name, expiry}' | while IFS='|' read -r cert_name expiry_date; do
                 printf "$CYAN║$NC  ${YELLOW}%-24s${NC} -> ${GREEN}%-22s${NC}  $CYAN║$NC\n" "$cert_name" "$expiry_date"
             done
