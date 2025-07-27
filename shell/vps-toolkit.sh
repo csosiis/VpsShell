@@ -2302,7 +2302,6 @@ _create_self_signed_cert() {
         return 1
     fi
 }
-
 # 函数优化版：提示用户选择协议
 _singbox_prompt_for_protocols() {
     local -n protocols_ref=$1
@@ -3283,57 +3282,62 @@ generate_tuic_client_config() {
     press_any_key
 }
 
-# =================================================
-#           Sing-Box 管理 (singbox_main_menu) - 优化版
-# =================================================
 singbox_main_menu() {
     while true; do
-        local choice
-
+        clear
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        local STATUS_COLOR
         if is_singbox_installed; then
-            # --- Sing-Box 已安装时显示的菜单 ---
-            local STATUS_COLOR
-            if systemctl is-active --quiet sing-box; then
-                STATUS_COLOR="$GREEN● 活动$NC"
-            else
-                STATUS_COLOR="$RED● 不活动$NC"
-            fi
-            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $STATUS_COLOR"
+            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
+            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-            local -a options=(
-                "新增节点"
-                "管理节点"
-                "启动 Sing-Box"
-                "停止 Sing-Box"
-                "重启 Sing-Box"
-                "查看日志"
-                "卸载 Sing-Box (卸载)"
-            )
-
-            _draw_menu "$title" choice "${options[@]}"
-
+            read -p "请输入选项: " choice
             case $choice in
-                1) singbox_add_node_orchestrator ;;
-                2) view_node_info ;;
-                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-                6) clear; journalctl -u sing-box -f --no-pager ;;
-                7) singbox_do_uninstall ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
+            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
+            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+            6) clear; journalctl -u sing-box -f --no-pager ;;
+            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            # --- Sing-Box 未安装时显示的菜单 ---
-            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $YELLOW● 未安装$NC"
-            local -a options=("安装 Sing-Box")
+            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
+            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-            _draw_menu "$title" choice "${options[@]}"
-
+            read -p "请输入选项: " choice
             case $choice in
-                1) singbox_do_install ;;
-                0) break ;;
-                *) log_error "无效选项！"; sleep 1 ;;
+            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
             esac
         fi
     done
