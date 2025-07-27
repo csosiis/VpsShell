@@ -5179,52 +5179,28 @@ uninstall_maccms() {
 }
 
 install_uptime_kuma() {
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建 Uptime Kuma。"
-        press_any_key; return;
-    fi
-    clear
-    log_info "开始使用 Docker Compose 搭建 Uptime Kuma..."
-
-    local project_dir="/root/uptime-kuma"
-    mkdir -p "$project_dir"
-    cd "$project_dir" || return 1
-
-    local web_port
-    while true; do
-        read -p "请输入 Uptime Kuma 的外部访问端口 [默认: 3001]: " web_port
-        web_port=${web_port:-"3001"}
-        if check_port "$web_port"; then break; fi
-    done
-
-    cat > docker-compose.yml <<EOF
+    local compose_template="
 version: '3.8'
 
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: uptime-kuma
+    container_name: {{container_name}}
     restart: always
     ports:
-      - "$web_port:3001"
+      - \"{{ports_or_port}}:3001\"
     volumes:
       - uptime_kuma_data:/app/data
 
 volumes:
   uptime_kuma_data:
-EOF
-
-    log_info "正在启动 Uptime Kuma 服务..."
-    docker compose up -d
-
-    log_info "检查服务状态..."
-    sleep 5
-    docker compose ps
-
-    local public_ip=$(get_public_ip v4)
-    log_info "✅ Uptime Kuma 安装完成！"
-    log_info "请通过 http://$public_ip:$web_port 访问。"
-    press_any_key
+"
+    _install_docker_compose_app \
+      "Uptime Kuma" \
+      "/root/uptime-kuma" \
+      "port" \
+      "true" \
+      "$compose_template"
 }
 
 uninstall_uptime_kuma() {
@@ -5359,10 +5335,9 @@ uninstall_1panel() {
     fi
     press_any_key
 }
-
-
-# --- 新增：智能卸载菜单 ---
-
+# =================================================================
+#           智能卸载菜单 (V2.0 - 增强检测版)
+# =================================================================
 uninstall_panels_menu() {
     while true; do
         clear
@@ -5371,7 +5346,7 @@ uninstall_panels_menu() {
         local installed_items=()
         local function_map=()
 
-        # 检测逻辑
+        # --- Docker Compose 应用检测 (通过 docker-compose.yml) ---
         if [ -f "/root/wordpress/docker-compose.yml" ]; then
             installed_items+=("WordPress (位于 /root/wordpress)")
             function_map+=("uninstall_wordpress")
@@ -5380,40 +5355,49 @@ uninstall_panels_menu() {
             installed_items+=("苹果CMS (位于 /root/maccms)")
             function_map+=("uninstall_maccms")
         fi
-        if [ -d "/usr/local/x-ui/" ]; then
+        if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
+            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
+            function_map+=("uninstall_uptime_kuma")
+        fi
+
+        # --- 外部脚本安装检测 (通过特征命令或目录) ---
+        if command -v 3x-ui &>/dev/null || [ -d "/usr/local/x-ui/" ]; then
             installed_items+=("3x-ui 面板")
             function_map+=("uninstall_3xui")
         fi
-        if [ -d "/usr/local/s-ui/" ]; then
+        if command -v s-ui &>/dev/null || [ -d "/usr/local/s-ui/" ]; then
             installed_items+=("S-ui 面板")
             function_map+=("uninstall_sui")
-        fi
-         if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
-            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
-            function_map+=("uninstall_uptime_kuma")
         fi
         if [ -d "/www/server/panel" ]; then
             installed_items+=("宝塔面板")
             function_map+=("uninstall_bt_panel")
         fi
-        if [ -d "/opt/1panel" ]; then
-            installed_items+=("1Panel")
+        if command -v 1pctl &>/dev/null; then
+            installed_items+=("1Panel 面板")
             function_map+=("uninstall_1panel")
         fi
-        if [ -f "/root/portainer/docker-compose.yml" ] || docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+
+        # --- Docker 独立容器应用检测 (通过容器名) ---
+        if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
             installed_items+=("Portainer (通用Docker面板)")
-            function_map+=("uninstall_portainer") # 假设你有一个卸载它的函数
+            # 确保你有一个对应的 uninstall_portainer 函数
+            # 此处我们假设 uninstall_docker_compose_project 可以处理（如果它被改造得更通用）
+            # 或者你需要一个专门的 uninstall_portainer 函数。
+            # 为安全起见，我们暂时注释掉，除非你已创建该函数
+            # function_map+=("uninstall_portainer")
         fi
 
-
+        # --- 检查是否有可卸载项 ---
         if [ ${#installed_items[@]} -eq 0 ]; then
-            log_warn "未检测到任何通过本脚本安装的应用或面板。"
+            log_warn "未检测到任何通过本脚本安装且可识别的应用或面板。"
             press_any_key
             return
         fi
 
+        # --- 绘制菜单 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 选择要卸载的面板                 $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                 选择要卸载的应用或面板             $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
         for i in "${!installed_items[@]}"; do
@@ -5430,15 +5414,103 @@ uninstall_panels_menu() {
                 break
             else
                 local index=$((choice-1))
-                # 调用对应的卸载函数
+                # 清屏并调用对应的卸载函数
+                clear
                 ${function_map[$index]}
+
                 # 卸载后暂停，以便用户可以再次进入此菜单查看结果
-                press_any_key
+                # press_any_key
+                # 注释掉press_any_key，因为卸载函数内部通常已经有了，避免重复按键
             fi
         else
             log_error "无效选项！"; sleep 1
         fi
     done
+}
+# =================================================================
+#           新增：通用 Docker Compose 应用安装器
+# =================================================================
+_install_docker_compose_app() {
+    local app_name="$1"
+    local default_dir="$2"
+    local port_type="$3" # "ports" for external access, "port" for internal proxy
+    local needs_proxy="$4"
+    local compose_template="$5"
+
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 $app_name。"
+        press_any_key
+        return 1
+    fi
+    clear
+    log_info "开始使用 Docker Compose 搭建 $app_name..."
+
+    local project_dir
+    while true; do
+        read -e -p "请输入新的 $app_name 项目的安装目录 [默认: $default_dir]: " project_dir
+        project_dir=${project_dir:-"$default_dir"}
+        if [ -f "$project_dir/docker-compose.yml" ]; then
+            log_error "错误：目录 \"$project_dir\" 下已存在一个 Docker 项目！"
+            log_warn "请为新的 $app_name 站点选择一个不同的、全新的目录。"
+            continue
+        else
+            break
+        fi
+    done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 $project_dir！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir！"; press_any_key; return 1; }
+    log_info "新的 $app_name 将被安装在: $(pwd)"
+
+    local app_port
+    while true; do
+        local prompt_msg="请输入 $app_name 的"
+        if [ "$port_type" == "ports" ]; then
+            prompt_msg+="外部访问端口"
+        else # "port"
+            prompt_msg+="内部代理端口 (外部无法直接访问)"
+        fi
+        read -p "$prompt_msg [回车则随机生成]: " app_port
+        app_port=${app_port:-$(generate_random_port)}
+        if check_port "$app_port"; then break; fi
+    done
+
+    # 替换模板变量
+    local container_name="${project_dir##*/}" # 使用目录名作为容器名
+    local final_compose_content="${compose_template//\{\{container_name\}\}/$container_name}"
+    final_compose_content="${final_compose_content//\{\{ports_or_port\}\}/$app_port}"
+
+    log_info "正在生成 docker-compose.yml 文件..."
+    echo -e "$final_compose_content" > docker-compose.yml
+
+    log_info "正在使用 Docker Compose 启动 $app_name 服务..."
+    log_warn "首次启动需要下载镜像，可能需要一些时间，请耐心等待..."
+    docker compose up -d
+    log_info "正在检查服务状态..."
+    sleep 5
+    docker compose ps
+    log_info "✅ $app_name 容器已成功启动！"
+
+    if [ "$needs_proxy" == "true" ]; then
+        local domain
+        while true; do
+            read -p "请输入您的网站访问域名 (例如 ${app_name,,}.example.com)，必须提前解析: " domain
+            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+        done
+        if setup_auto_reverse_proxy "$domain" "$app_port"; then
+            echo "$domain" > "$project_dir/.proxy_domain"
+            log_info "✅ $app_name 反向代理设置完成！"
+            log_info "请通过 https://$domain 访问您的应用。"
+        else
+            log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
+        fi
+    else
+        local public_ip
+        public_ip=$(get_public_ip v4)
+        log_info "✅ $app_name 安装完成！"
+        log_info "请通过 http://$public_ip:$app_port 访问。"
+    fi
+
+    press_any_key
 }
 # (这是被修改的函数, 全新的菜单结构)
 docker_apps_menu() {
