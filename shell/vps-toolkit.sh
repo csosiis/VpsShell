@@ -242,7 +242,7 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：通用菜单绘制函数 (V12 - 最终对齐修正版)
+#           新增：通用菜单绘制函数 (V13 - awk兼容性终极修正版)
 # =================================================
 # 函数: 绘制一个标准的、完美对齐的菜单
 #
@@ -260,12 +260,14 @@ _draw_menu() {
     local right_border_col=$((menu_width + 2))
     local border_char="║"
 
-    # --- 辅助函数：计算视觉宽度 (仅用于标题居中) ---
+    # --- 辅助函数：使用 awk -v 的安全方式计算视觉宽度 ---
     _get_visual_width() {
-        echo -n "$1" | awk '{
+        # 核心改动：使用 awk -v var="$1" 的方式传递变量，
+        # 这种方式能确保字符串内容不会干扰 awk 的源代码。
+        awk -v text="$1" 'BEGIN {
             w=0;
-            for(i=1; i<=length($0); i++) {
-                char = substr($0, i, 1);
+            for(i=1; i<=length(text); i++) {
+                char = substr(text, i, 1);
                 if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; }
             }
             print w;
@@ -279,14 +281,51 @@ _draw_menu() {
 
     local title_line_num=0
     while IFS= read -r title_line; do
-        # 判断是第一行主标题还是后续状态行
         if [ $title_line_num -eq 0 ]; then
             # --- 主标题：居中对齐 ---
             local clean_title
             clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
             local title_width
             title_width=$(_get_visual_width "$clean_title")
-            local padding_left=$(((menu_width - title_width)
+            local padding_left=$(((menu_width - title_width) / 2))
+            local padding_right=$((menu_width - title_width - padding_left))
+            printf "$CYAN%s%*s%b%*s%s$NC\n" "$border_char" "$padding_left" "" "$title_line" "$padding_right" "" "$border_char"
+        else
+            # --- 状态行/副标题：左对齐 ---
+            printf "$CYAN%s$NC  %b" "$border_char" "$title_line"
+            printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+        fi
+        title_line_num=$((title_line_num + 1))
+    done <<< "$(echo -e "$title_block")"
+
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+    # 2. 打印菜单选项
+    for i in "${!options[@]}"; do
+        local option_text="${options[$i]}"
+        local rendered_option
+        rendered_option=$(echo -e "$option_text")
+        local prefix_text
+        printf -v prefix_text "  %2d. " "$((i + 1))"
+        # 增加垂直间距
+        printf "$CYAN%s" "$border_char"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+        # 打印内容行
+        printf "$CYAN%s$NC%s%b" "$border_char" "$prefix_text" "$rendered_option"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    done
+
+    # 3. 打印结尾和 "返回" 选项
+    printf "$CYAN%s" "$border_char"
+    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    printf "$CYAN%s$NC  0. 返回" "$border_char"
+    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+    # 4. 读取用户输入
+    read -p "请输入选项: " choice_ref
+}
 # =================================================
 #           新增：系统健康巡检辅助函数
 # =================================================
@@ -2282,13 +2321,13 @@ _singbox_prompt_for_protocols() {
 
     local title="Sing-Box 节点协议选择"
     local -a options=(
-        "VLESS + REALITY (推荐, 无需域名)"
+        "${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}"
         "VLESS + WSS"
         "VMess + WSS"
         "Trojan + WSS"
         "Hysteria2 (UDP)"
         "TUIC v5 (UDP)"
-        "${YELLOW}一键生成 (除REALITY外) 全部节点${NC}"
+        "${GREEN}一键生成 (除REALITY外) 全部节点${NC}"
     )
 
     local choice
@@ -3269,16 +3308,16 @@ singbox_main_menu() {
             else
                 STATUS_COLOR="$RED● 不活动$NC"
             fi
-            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $STATUS_COLOR"
+            local title="Sing-Box 管理\n\n  ${NC}当前状态: $STATUS_COLOR\n"
 
             local -a options=(
-                "新增节点"
-                "管理节点"
+                "${GREEN}新增节点${NC}"
+                "${YELLOW}管理节点${NC}"
                 "启动 Sing-Box"
                 "停止 Sing-Box"
                 "重启 Sing-Box"
                 "查看日志"
-                "卸载 Sing-Box (卸载)"
+                "${RED}卸载 Sing-Box (卸载)${NC}"
             )
 
             _draw_menu "$title" choice "${options[@]}"
@@ -6175,106 +6214,54 @@ initial_setup_check() {
         sleep 2
     fi
 }
-
+# =================================================
+#           脚本初始化 & 主入口 (最终优化版)
+# =================================================
 main_menu() {
     while true; do
-        clear
-
-        # 获取 IP 地址以供显示
+        # 1. 动态获取IP地址
         local ipv4
         ipv4=$(get_public_ip v4)
         local ipv6
         ipv6=$(get_public_ip v6)
+        [ -z "$ipv4" ] && ipv4="N/A"
+        [ -z "$ipv6" ] && ipv6="N/A"
 
-        # --- 以下是菜单的绘制 ---
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        # 2. 组合成一个多行的标题 (已移除多余的分割线)
+        local title
+        title="全功能 VPS & 应用管理脚本\n\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}\n"
 
-        # --- IP 显示逻辑 (精确对齐版) ---
-        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
-            # 情况1: IPv4 和 IPv6 都存在，换行显示
+        # 3. 定义主菜单的所有选项
+        local -a options=(
+            "系统综合管理"
+            "Sing-Box 管理"
+            "Sub-Store 管理"
+            "哪吒监控管理"
+            "Docker 通用管理"
+            "应用 & 面板安装"
+            "证书管理 & 网站反代"
+            "${GREEN}更新此脚本${NC}"
+        )
 
-            # 处理 IPv4 行
-            local text1="  IPv4: ${ipv4}"
-            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
-            local len1=${#text1}
-            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
-            local space1
-            space1=$(printf "%${pad1}s")
-            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
+        # 4. 定义一个变量来接收用户的选择，并调用通用菜单函数
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-            # 处理 IPv6 行
-            local text2="  IPv6: ${ipv6}"
-            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
-            local len2=${#text2}
-            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
-            local space2
-            space2=$(printf "%${pad2}s")
-            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
-
-        else
-            # 情况2: 只有一个IP或都没有，显示单行
-            local text=""
-            local display=""
-            if [ -n "$ipv4" ]; then
-                text="  IPv4: ${ipv4}"
-                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
-            elif [ -n "$ipv6" ]; then
-                text="  IPv6: ${ipv6}"
-                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
-            else
-                text="  IP: 获取失败"
-                display="  ${RED}IP: 获取失败${CYAN}"
-            fi
-            local len=${#text}
-            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
-            local space
-            space=$(printf "%${pad}s")
-            echo -e "$CYAN║${display}${space}$CYAN║$NC"
-        fi
-
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. Docker 通用管理                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        # 5. 根据用户的选择执行相应操作
         case $choice in
-        1) sys_manage_menu ;;
-        2) singbox_main_menu ;;
-        3) substore_main_menu ;;
-        4) nezha_main_menu ;;
-        5) docker_manage_menu ;;
-        6) docker_apps_menu ;;
-        7) certificate_management_menu ;;
-        9) do_update_script ;;
-        0) exit 0 ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) sys_manage_menu ;;
+            2) singbox_main_menu ;;
+            3) substore_main_menu ;;
+            4) nezha_main_menu ;;
+            5) docker_manage_menu ;;
+            6) docker_apps_menu ;;
+            7) certificate_management_menu ;;
+            8) do_update_script ;;
+            0) exit 0 ;; # 0 号选项固定为退出脚本
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
-
 # --- 脚本执行入口 ---
 check_root
 detect_os_and_package_manager
