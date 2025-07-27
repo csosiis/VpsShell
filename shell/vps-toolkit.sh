@@ -2303,56 +2303,44 @@ _create_self_signed_cert() {
     fi
 }
 
+# 函数优化版：提示用户选择协议
 _singbox_prompt_for_protocols() {
     local -n protocols_ref=$1
     local -n is_one_click_ref=$2
 
-    clear
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    local title="Sing-Box 节点协议选择"
+    local -a options=(
+        "VLESS + REALITY (推荐, 无需域名)"
+        "VLESS + WSS"
+        "VMess + WSS"
+        "Trojan + WSS"
+        "Hysteria2 (UDP)"
+        "TUIC v5 (UDP)"
+        "${YELLOW}一键生成 (除REALITY外) 全部节点${NC}"
+    )
 
-    read -p "请输入选项: " protocol_choice
+    local choice
+    _draw_menu "$title" choice "${options[@]}"
 
-    case $protocol_choice in
-    1) protocols_ref=("VLESS-REALITY") ;;
-    2) protocols_ref=("VLESS") ;;
-    3) protocols_ref=("VMess") ;;
-    4) protocols_ref=("Trojan") ;;
-    5) protocols_ref=("Hysteria2") ;;
-    6) protocols_ref=("TUIC") ;;
-    7)
-        protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
-        is_one_click_ref=true
-        ;;
-    0) return 1 ;;
-    *)
-        log_error "无效选择，操作中止。"
-        press_any_key
-        return 1
-        ;;
+    case $choice in
+        1) protocols_ref=("VLESS-REALITY") ;;
+        2) protocols_ref=("VLESS") ;;
+        3) protocols_ref=("VMess") ;;
+        4) protocols_ref=("Trojan") ;;
+        5) protocols_ref=("Hysteria2") ;;
+        6) protocols_ref=("TUIC") ;;
+        7)
+            protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+            is_one_click_ref=true
+            ;;
+        0) return 1 ;; # 用户选择返回
+        *)
+            log_error "无效选择，操作中止。"
+            press_any_key
+            return 1
+            ;;
     esac
-    return 0
+    return 0 # 表示用户成功做出了选择
 }
 # =================================================
 #           函数：确保服务器时间精准 (新增)
@@ -3295,62 +3283,57 @@ generate_tuic_client_config() {
     press_any_key
 }
 
+# =================================================
+#           Sing-Box 管理 (singbox_main_menu) - 优化版
+# =================================================
 singbox_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local choice
 
-            read -p "请输入选项: " choice
+        if is_singbox_installed; then
+            # --- Sing-Box 已安装时显示的菜单 ---
+            local STATUS_COLOR
+            if systemctl is-active --quiet sing-box; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $STATUS_COLOR"
+
+            local -a options=(
+                "新增节点"
+                "管理节点"
+                "启动 Sing-Box"
+                "停止 Sing-Box"
+                "重启 Sing-Box"
+                "查看日志"
+                "卸载 Sing-Box (卸载)"
+            )
+
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
-            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
-            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-            6) clear; journalctl -u sing-box -f --no-pager ;;
-            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_add_node_orchestrator ;;
+                2) view_node_info ;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+                6) clear; journalctl -u sing-box -f --no-pager ;;
+                7) singbox_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            # --- Sing-Box 未安装时显示的菜单 ---
+            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $YELLOW● 未安装$NC"
+            local -a options=("安装 Sing-Box")
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
-            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         fi
     done
@@ -6221,56 +6204,106 @@ initial_setup_check() {
         sleep 2
     fi
 }
-# =================================================
-#           脚本初始化 & 主入口 (V10 - 优化版)
-# =================================================
+
 main_menu() {
     while true; do
-        # 1. 动态获取IP地址，并组合成一个多行的标题
+        clear
+
+        # 获取 IP 地址以供显示
         local ipv4
         ipv4=$(get_public_ip v4)
         local ipv6
         ipv6=$(get_public_ip v6)
-        [ -z "$ipv4" ] && ipv4="N/A"
-        [ -z "$ipv6" ] && ipv6="N/A"
 
-        # 将IP信息和主标题合并，\n是换行符
-        local title
-        title="全功能 VPS & 应用管理脚本\n$CYAN──────────────────────────────────────────────────\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
+        # --- 以下是菜单的绘制 ---
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-        # 2. 定义主菜单的所有选项
-        local -a options=(
-            "系统综合管理"
-            "Sing-Box 管理"
-            "Sub-Store 管理"
-            "哪吒监控管理"
-            "Docker 通用管理"
-            "应用 & 面板安装"
-            "证书管理 & 网站反代"
-            "${GREEN}更新此脚本${NC}"
-        )
+        # --- IP 显示逻辑 (精确对齐版) ---
+        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
+            # 情况1: IPv4 和 IPv6 都存在，换行显示
 
-        # 3. 定义一个变量来接收用户的选择，并调用通用菜单函数
-        local choice
-        # 注意：这里我们将 "退出脚本" 的逻辑放到了 case 0 中，所以不把它放在选项数组里
-        _draw_menu "$title" choice "${options[@]}"
+            # 处理 IPv4 行
+            local text1="  IPv4: ${ipv4}"
+            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            local len1=${#text1}
+            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
+            local space1
+            space1=$(printf "%${pad1}s")
+            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
 
-        # 4. 根据用户的选择执行相应操作
-        #    注意：case 的编号现在与上面 options 数组的顺序严格对应
+            # 处理 IPv6 行
+            local text2="  IPv6: ${ipv6}"
+            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            local len2=${#text2}
+            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
+            local space2
+            space2=$(printf "%${pad2}s")
+            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
+
+        else
+            # 情况2: 只有一个IP或都没有，显示单行
+            local text=""
+            local display=""
+            if [ -n "$ipv4" ]; then
+                text="  IPv4: ${ipv4}"
+                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
+            elif [ -n "$ipv6" ]; then
+                text="  IPv6: ${ipv6}"
+                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
+            else
+                text="  IP: 获取失败"
+                display="  ${RED}IP: 获取失败${CYAN}"
+            fi
+            local len=${#text}
+            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
+            local space
+            space=$(printf "%${pad}s")
+            echo -e "$CYAN║${display}${space}$CYAN║$NC"
+        fi
+
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. Docker 通用管理                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
         case $choice in
-            1) sys_manage_menu ;;
-            2) singbox_main_menu ;;
-            3) substore_main_menu ;;
-            4) nezha_main_menu ;;
-            5) docker_manage_menu ;;
-            6) docker_apps_menu ;;
-            7) certificate_management_menu ;;
-            8) do_update_script ;;
-            0) exit 0 ;; # 0 号选项固定为退出或返回
-            *) log_error "无效选项！"; sleep 1 ;;
+        1) sys_manage_menu ;;
+        2) singbox_main_menu ;;
+        3) substore_main_menu ;;
+        4) nezha_main_menu ;;
+        5) docker_manage_menu ;;
+        6) docker_apps_menu ;;
+        7) certificate_management_menu ;;
+        9) do_update_script ;;
+        0) exit 0 ;;
+        *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
+
+
 # --- 脚本执行入口 ---
 check_root
 detect_os_and_package_manager
