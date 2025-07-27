@@ -242,22 +242,22 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：通用菜单绘制函数 (V10 - 光标定位终极对齐版)
+#           新增：通用菜单绘制函数 (V12 - 最终对齐修正版)
 # =================================================
 # 函数: 绘制一个标准的、完美对齐的菜单
 #
-# @param $1: 菜单标题 (字符串)
+# @param $1: 菜单标题 (字符串，可包含\n换行符)
 # @param $2: 用于接收用户选择的变量名 (引用)
 # @param $3+: 菜单选项数组
 _draw_menu() {
-    local title="$1"
+    local title_block="$1"
     local -n choice_ref=$2
     shift 2
     local -a options=("$@")
 
     # --- 核心参数 ---
     local menu_width=50
-    local right_border_col=$((menu_width + 2)) # 右边框所在的列
+    local right_border_col=$((menu_width + 2))
     local border_char="║"
 
     # --- 辅助函数：计算视觉宽度 (仅用于标题居中) ---
@@ -274,46 +274,19 @@ _draw_menu() {
 
     clear
 
-    # 1. 打印上边框和居中的标题
+    # 1. 打印上边框和智能对齐的标题
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    local clean_title
-    clean_title=$(echo -e "$title" | sed 's/\x1b\[[0-9;]*m//g')
-    local title_width
-    title_width=$(_get_visual_width "$clean_title")
-    local padding_left=$(((menu_width - title_width) / 2))
-    local padding_right=$((menu_width - title_width - padding_left))
-    printf "$CYAN%s%*s$WHITE%b$CYAN%*s%s$NC\n" "$border_char" "$padding_left" "" "$title" "$padding_right" "" "$border_char"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # 2. 打印菜单选项 (使用光标定位)
-    for i in "${!options[@]}"; do
-        local option_text="${options[$i]}"
-        local rendered_option
-        rendered_option=$(echo -e "$option_text")
-
-        local prefix_text
-        printf -v prefix_text "  %2d. " "$((i + 1))"
-
-        # 打印空行增加间距，并使用光标定位打印右边框
-        printf "$CYAN%s" "$border_char"
-        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-
-        # 打印内容行，并使用光标定位打印右边框
-        printf "$CYAN%s$NC%s%b" "$border_char" "$prefix_text" "$rendered_option"
-        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-    done
-
-    # 3. 打印结尾和 "返回" 选项 (使用光标定位)
-    printf "$CYAN%s" "$border_char"
-    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    printf "$CYAN%s$NC  0. 返回" "$border_char"
-    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-    # 4. 读取用户输入
-    read -p "请输入选项: " choice_ref
-}
+    local title_line_num=0
+    while IFS= read -r title_line; do
+        # 判断是第一行主标题还是后续状态行
+        if [ $title_line_num -eq 0 ]; then
+            # --- 主标题：居中对齐 ---
+            local clean_title
+            clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
+            local title_width
+            title_width=$(_get_visual_width "$clean_title")
+            local padding_left=$(((menu_width - title_width)
 # =================================================
 #           新增：系统健康巡检辅助函数
 # =================================================
