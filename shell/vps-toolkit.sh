@@ -263,10 +263,7 @@ _check_service_status() {
 }
 # =================================================
 #           修正版：系统健康巡检辅助函数
-# =================================================
-# 修正说明：
-# 1. 不在函数内直接打印，而是返回状态文本和颜色变量。
-# 2. 这种方式将格式化(printf)与内容生成(此函数)分离，避免了对齐问题。
+# =================================================。
 _get_service_status() {
     local service_name="$1"
     # 使用-n声明，可以直接修改外部同名变量的值
@@ -287,49 +284,11 @@ _get_service_status() {
     fi
 }
 # =================================================
-#    最终版：两列对齐报告打印函数 (V3 - 视觉宽度对齐)
-# =================================================
-# 功能: 智能计算中英文混合文本的视觉宽度，确保冒号和值完美对齐。
-# 参数1: 标签 (Label)
-# 参数2: 值 (Value)
-# 参数3: 值的颜色 (可选, 默认为白色)
-_print_aligned_line() {
-    local label="$1"
-    local value="$2"
-    local color="${3:-$WHITE}"
-
-    # 目标：让冒号出现在第20个视觉宽度的位置
-    local target_label_width=18
-
-    # 核心：计算标签的视觉宽度 (英文/数字计1，其他字符计2)
-    local visible_width=0
-    for (( i=0; i<${#label}; i++ )); do
-        local char="${label:$i:1}"
-        if [[ "$char" =~ [a-zA-Z0-9] ]]; then
-            visible_width=$((visible_width + 1))
-        else
-            visible_width=$((visible_width + 2))
-        fi
-    done
-
-    # 计算需要填充的空格数
-    local padding_needed=$((target_label_width - visible_width))
-    local padding=""
-    if [ $padding_needed -gt 0 ]; then
-        padding=$(printf "%${padding_needed}s")
-    fi
-
-    # 拼接并打印
-    local full_label="${label}${padding}"
-    # 值的宽度 = 总宽度50 - 边框内外空格4 - 标签宽度18 - 冒号空格2 = 26
-    printf "$CYAN║$NC  %s: ${color}%-26s${NC}   $CYAN║$NC\n" "$full_label" "$value"
-}
-# =================================================
-#       最终版：系统健康巡检主函数 (V5 - 视觉宽度对齐)
+#     最终版：系统健康巡检主函数 (V6 - 系统信息查询风格)
 # =================================================
 system_health_check() {
     clear
-    # 辅助函数：用于获取服务状态，但不打印
+    # 辅助函数：用于获取服务状态，但不打印 (此函数保持不变)
     _get_service_status() {
         local service_name="$1"
         local -n status_text_ref=$2
@@ -346,68 +305,69 @@ system_health_check() {
         fi
     }
 
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                   系统健康巡检报告                 $CYAN║$NC"
-    echo -e "$CYAN╟─────────────── $WHITE核心服务状态$CYAN ───────────────────╢$NC"
+    echo -e "\n$CYAN-------------------- 系统健康巡检报告 ---------------------$NC"
 
+    # --- 核心服务状态 ---
     local status_text status_color
     _get_service_status "docker" status_text status_color
-    _print_aligned_line "Docker 服务" "$status_text" "$status_color"
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Docker 服务" "$status_text"
 
     _get_service_status "nginx" status_text status_color
-    _print_aligned_line "Nginx 服务" "$status_text" "$status_color"
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Nginx 服务" "$status_text"
 
     _get_service_status "caddy" status_text status_color
-    _print_aligned_line "Caddy 服务" "$status_text" "$status_color"
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Caddy 服务" "$status_text"
 
     _get_service_status "sing-box" status_text status_color
-    _print_aligned_line "Sing-Box 服务" "$status_text" "$status_color"
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Sing-Box 服务" "$status_text"
 
     _get_service_status "fail2ban" status_text status_color
-    _print_aligned_line "Fail2Ban 服务" "$status_text" "$status_color"
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Fail2Ban 服务" "$status_text"
 
-    echo -e "$CYAN╟─────────────── $WHITE系统资源使用$CYAN ───────────────────╢$NC"
-
+    # --- 系统资源使用 ---
+    echo -e "$CYAN-------------------------------------------------------$NC"
     local disk_usage_percent disk_status_color disk_info
     disk_usage_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
     if [ "$disk_usage_percent" -gt 85 ]; then disk_status_color="$RED";
     elif [ "$disk_usage_percent" -gt 65 ]; then disk_status_color="$YELLOW";
     else disk_status_color="$GREEN"; fi
     disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
-    _print_aligned_line "根目录磁盘" "$disk_info" "$disk_status_color"
+    printf "$GREEN%-20s: ${disk_status_color}%s${NC}\n" "根目录磁盘" "$disk_info"
 
     local mem_info
     mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
-    _print_aligned_line "内存使用" "$mem_info" "$WHITE"
+    printf "$GREEN%-20s: $WHITE%s${NC}\n" "内存使用" "$mem_info"
 
+    # --- Docker 容器概览 ---
     if command -v docker &>/dev/null; then
-        echo -e "$CYAN╟─────────────── $WHITEDocker 容器概览$CYAN ──────────────────╢$NC"
+        echo -e "$CYAN-------------------------------------------------------$NC"
         local total_containers running_containers restarting_containers
         total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
         running_containers=$(docker ps --format '{{.Names}}' | wc -l)
         restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
 
-        _print_aligned_line "总容器数" "$total_containers" "$WHITE"
-        _print_aligned_line "运行中" "$running_containers" "$GREEN"
+        printf "$GREEN%-20s: $WHITE%s${NC}\n" "总容器数" "$total_containers"
+        printf "$GREEN%-20s: ${GREEN}%s${NC}\n" "运行中" "$running_containers"
         if [ -n "$restarting_containers" ]; then
-             _print_aligned_line "异常(重启中)" "$restarting_containers" "$RED"
+             printf "$GREEN%-20s: ${RED}%s${NC}\n" "异常(重启中)" "$restarting_containers"
         fi
     fi
 
+    # --- SSL 证书有效期 ---
     if command -v certbot &>/dev/null; then
-        echo -e "$CYAN╟─────────────── $WHITESSL 证书有效期$CYAN ──────────────────╢$NC"
+        echo -e "$CYAN-------------------------------------------------------$NC"
+        log_info "SSL 证书有效期:"
         local cert_info
         cert_info=$(certbot certificates 2>/dev/null)
         if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
-            _print_aligned_line "未发现任何 Certbot 证书" "" "$YELLOW"
+            echo -e "$YELLOW  未发现任何 Certbot 证书$NC"
         else
-            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID.*\)/," (VALID: " $NF " days)"); printf "%s|%s\n", name, expiry}' | while IFS='|' read -r cert_name expiry_date; do
-                printf "$CYAN║$NC  ${YELLOW}%-24s${NC} -> ${GREEN}%-22s${NC}  $CYAN║$NC\n" "$cert_name" "$expiry_date"
-            done
+            # 使用更简洁的列表格式输出
+            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Domains:/ {domains=$0; sub(/Domains: /,"",domains)} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID/," (VALID"); printf "  - %-25s\n    Domains: %s\n    Expires: %s\n\n", name, domains, expiry}'
         fi
     fi
 
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    echo -e "$CYAN-------------------------------------------------------$NC"
     press_any_key
 }
 # =================================================
