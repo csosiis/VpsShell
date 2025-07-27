@@ -3832,13 +3832,13 @@ substore_manage_menu() {
         install_type="Docker版"
         is_docker=true
         if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-            status_text="${GREEN}● 活动    ${NC}"
+            status_text="${GREEN}● 活动     ${NC}"
         fi
     elif is_substore_installed_baremetal; then
         install_type="宿主机版"
         is_baremetal=true
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            status_text="${GREEN}● 活动    ${NC}"
+            status_text="${GREEN}● 活动     ${NC}"
         fi
     fi
 
@@ -3899,9 +3899,9 @@ substore_main_menu() {
         if is_substore_installed_docker; then
             install_type="Docker版"
             if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-                STATUS_COLOR="$GREEN● 活动$NC"
+                STATUS_COLOR="$GREEN● 活动    $NC"
             else
-                STATUS_COLOR="$RED● 不活动$NC"
+                STATUS_COLOR="$RED● 不活动   $NC"
             fi
         elif is_substore_installed_baremetal; then
             install_type="宿主机版"
