@@ -242,7 +242,7 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：通用菜单绘制函数 (V9 - 兼容性终极修正版)
+#           新增：通用菜单绘制函数 (V10 - 光标定位终极对齐版)
 # =================================================
 # 函数: 绘制一个标准的、完美对齐的菜单
 #
@@ -257,23 +257,16 @@ _draw_menu() {
 
     # --- 核心参数 ---
     local menu_width=50
+    local right_border_col=$((menu_width + 2)) # 右边框所在的列
     local border_char="║"
 
-    # --- 辅助函数：使用 awk 精确计算视觉宽度 (强兼容版) ---
+    # --- 辅助函数：计算视觉宽度 (仅用于标题居中) ---
     _get_visual_width() {
-        # 使用 awk, 强兼容模式
-        # 核心改动：不再使用 [[:ascii:]]，而是使用 /^[ -~]$/
-        # 这个正则表达式匹配从空格(ASCII 32)到波浪线(ASCII 126)的所有可打印ASCII字符
-        # 这是最古老且最通用的方法之一，几乎所有 awk 版本都支持。
         echo -n "$1" | awk '{
             w=0;
             for(i=1; i<=length($0); i++) {
                 char = substr($0, i, 1);
-                if (char ~ /^[ -~]$/) {
-                    w += 1;
-                } else {
-                    w += 2;
-                }
+                if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; }
             }
             print w;
         }'
@@ -292,36 +285,30 @@ _draw_menu() {
     printf "$CYAN%s%*s$WHITE%b$CYAN%*s%s$NC\n" "$border_char" "$padding_left" "" "$title" "$padding_right" "" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # 2. 打印菜单选项
+    # 2. 打印菜单选项 (使用光标定位)
     for i in "${!options[@]}"; do
         local option_text="${options[$i]}"
         local rendered_option
         rendered_option=$(echo -e "$option_text")
-        local clean_option
-        clean_option=$(echo -e "$rendered_option" | sed 's/\x1b\[[0-9;]*m//g')
 
         local prefix_text
         printf -v prefix_text "  %2d. " "$((i + 1))"
-        local prefix_width=${#prefix_text}
 
-        local option_width
-        option_width=$(_get_visual_width "$clean_option")
+        # 打印空行增加间距，并使用光标定位打印右边框
+        printf "$CYAN%s" "$border_char"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
 
-        local padding_spaces=$((menu_width - prefix_width - option_width))
-
-        # 增加垂直间距
-        printf "$CYAN%s%*s%s$NC\n" "$border_char" "$menu_width" "" "$border_char"
-        # 打印内容行
-        printf "$CYAN%s$NC%s%b%*s$CYAN%s$NC\n" "$border_char" "$prefix_text" "$rendered_option" "$padding_spaces" "" "$border_char"
+        # 打印内容行，并使用光标定位打印右边框
+        printf "$CYAN%s$NC%s%b" "$border_char" "$prefix_text" "$rendered_option"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     done
 
-    # 3. 打印结尾和 "返回" 选项
-    printf "$CYAN%s%*s%s$NC\n" "$border_char" "$menu_width" "" "$border_char"
+    # 3. 打印结尾和 "返回" 选项 (使用光标定位)
+    printf "$CYAN%s" "$border_char"
+    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    local return_text="  0. 返回"
-    local return_width=$(_get_visual_width "$return_text")
-    local return_padding=$((menu_width - return_width))
-    printf "$CYAN%s$NC%s%*s$CYAN%s$NC\n" "$border_char" "$return_text" "$return_padding" "" "$border_char"
+    printf "$CYAN%s$NC  0. 返回" "$border_char"
+    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     # 4. 读取用户输入
