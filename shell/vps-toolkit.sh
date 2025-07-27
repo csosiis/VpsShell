@@ -6020,7 +6020,28 @@ setup_auto_reverse_proxy() {
     fi
     return $status
 }
+# =================================================
+#           证书 & 反代 (新增的缺失函数)
+# =================================================
 
+# (新增) 查看/列出所有证书
+list_certificates() {
+    # 检查 certbot 命令是否存在
+    if ! command -v certbot &>/dev/null; then
+        log_error "Certbot 未安装，无法查看证书列表。"
+        return
+    fi
+
+    clear
+    log_info "正在获取由 Certbot 管理的所有证书列表..."
+    echo -e "$CYAN----------------------------------------------------------------------$NC"
+
+    # 直接执行 certbot certificates 命令，它会处理“找到证书”和“未找到证书”两种情况
+    # 并以友好的格式输出
+    certbot certificates
+
+    echo -e "$CYAN----------------------------------------------------------------------$NC"
+}
 # --- (新增) 仅申请证书的工作流函数 ---
 apply_ssl_certificate_only_workflow() {
     clear
