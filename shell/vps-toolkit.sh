@@ -2366,8 +2366,8 @@ _singbox_handle_reality_setup() {
 
     # --- **核心优化**：获取并验证伪装域名 (serverName) ---
     while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.bing.com"}
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.microsoft.com"}
 
         log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
         # 使用curl测试HTTPS连接，-m 5设置5秒超时
@@ -2438,8 +2438,8 @@ _singbox_handle_certificate_setup() {
         elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
         else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
-        sni_domain_ref=${sni_input:-"www.bing.com"}
+        read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
+        sni_domain_ref=${sni_input:-"www.microsoft.com"}
         if ! _create_self_signed_cert "$sni_domain_ref"; then log_error "自签名证书处理失败。"; return 1; fi
         cert_path_ref="/etc/sing-box/certs/$sni_domain_ref.cert.pem"
         key_path_ref="/etc/sing-box/certs/$sni_domain_ref.key.pem"
