@@ -3522,23 +3522,18 @@ EOF
         press_any_key
     fi
 }
-
-
-# --- 安装方式选择 (新的路由函数) ---
+# =================================================
+#      Sub-Store 安装方式选择 (substore_do_install) - 优化版
+# =================================================
 substore_do_install() {
-    clear
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                 选择安装方式                     $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-    read -p "请输入选项: " choice
+    local title="选择 Sub-Store 安装方式"
+    local -a options=(
+        "Docker 版安装 (推荐, 隔离性好)"
+        "宿主机版安装 (直接部署, 占用低)"
+    )
+    local choice
+    _draw_menu "$title" choice "${options[@]}"
+
     case $choice in
         1) substore_do_install_docker ;;
         2) substore_do_install_baremetal ;;
@@ -3546,8 +3541,6 @@ substore_do_install() {
         *) log_error "无效选项!"; sleep 1 ;;
     esac
 }
-
-
 # --- Docker 版卸载函数 (新增) ---
 substore_do_uninstall_docker() {
     if ! is_substore_installed_docker; then
@@ -3794,132 +3787,119 @@ substore_setup_reverse_proxy() {
     fi
     press_any_key
 }
-
+# =================================================
+#      Sub-Store 管理菜单 (substore_manage_menu) - 优化版
+# =================================================
 substore_manage_menu() {
-    # 此菜单现在需要根据安装类型显示不同的选项
-    # 为简化，我们只修改核心功能，保持此菜单结构，但内部命令会变得更智能
-    clear
-
-    local install_type="未知"
-    local status_text="${RED}● 不活动   ${NC}"
-    local is_baremetal=false
-    local is_docker=false
-
-    if is_substore_installed_docker; then
-        install_type="Docker版"
-        is_docker=true
-        if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-            status_text="${GREEN}● 活动     ${NC}"
-        fi
-    elif is_substore_installed_baremetal; then
-        install_type="宿主机版"
-        is_baremetal=true
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            status_text="${GREEN}● 活动        ${NC}"
-        fi
-    fi
-
-    local rp_menu_text="设置反向代理 (推荐)"
-    # ... 此处可以添加更智能的检测逻辑 ...
-
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                  Sub-Store 管理                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$status_text" "$install_type"
-    echo -e "$CYAN╟──────────────────── $WHITE服务控制$CYAN ────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. 启动服务            2. 停止服务             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. 重启服务            4. 查看日志             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────── $WHITE参数配置$CYAN ────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. 查看访问链接                                $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $YELLOW$rp_menu_text$NC                         $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-    read -p "请输入选项: " choice
-
-    if ! $is_docker && ! $is_baremetal; then
-        log_warn "未检测到任何 Sub-Store 安装。"; sleep 2; return;
-    fi
-
-    case $choice in
-    1) if $is_docker; then docker start sub-store; else systemctl start "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    2) if $is_docker; then docker stop sub-store; else systemctl stop "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    3) if $is_docker; then docker restart sub-store; else systemctl restart "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    4) if $is_docker; then clear; docker logs -f sub-store; else clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager; fi ;;
-    5) substore_view_access_link ;;
-    6) substore_setup_reverse_proxy ;;
-    # 暂时移除重置端口和密钥的功能，因为对 Docker 版实现复杂
-    # 7) substore_reset_ports ;;
-    # 8) substore_reset_api_key ;;
-    0) return ;;
-    *) log_error "无效选项！"; sleep 1 ;;
-    esac
-    # 递归调用以刷新状态
-    substore_manage_menu
-}
-
-# --- 主菜单 (修改后) ---
-substore_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR install_type="未安装"
+        # 1. 检测安装状态和类型
+        local install_type="未知"
+        local status_text="${RED}● 不活动$NC"
+        local is_baremetal=false
+        local is_docker=false
+
         if is_substore_installed_docker; then
             install_type="Docker版"
+            is_docker=true
             if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-                STATUS_COLOR="$GREEN● 活动     $NC"
-            else
-                STATUS_COLOR="$RED● 不活动   $NC"
+                status_text="${GREEN}● 活动$NC"
             fi
         elif is_substore_installed_baremetal; then
             install_type="宿主机版"
+            is_baremetal=true
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-                STATUS_COLOR="$GREEN● 活动        $NC"
-            else
-                STATUS_COLOR="$RED● 不活动      $NC"
+                status_text="${GREEN}● 活动$NC"
             fi
         else
-            STATUS_COLOR="$YELLOW● 未安装     $NC"
+             log_warn "未检测到任何 Sub-Store 安装。"; sleep 2; return;
         fi
 
-        printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$STATUS_COLOR" "$install_type"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        # 2. 构建标题和选项
+        local title="Sub-Store 管理\n\n  状态: $status_text | 类型: $install_type"
+        local -a options=(
+            "启动服务"
+            "停止服务"
+            "重启服务"
+            "查看日志"
+            "${GREEN}查看访问链接${NC}"
+            "${YELLOW}设置反向代理 (推荐)${NC}"
+        )
 
-        if is_substore_installed_docker || is_substore_installed_baremetal; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
+        # 3. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 处理逻辑
+        case $choice in
+        1) if $is_docker; then docker start sub-store; else systemctl start "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        2) if $is_docker; then docker stop sub-store; else systemctl stop "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        3) if $is_docker; then docker restart sub-store; else systemctl restart "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        4) if $is_docker; then clear; docker logs -f sub-store; else clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager; fi ;;
+        5) substore_view_access_link ;;
+        6) substore_setup_reverse_proxy ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+#      Sub-Store 主菜单 (substore_main_menu) - 优化版
+# =================================================
+substore_main_menu() {
+    while true; do
+        # 1. 检测安装状态
+        local STATUS_COLOR install_type="未安装"
+        local is_installed=false
+        if is_substore_installed_docker; then
+            install_type="Docker版"
+            is_installed=true
+            if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+        elif is_substore_installed_baremetal; then
+            install_type="宿主机版"
+            is_installed=true
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+        else
+            STATUS_COLOR="$YELLOW● 未安装$NC"
+        fi
+
+        # 2. 根据安装状态，准备不同的标题和选项
+        local title="Sub-Store 管理\n\n  状态: $STATUS_COLOR | 类型: $install_type"
+        local -a options
+        if $is_installed; then
+            options=(
+                "${GREEN}管理 Sub-Store (启停/日志/配置)${NC}"
+                "更新 Sub-Store 应用"
+                "${RED}卸载 Sub-Store (卸载)${NC}"
+            )
+        else
+            options=("安装 Sub-Store")
+        fi
+
+        # 3. 调用菜单并处理逻辑
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        if $is_installed; then
             case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_manage_menu ;;
+                2) update_sub_store_app ;;
+                3) substore_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         fi
     done
