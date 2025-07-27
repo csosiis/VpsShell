@@ -2521,6 +2521,7 @@ _singbox_build_protocol_config_and_link() {
     local tls_config_udp="{\"enabled\":true,\"certificate_path\":\"$cert_path\",\"key_path\":\"$key_path\",\"alpn\":[\"h3\"]}"
 
     case $protocol in
+    case $protocol in
     "VLESS-REALITY")
         local reality_tls_config="{\"enabled\": true, \"server_name\": \"$sni_domain\", \"reality\": {\"enabled\": true, \"handshake\": {\"server\": \"$sni_domain\", \"server_port\": 443}, \"private_key\": \"$private_key\", \"short_id\": [\"$short_id\"]}}"
 
