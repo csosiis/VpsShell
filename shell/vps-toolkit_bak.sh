@@ -9,13 +9,13 @@
 # =================================================================
 
 # --- 颜色和样式定义 ---
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-NC='\033[0m'
+GREEN=$'\033[0;32m'
+RED=$'\033[0;31m'
+YELLOW=$'\033[0;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+WHITE=$'\033[1;37m'
+NC=$'\033[0m'
 
 # --- 全局常量和路径定义 ---
 SUBSTORE_SERVICE_NAME="sub-store.service"
@@ -77,35 +77,7 @@ press_any_key() {
     echo ""
     read -n 1 -s -r -p "按任意键返回..."
 }
-# --- 新增：配置文件路径定义 (放在全局常量区域) ---
-CONFIG_FILE="$HOME/.vps_toolkit.conf"
 
-# --- 新增：配置文件加载函数 ---
-load_config() {
-    if [ -f "$CONFIG_FILE" ]; then
-        # 如果配置文件存在，则加载其中的变量
-        . "$CONFIG_FILE"
-    fi
-}
-
-# --- 新增：配置文件保存函数 ---
-# 用法: save_config "KEY_NAME" "value_to_save"
-save_config() {
-    local key="$1"
-    local value="$2"
-
-    # 确保配置文件目录存在
-    mkdir -p "$(dirname "$CONFIG_FILE")"
-    touch "$CONFIG_FILE"
-
-    # 如果键已存在，则替换旧值；否则，追加新键值对
-    if grep -q -E "^${key}=" "$CONFIG_FILE"; then
-        # 使用sed进行原地替换，-i.bak会创建一个备份
-        sed -i.bak "s|^${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE"
-    else
-        echo "${key}=\"${value}\"" >> "$CONFIG_FILE"
-    fi
-}
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         log_error "此脚本必须以 root 用户身份运行。"
@@ -216,29 +188,6 @@ install_packages() {
             ;;
     esac
 }
-# 统一的包卸载函数
-remove_packages() {
-    local packages_to_remove=("$@")
-    if [ ${#packages_to_remove[@]} -eq 0 ]; then
-        return 0
-    fi
-    log_info "正在卸载包: ${packages_to_remove[*]}"
-    case "$PKG_MANAGER" in
-        apt)
-            # 使用 --purge 选项来同时删除配置文件
-            apt-get remove --purge -y "${packages_to_remove[@]}"
-            apt-get autoremove -y
-            ;;
-        yum|dnf)
-            "$PKG_MANAGER" remove -y "${packages_to_remove[@]}"
-            "$PKG_MANAGER" autoremove -y
-            ;;
-        *)
-            log_error "未知的包管理器: $PKG_MANAGER"
-            return 1
-            ;;
-    esac
-}
 
 # 确保依赖包已安装（已适配多发行版）
 ensure_dependencies() {
@@ -292,8 +241,264 @@ ensure_dependencies() {
     fi
     return 0
 }
+# =================================================
+#           新增：系统健康巡检辅助函数
+# =================================================
+_check_service_status() {
+    local service_name="$1"
+    local display_name="$2"
+    local status_text
+    if systemctl is-active --quiet "$service_name"; then
+        status_text="${GREEN}● 运行中${NC}"
+    else
+        # 如果服务文件存在但未运行，则为不活动；如果文件不存在，则为未安装
+        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text="${RED}● 不活动${NC}"
+        else
+            status_text="${YELLOW}○ 未安装${NC}"
+        fi
+    fi
+    # 使用printf进行格式化对齐
+    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "$display_name" "$status_text"
+}
+# =================================================
+#           修正版：系统健康巡检辅助函数
+# =================================================。
+_get_service_status() {
+    local service_name="$1"
+    # 使用-n声明，可以直接修改外部同名变量的值
+    local -n status_text_ref=$2
+    local -n status_color_ref=$3
 
+    if systemctl is-active --quiet "$service_name"; then
+        status_text_ref="● 运行中"
+        status_color_ref=$GREEN
+    else
+        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text_ref="● 不活动"
+            status_color_ref=$RED
+        else
+            status_text_ref="○ 未安装"
+            status_color_ref=$YELLOW
+        fi
+    fi
+}
+# =================================================
+#     最终版：系统健康巡检主函数 (V6 - 系统信息查询风格)
+# =================================================
+system_health_check() {
+    clear
+    # 辅助函数：用于获取服务状态，但不打印 (此函数保持不变)
+    _get_service_status() {
+        local service_name="$1"
+        local -n status_text_ref=$2
+        local -n status_color_ref=$3
+        if systemctl is-active --quiet "$service_name"; then
+            status_text_ref="● 运行中"
+            status_color_ref=$GREEN
+        elif systemctl list-unit-files | grep -q "^${service_name}.service"; then
+            status_text_ref="● 不活动"
+            status_color_ref=$RED
+        else
+            status_text_ref="○ 未安装"
+            status_color_ref=$YELLOW
+        fi
+    }
 
+    echo -e "\n$CYAN-------------------- 系统健康巡检报告 ---------------------$NC"
+
+    # --- 核心服务状态 ---
+    local status_text status_color
+    _get_service_status "docker" status_text status_color
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Docker 服务" "$status_text"
+
+    _get_service_status "nginx" status_text status_color
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Nginx 服务" "$status_text"
+
+    _get_service_status "caddy" status_text status_color
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Caddy 服务" "$status_text"
+
+    _get_service_status "sing-box" status_text status_color
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Sing-Box 服务" "$status_text"
+
+    _get_service_status "fail2ban" status_text status_color
+    printf "$GREEN%-20s: ${status_color}%s${NC}\n" "Fail2Ban 服务" "$status_text"
+
+    # --- 系统资源使用 ---
+    echo -e "$CYAN-------------------------------------------------------$NC"
+    local disk_usage_percent disk_status_color disk_info
+    disk_usage_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+    if [ "$disk_usage_percent" -gt 85 ]; then disk_status_color="$RED";
+    elif [ "$disk_usage_percent" -gt 65 ]; then disk_status_color="$YELLOW";
+    else disk_status_color="$GREEN"; fi
+    disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
+    printf "$GREEN%-20s: ${disk_status_color}%s${NC}\n" "根目录磁盘  " "$disk_info"
+
+    local mem_info
+    mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
+    printf "$GREEN%-20s: $WHITE%s${NC}\n" "内存使用 " "$mem_info"
+
+    # --- Docker 容器概览 ---
+    if command -v docker &>/dev/null; then
+        echo -e "$CYAN-------------------------------------------------------$NC"
+        local total_containers running_containers restarting_containers
+        total_containers=$(docker ps -a --format '{{.Names}}' | wc -l)
+        running_containers=$(docker ps --format '{{.Names}}' | wc -l)
+        restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
+
+        printf "$GREEN%-20s: $WHITE%s${NC}\n" "总容器数 " "$total_containers"
+        printf "$GREEN%-20s: ${GREEN}%s${NC}\n" "运行中" "$running_containers"
+        if [ -n "$restarting_containers" ]; then
+             printf "$GREEN%-20s: ${RED}%s${NC}\n" "异常(重启中)" "$restarting_containers"
+        fi
+    fi
+
+    # --- SSL 证书有效期 ---
+    if command -v certbot &>/dev/null; then
+        echo -e "$CYAN-------------------------------------------------------$NC"
+        log_info "SSL 证书有效期:"
+        local cert_info
+        cert_info=$(certbot certificates 2>/dev/null)
+        if [[ ! "$cert_info" =~ "Found the following certs:" ]]; then
+            echo -e "$YELLOW  未发现任何 Certbot 证书$NC"
+        else
+            # 使用更简洁的列表格式输出
+            echo "$cert_info" | awk '/Certificate Name:/ {name=$3} /Domains:/ {domains=$0; sub(/Domains: /,"",domains)} /Expiry Date:/ {expiry=$0; sub(/.*Expiry Date: /,""); sub(/ \(VALID/," (VALID"); printf "  - %-25s\n    Domains: %s\n    Expires: %s\n\n", name, domains, expiry}'
+        fi
+    fi
+
+    echo -e "$CYAN-------------------------------------------------------$NC"
+    press_any_key
+}
+# =================================================
+#           新增：防火墙助手
+# =================================================
+firewall_helper_menu() {
+    local FW_COMMAND=""
+    local FW_TYPE=""
+
+    # 优先检测 UFW
+    if command -v ufw &>/dev/null; then
+        FW_COMMAND="ufw"
+        FW_TYPE="UFW"
+    elif command -v firewall-cmd &>/dev/null; then
+        FW_COMMAND="firewall-cmd"
+        FW_TYPE="FirewallD"
+    else
+        log_error "未检测到 UFW 或 FirewallD，无法使用此功能。"
+        press_any_key
+        return
+    fi
+
+    log_info "检测到防火墙类型: $FW_TYPE"
+
+    while true; do
+        clear
+        local status_text
+        if [ "$FW_TYPE" == "UFW" ]; then
+            # UFW状态输出比较长，这里简化显示
+            if ufw status | grep -q 'Status: active'; then
+                status_text="${GREEN}● 活动 (Active)${NC}"
+            else
+                status_text="${RED}● 不活动 (Inactive)${NC}"
+            fi
+        else # FirewallD
+            if systemctl is-active --quiet firewalld; then
+                status_text="${GREEN}● 活动 (Active)${NC}"
+            else
+                status_text="${RED}● 不活动 (Inactive)${NC}"
+            fi
+        fi
+
+        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+        echo -e "$CYAN║$WHITE                 防火墙助手 ($FW_TYPE)               $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC  当前状态: $status_text                              $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   1. 查看当前所有规则                            $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   2. ${GREEN}开放一个端口 (Allow)${NC}                         $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   3. ${RED}关闭一个端口 (Delete/Remove)${NC}                 $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   4. 开启防火墙                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. 关闭防火墙                                  $CYAN║$NC"
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+        read -p "请输入选项: " choice
+        case $choice in
+        1)
+            clear
+            log_info "当前防火墙规则:"
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw status numbered
+            else
+                firewall-cmd --list-all
+            fi
+            press_any_key
+            ;;
+        2)
+            read -p "请输入要开放的端口号: " port
+            read -p "请输入协议 [默认: tcp]: " proto
+            proto=${proto:-"tcp"}
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw allow "$port/$proto"
+            else
+                firewall-cmd --permanent --add-port="$port/$proto"
+                firewall-cmd --reload
+            fi
+            log_info "✅ 规则添加完成 (如果需要)。"
+            press_any_key
+            ;;
+        3)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                log_info "请参考下面的列表，输入要删除的规则【编号】。"
+                ufw status numbered
+                read -p "请输入要删除的规则编号: " rule_num
+                if [[ "$rule_num" =~ ^[0-9]+$ ]]; then
+                    # UFW需要二次确认
+                    yes | ufw delete "$rule_num"
+                else
+                    log_error "无效的编号。"
+                fi
+            else # FirewallD
+                read -p "请输入要关闭的端口号: " port
+                read -p "请输入协议 [默认: tcp]: " proto
+                proto=${proto:-"tcp"}
+                firewall-cmd --permanent --remove-port="$port/$proto"
+                firewall-cmd --reload
+            fi
+            log_info "✅ 规则移除完成 (如果需要)。"
+            press_any_key
+            ;;
+        4)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                yes | ufw enable
+            else
+                systemctl enable firewalld
+                systemctl start firewalld
+            fi
+            log_info "✅ 防火墙已开启。"; sleep 1
+            ;;
+        5)
+            if [ "$FW_TYPE" == "UFW" ]; then
+                ufw disable
+            else
+                systemctl stop firewalld
+                systemctl disable firewalld
+            fi
+            log_info "✅ 防火墙已关闭。"; sleep 1
+            ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
 # =================================================
 #                系统管理 (sys_manage_menu)
 # =================================================
@@ -305,33 +510,27 @@ sys_manage_menu() {
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   5. 修改 SSH 端口                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 设置系统时区                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   7. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   8. DNS 工具箱 (优化/备份/恢复)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 (增强)${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
+        echo -e "$CYAN║$NC  12. 防火墙助手 (UFW/FirewallD)                  $CYAN║$NC"
+        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检${NC}                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
         echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
         read -p "请输入选项: " choice
@@ -347,6 +546,8 @@ sys_manage_menu() {
         9) manage_bbr ;;
         10) install_warp ;;
         11) utility_tools_menu ;;
+        12) firewall_helper_menu ;;
+        13) system_health_check ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -1416,12 +1617,11 @@ EOF
                 log_info "正在停止并卸载 Fail2Ban..."
                 systemctl stop fail2ban
                 systemctl disable fail2ban
-                remove_packages "fail2ban" # <--- 调用新函数
-                rm -rf /etc/fail2ban
-                log_info "✅ Fail2Ban 已卸载。"
-                press_any_key
-                return
-            fi
+                if [ "$PKG_MANAGER" == "apt" ]; then
+                    apt-get remove --purge -y fail2ban
+                else
+                    "$PKG_MANAGER" remove -y fail2ban
+                fi
                 rm -rf /etc/fail2ban
                 log_info "✅ Fail2Ban 已卸载。"
                 press_any_key
@@ -1754,7 +1954,7 @@ backup_directory() {
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_filename="${dir_name}_backup_${timestamp}.tar.gz"
-    local full_backup_path="${backup_dest}/${backup_filename}"
+    local full_backup_path="$backup_dest/$backup_filename"
 
     log_info "准备将 '$source_dir' 备份到 '$full_backup_path' ..."
     if tar -czvf "$full_backup_path" -C "$(dirname "$source_dir")" "$dir_name"; then
@@ -2166,8 +2366,8 @@ _singbox_handle_reality_setup() {
 
     # --- **核心优化**：获取并验证伪装域名 (serverName) ---
     while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.bing.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.bing.com"}
+        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
+        server_name_ref=${server_name_input:-"www.microsoft.com"}
 
         log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
         # 使用curl测试HTTPS连接，-m 5设置5秒超时
@@ -2238,8 +2438,8 @@ _singbox_handle_certificate_setup() {
         elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
         else log_error "无法获取任何公网 IP 地址！"; return 1; fi
 
-        read -p "请输入 SNI 伪装域名 [默认: www.bing.com]: " sni_input
-        sni_domain_ref=${sni_input:-"www.bing.com"}
+        read -p "请输入 SNI 伪装域名 [默认: www.microsoft.com]: " sni_input
+        sni_domain_ref=${sni_input:-"www.microsoft.com"}
         if ! _create_self_signed_cert "$sni_domain_ref"; then log_error "自签名证书处理失败。"; return 1; fi
         cert_path_ref="/etc/sing-box/certs/$sni_domain_ref.cert.pem"
         key_path_ref="/etc/sing-box/certs/$sni_domain_ref.key.pem"
@@ -2356,8 +2556,6 @@ _singbox_build_protocol_config_and_link() {
 # =================================================
 #           函数: 节点添加总指挥 (增强版)
 # =================================================
-
-# 这是完整的、修改后的 singbox_add_node_orchestrator 函数
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
 
@@ -2400,42 +2598,6 @@ singbox_add_node_orchestrator() {
     echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
     read custom_id
     custom_id=${custom_id:-$operator_name}
-
-    # --- 新增：操作前摘要与最终确认 ---
-    clear
-    log_warn "----------- 配置摘要与最终确认 -----------"
-    echo -e "$WHITE  即将创建以下协议的节点: ${YELLOW}${protocols_to_create[*]}$NC"
-
-    if [ -n "$reality_private_key" ]; then
-        echo -e "$WHITE  连接模式: ${GREEN}VLESS + REALITY${NC}"
-        echo -e "$WHITE    - 连接地址 (IP/Domain): ${YELLOW}$connect_addr${NC}"
-        echo -e "$WHITE    - 监听端口 (TCP): ${YELLOW}${ports['VLESS-REALITY']}${NC}"
-        echo -e "$WHITE    - 伪装域名 (SNI): ${YELLOW}$sni_domain${NC}"
-        echo -e "$WHITE    - Short ID: ${YELLOW}$reality_short_id${NC}"
-    else
-        local cert_type="Let's Encrypt"
-        if [ ${#insecure_params[@]} -gt 0 ]; then
-             cert_type="自签名证书 (IP直连)"
-        fi
-        echo -e "$WHITE  连接模式: ${GREEN}WebSocket + TLS${NC}"
-        echo -e "$WHITE    - 连接地址 (Domain/IP): ${YELLOW}$connect_addr${NC}"
-        echo -e "$WHITE    - 证书类型: ${YELLOW}$cert_type${NC}"
-        echo -e "$WHITE    - 伪装域名 (SNI): ${YELLOW}$sni_domain${NC}"
-        for p in "${protocols_to_create[@]}"; do
-             local protocol_type="TCP"
-             if [[ "$p" == "Hysteria2" || "$p" == "TUIC" ]]; then protocol_type="UDP"; fi
-             echo -e "$WHITE    - ${p} 端口 (${protocol_type}): ${YELLOW}${ports[$p]}${NC}"
-        done
-    fi
-    log_warn "-------------------------------------------"
-    read -p "请确认以上信息无误，是否继续执行？(y/N): " final_confirm
-    if [[ ! "$final_confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
-    fi
-    # --- 摘要结束 ---
-
 
     local success_count=0
     local final_node_link=""
@@ -2498,6 +2660,7 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
+            # --- **核心优化**：增加 REALITY 和其他协议的最终提醒 ---
             if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
                 echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
                 log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
@@ -2536,11 +2699,13 @@ singbox_add_node_orchestrator() {
                 done
                 echo -e "$YELLOW==============================================================$NC"
             fi
+            # --- **优化结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
             log_error "Sing-Box 重启失败！您的新配置可能存在问题。"
             log_error "旧的配置文件已自动恢复。请使用 'journalctl -u sing-box -f' 查看详细日志。"
+            # 回滚操作
             mv "$SINGBOX_CONFIG_FILE.bak" "$SINGBOX_CONFIG_FILE"
             press_any_key
         fi
@@ -2727,7 +2892,7 @@ delete_nodes() {
     done
     press_any_key
 }
-# 这是完整的、修改后的 push_to_sub_store 函数
+
 push_to_sub_store() {
     ensure_dependencies "curl" "jq"
     if [ ! -s "$SINGBOX_NODE_LINKS_FILE" ]; then
@@ -2773,19 +2938,19 @@ push_to_sub_store() {
         return
     fi
 
-    # --- 核心修改：使用并保存Sub-Store订阅标识 ---
+    local sub_store_config_file="/etc/sing-box/sub-store-config.txt"
     local sub_store_subs
-    read -p "请输入 Sub-Store 的订阅标识 (name) [默认: ${SUB_STORE_NAME:-<无>}]: " input_subs
-    sub_store_subs=${input_subs:-$SUB_STORE_NAME}
-
+    if [ -f "$sub_store_config_file" ]; then
+        sub_store_subs=$(grep "sub_store_subs=" "$sub_store_config_file" | cut -d'=' -f2)
+    fi
+    echo ""
+    read -p "请输入 Sub-Store 的订阅标识 (name) [默认: $sub_store_subs]: " input_subs
+    sub_store_subs=${input_subs:-$sub_store_subs}
     if [ -z "$sub_store_subs" ]; then
         log_error "Sub-Store 订阅标识不能为空！"
         press_any_key
         return
     fi
-    # 将新的有效值保存到配置文件
-    save_config "SUB_STORE_NAME" "$sub_store_subs"
-    # --- 核心修改结束 ---
 
     echo ""
     local action
@@ -2812,8 +2977,7 @@ push_to_sub_store() {
         -d "$node_json")
 
     if echo "$response" | jq -e '.success' >/dev/null; then
-        # 脚本不再需要独立的 sub-store-config.txt 文件了
-        # echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
+        echo "sub_store_subs=$sub_store_subs" >"$sub_store_config_file"
         log_info "✅ 节点信息已成功推送到 Sub-Store！"
         local success_message
         success_message=$(echo "$response" | jq -r '.message')
@@ -2857,7 +3021,7 @@ _get_nginx_user() {
         echo "nginx"    # CentOS/RHEL 默认用户
     fi
 }
-
+# (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
@@ -3114,113 +3278,217 @@ singbox_main_menu() {
     done
 }
 # =================================================
-#                Sub-Store 管理
+#                Sub-Store 管理 (V2 - 双模安装)
 # =================================================
 
-is_substore_installed() {
+# --- 辅助检测函数 ---
+is_substore_installed_baremetal() {
     if [ -f "$SUBSTORE_SERVICE_FILE" ]; then return 0; else return 1; fi
 }
 
-# (这是经过优化的“裸机”安装版本)
-substore_do_install() {
-    # 确保核心依赖已安装
+is_substore_installed_docker() {
+    if command -v docker &>/dev/null && docker ps -a --format '{{.Names}}' | grep -q "^sub-store$"; then
+        return 0
+    else
+        return 1
+    fi
+}
+# --- Docker 版安装函数 (链接修正版) ---
+substore_do_install_docker() {
+    # 1. 确保 Docker 已安装
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续。"
+        press_any_key
+        return
+    fi
+    clear
+    log_info "开始使用 Docker 安装 Sub-Store (镜像: xream/sub-store)..."
+
+    # 2. 检查并处理旧容器
+    if is_substore_installed_docker; then
+        log_warn "检测到已存在的同名 (sub-store) 容器。"
+        read -p "是否要停止并删除旧容器以进行全新安装？(y/N): " confirm_remove
+        if [[ "$confirm_remove" =~ ^[Yy]$ ]]; then
+            log_info "正在停止并删除旧的 sub-store 容器..."
+            docker stop sub-store &>/dev/null
+            docker rm sub-store &>/dev/null
+            log_info "旧容器已移除。"
+        else
+            log_error "安装中止，因为已存在的容器未被移除。"
+            press_any_key
+            return
+        fi
+    fi
+
+    # 3. 收集用户配置
+    local data_dir
+    read -e -p "请输入 Sub-Store 的数据存放目录 [默认: /root/sub-store-data]: " data_dir
+    data_dir=${data_dir:-"/root/sub-store-data"}
+    mkdir -p "$data_dir"
+    log_info "数据将保存在: $data_dir"
+
+    local backend_path
+    read -p "请输入后端的访问路径 (API Key) [回车则随机生成]: " backend_path_input
+    backend_path=${backend_path_input:-$(generate_random_password)}
+    if [[ ! "$backend_path" == /* ]]; then
+        backend_path="/$backend_path"
+    fi
+    log_info "后端访问路径 (API Key) 设置为: ${backend_path}"
+
+    local external_port
+    while true; do
+        read -p "请输入 Sub-Store 的外部访问端口 [默认: 3001]: " port_input
+        external_port=${port_input:-"3001"}
+        if check_port "$external_port"; then break; fi
+    done
+
+    local cron_schedule
+    read -p "请输入后端的自动同步 CRON 表达式 [默认: 55 23 * * *]: " cron_schedule
+    cron_schedule=${cron_schedule:-"55 23 * * *"}
+
+    # 4. 构建并执行命令 (使用数组以保证健壮性)
+    log_info "正在构建 docker run 命令..."
+
+    local docker_args=("run" "-d" "--restart=always")
+    docker_args+=("-e" "SUB_STORE_FRONTEND_BACKEND_PATH=${backend_path}")
+    docker_args+=("-e" "SUB_STORE_BACKEND_SYNC_CRON=${cron_schedule}")
+
+    read -p "是否要配置 Telegram 推送通知? (y/N): " configure_tg
+    if [[ "$configure_tg" =~ ^[Yy]$ ]]; then
+        local tg_api_key tg_chat_id
+        read -p "请输入 Telegram Bot API Key: " tg_api_key
+        read -p "请输入 Telegram Chat ID: " tg_chat_id
+        if [ -n "$tg_api_key" ] && [ -n "$tg_chat_id" ]; then
+            local push_url="https://api.telegram.org/bot${tg_api_key}/sendMessage?chat_id=${tg_chat_id}&text=[推送标题][推送内容]?group=SubStore&autoCopy=1&isArchive=1&sound=shake&level=timeSensitive&icon=https%3A%2F%2Fraw.githubusercontent.com%2F58xinian%2Ficon%2Fmaster%2FSub-Store1.png"
+            docker_args+=("-e" "SUB_STORE_PUSH_SERVICE=${push_url}")
+            log_info "Telegram 推送已配置。"
+        else
+            log_warn "API Key 或 Chat ID 为空，已跳过 Telegram 配置。"
+        fi
+    fi
+
+    docker_args+=("-p" "${external_port}:3001")
+    docker_args+=("-v" "${data_dir}:/opt/app/data")
+    docker_args+=("--name" "sub-store")
+    docker_args+=("xream/sub-store")
+
+    echo -e "\n${YELLOW}将要执行以下命令:${NC}"
+    printf "docker "
+    for arg in "${docker_args[@]}"; do
+        if [[ "$arg" == *" "* ]]; then
+            printf "'%s' " "$arg"
+        else
+            printf "%s " "$arg"
+        fi
+    done
+    echo -e "\n"
+    read -p "确认无误后按 Enter 键继续..."
+
+    if docker "${docker_args[@]}"; then
+        log_info "正在等待容器启动 (等待 5 秒)..."
+        sleep 5
+        if is_substore_installed_docker; then
+            log_info "✅ Sub-Store (Docker版) 安装并启动成功！"
+            local public_ip
+            public_ip=$(get_public_ip v4)
+
+            local backend_url="http://${public_ip}:${external_port}${backend_path}"
+            local final_url="http://${public_ip}:${external_port}/subs?api=${backend_url}"
+
+            echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
+            log_info "请通过以下链接访问 (如果防火墙允许):"
+            echo -e "\n  $YELLOW$final_url$NC\n"
+            echo -e "$CYAN-----------------------------------------------------------$NC"
+
+            touch "$data_dir/.docker_install_flag"
+
+            read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
+            if [[ "$choice" =~ ^[Yy]$ ]]; then
+                local domain
+                read -p "请输入您已解析好的域名: " domain
+                if [ -n "$domain" ]; then
+                    if setup_auto_reverse_proxy "$domain" "$external_port"; then
+                        log_info "✅ 反向代理设置成功！请通过 https://$domain 访问。"
+                        local proxy_backend_url="https://$domain$backend_path"
+                        local proxy_final_url="https://$domain/subs?api=$proxy_backend_url"
+                        echo -e "优化后的访问链接为: \n\n$YELLOW$proxy_final_url$NC\n"
+                        echo "$domain" > "$data_dir/.proxy_domain_docker"
+                    else
+                        log_error "反向代理设置失败。"
+                    fi
+                fi
+            fi
+        else
+            log_error "Sub-Store 容器启动失败！请使用 'docker logs sub-store' 查看日志排查。"
+        fi
+    else
+        log_error "执行 docker 命令失败！请检查 Docker 是否正在运行以及镜像名称是否正确。"
+    fi
+    press_any_key
+}
+# --- 宿主机版安装函数 (原 substore_do_install) ---
+substore_do_install_baremetal() {
     if ! ensure_dependencies "curl" "unzip" "git"; then
         log_error "基础依赖安装失败，无法继续。"
         press_any_key
         return
     fi
-
-    log_info "开始执行 Sub-Store [健壮版] 安装流程..."
-
-    # [优化1] 使用变量定义 FNM 的安装目录和路径，便于未来修改。
+    log_info "开始执行 Sub-Store [健壮版-宿主机] 安装流程..."
     local FNM_DIR="/root/.fnm"
     local FNM_PATH="$FNM_DIR/fnm"
-
-    # 安装 FNM (Node.js 版本管理器)
     if [ ! -f "$FNM_PATH" ]; then
         log_info "正在安装 FNM (Node.js 版本管理器)..."
         if ! curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$FNM_DIR" --skip-shell; then
-            log_error "FNM 安装脚本执行失败！"
-            press_any_key
-            return
+            log_error "FNM 安装脚本执行失败！"; press_any_key; return
         fi
     else
         log_info "FNM 已安装，跳过。"
     fi
-
-    # 设置当前 shell 的 FNM 环境
     export PATH="$FNM_DIR:$PATH"
     eval "$($FNM_PATH env)"
-
-    # 使用 FNM 安装并使用指定的 Node.js 版本
     log_info "正在使用 FNM 安装 Node.js (lts/iron)..."
     if ! $FNM_PATH install lts/iron; then
-        log_error "Node.js (lts/iron) 安装失败！"
-        press_any_key
-        return
+        log_error "Node.js (lts/iron) 安装失败！"; press_any_key; return
     fi
     $FNM_PATH use lts/iron
-
-    # [优化2] 获取 Node.js 的绝对路径，这是本次优化的核心！
     local NODE_EXEC_PATH
     NODE_EXEC_PATH=$(which node)
     if [ -z "$NODE_EXEC_PATH" ] || [ ! -f "$NODE_EXEC_PATH" ]; then
-        log_error "无法找到由 FNM 安装的 Node.js 可执行文件路径！安装中止。"
-        press_any_key
-        return
+        log_error "无法找到由 FNM 安装的 Node.js 可执行文件路径！安装中止。"; press_any_key; return
     fi
     log_info "成功定位到 Node.js 的绝对路径: $NODE_EXEC_PATH"
-
-    # 安装 pnpm
     if ! command -v pnpm &>/dev/null; then
         log_info "正在安装 pnpm..."
         if ! curl -fsSL https://get.pnpm.io/install.sh | sh -; then
-            log_error "pnpm 安装失败！"
-            press_any_key
-            return
+            log_error "pnpm 安装失败！"; press_any_key; return
         fi
-        # 设置 pnpm 环境变量
         export PNPM_HOME="$HOME/.local/share/pnpm"
         export PATH="$PNPM_HOME:$PATH"
     fi
-
-    # 下载和设置 Sub-Store 项目文件
     log_info "正在下载并设置 Sub-Store 项目文件..."
     mkdir -p "$SUBSTORE_INSTALL_DIR"
     cd "$SUBSTORE_INSTALL_DIR" || exit 1
-
-    # [优化4] 为关键下载步骤增加了错误检查
     log_info "正在下载后端文件: sub-store.bundle.js"
     if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js; then
-        log_error "下载 sub-store.bundle.js 失败！请检查网络。"
-        press_any_key
-        return
+        log_error "下载 sub-store.bundle.js 失败！请检查网络。"; press_any_key; return
     fi
-
     log_info "正在下载前端文件: dist.zip"
     if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip; then
-        log_error "下载 dist.zip 失败！请检查网络。"
-        press_any_key
-        return
+        log_error "下载 dist.zip 失败！请检查网络。"; press_any_key; return
     fi
-
     unzip -q -o dist.zip && mv dist frontend && rm dist.zip
     log_info "Sub-Store 项目文件准备就绪。"
-
-    # 收集用户配置
     log_info "开始配置系统服务...\n"
     local API_KEY
     read -p "请输入 Sub-Store 的 API 密钥 [回车则随机生成]: " user_api_key
     API_KEY=${user_api_key:-$(generate_random_password)}
     log_info "最终使用的 API 密钥为: ${API_KEY}\n"
-
     local FRONTEND_PORT
     while true; do
         read -p "请输入前端访问端口 [默认: 3000]: " port_input
         FRONTEND_PORT=${port_input:-"3000"}
         if check_port "$FRONTEND_PORT"; then break; fi
     done
-
     local BACKEND_PORT
     while true; do
         echo ""
@@ -3230,8 +3498,6 @@ substore_do_install() {
             if check_port "$BACKEND_PORT"; then break; fi
         fi
     done
-
-    # [优化3] 创建 systemd 服务文件，直接使用 Node.js 的绝对路径
     log_info "正在创建 systemd 服务文件..."
     cat <<EOF >"$SUBSTORE_SERVICE_FILE"
 [Unit]
@@ -3248,7 +3514,6 @@ Environment="SUB_STORE_FRONTEND_PORT=${FRONTEND_PORT}"
 Environment="SUB_STORE_DATA_BASE_PATH=${SUBSTORE_INSTALL_DIR}"
 Environment="SUB_STORE_BACKEND_API_HOST=127.0.0.1"
 Environment="SUB_STORE_BACKEND_API_PORT=${BACKEND_PORT}"
-# 直接使用 Node.js 的绝对路径，不再依赖 FNM
 ExecStart=${NODE_EXEC_PATH} ${SUBSTORE_INSTALL_DIR}/sub-store.bundle.js
 Type=simple
 User=root
@@ -3260,8 +3525,6 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # 启动服务
     log_info "正在启动并启用 sub-store 服务..."
     systemctl daemon-reload
     systemctl enable "$SUBSTORE_SERVICE_NAME" >/dev/null
@@ -3283,18 +3546,82 @@ EOF
     fi
 }
 
-substore_do_uninstall() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无需卸载。"
+
+# --- 安装方式选择 (新的路由函数) ---
+substore_do_install() {
+    clear
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    echo -e "$CYAN║$WHITE                 选择安装方式                     $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    read -p "请输入选项: " choice
+    case $choice in
+        1) substore_do_install_docker ;;
+        2) substore_do_install_baremetal ;;
+        0) return ;;
+        *) log_error "无效选项!"; sleep 1 ;;
+    esac
+}
+
+
+# --- Docker 版卸载函数 (新增) ---
+substore_do_uninstall_docker() {
+    if ! is_substore_installed_docker; then
+        log_warn "Sub-Store (Docker版) 未安装，无需卸载。"
         press_any_key
         return
     fi
-
-    read -p "你确定要完全卸载 Sub-Store 吗？所有配置文件都将被删除！(y/N): " confirm
+    log_info "正在准备卸载 Sub-Store (Docker版)..."
+    docker stop sub-store &>/dev/null
+    local data_dir
+    data_dir=$(docker inspect sub-store | jq -r '.[0].HostConfig.Binds[]' | grep ':/opt/app/data' | cut -d':' -f1)
+    if [ -z "$data_dir" ]; then
+        read -e -p "无法自动检测到数据目录，请输入您的数据目录路径 (例如 /root/sub-store-data): " data_dir
+    fi
+    if [ ! -d "$data_dir" ]; then
+         log_warn "指定的数据目录 '$data_dir' 不存在。将仅删除容器。"
+    else
+        local proxy_domain_file="$data_dir/.proxy_domain_docker"
+        if [ -f "$proxy_domain_file" ]; then
+            local domain=$(cat "$proxy_domain_file")
+            log_warn "检测到此应用关联了反向代理域名: $domain"
+            read -p "是否要在卸载应用的同时，删除其反代配置和SSL证书? (y/N): " confirm_delete_proxy
+            if [[ "$confirm_delete_proxy" =~ ^[Yy]$ ]]; then
+                _cleanup_reverse_proxy_config "$domain"
+            fi
+        fi
+    fi
+    read -p "警告：这将永久删除 sub-store 容器！此操作不可逆！是否继续？(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"
-        press_any_key
-        return
+        log_info "操作已取消。"; docker start sub-store &>/dev/null; press_any_key; return
+    fi
+    log_info "正在删除 sub-store 容器..."
+    docker rm sub-store &>/dev/null
+    if [ -d "$data_dir" ]; then
+        read -p "是否要删除数据目录 '$data_dir' 及其所有文件？(y/N): " confirm_delete_dir
+        if [[ "$confirm_delete_dir" =~ ^[Yy]$ ]]; then
+            log_info "正在删除数据目录 $data_dir ..."; rm -rf "$data_dir"; log_info "数据目录已删除。"
+        fi
+    fi
+    log_info "✅ Sub-Store (Docker版) 卸载完成。"; press_any_key
+}
+
+
+# --- 宿主机版卸载函数 (原 substore_do_uninstall) ---
+substore_do_uninstall_baremetal() {
+    if ! is_substore_installed_baremetal; then
+        log_warn "Sub-Store (宿主机版) 未安装，无需卸载。"; press_any_key; return
+    fi
+    read -p "你确定要完全卸载 Sub-Store (宿主机版) 吗？所有配置文件都将被删除！(y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "操作已取消。"; press_any_key; return
     fi
     set -e
     log_info "正在停止并禁用 Sub-Store 服务..."
@@ -3306,43 +3633,54 @@ substore_do_uninstall() {
     log_info "正在删除 Sub-Store 安装目录..."
     rm -rf "$SUBSTORE_INSTALL_DIR"
     set +e
-    log_info "✅ Sub-Store 已成功卸载。"
-    press_any_key
+    log_info "✅ Sub-Store (宿主机版) 已成功卸载。"; press_any_key
 }
 
+
+# --- 智能卸载路由函数 (新的 substore_do_uninstall) ---
+substore_do_uninstall() {
+    if is_substore_installed_docker; then
+        substore_do_uninstall_docker
+    elif is_substore_installed_baremetal; then
+        substore_do_uninstall_baremetal
+    else
+        log_warn "未检测到任何版本的 Sub-Store 安装。"
+        press_any_key
+    fi
+}
+
+
+# --- 后续管理函数 (保持不变或稍作调整以兼容) ---
+
 update_sub_store_app() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无法更新。"
+    if is_substore_installed_docker; then
+        log_info "您安装的是 Docker 版本，更新方式如下："
+        echo "1. docker stop sub-store"
+        echo "2. docker rm sub-store"
+        echo "3. docker pull xream/sub-store:latest"
+        echo "4. 使用您初次安装时的参数重新运行 docker run 命令即可。"
         press_any_key
         return
     fi
-    log_info "正在准备更新 Sub-Store..."
+    if ! is_substore_installed_baremetal; then
+        log_warn "Sub-Store (宿主机版) 未安装，无法更新。"; press_any_key; return
+    fi
+    log_info "正在准备更新 Sub-Store (宿主机版)..."
     cd "$SUBSTORE_INSTALL_DIR" || { log_error "无法进入安装目录: $SUBSTORE_INSTALL_DIR"; return; }
-
     log_info "正在下载最新的后端 bundle..."
     if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new; then
-        log_error "下载后端文件失败！"
-        rm -f sub-store.bundle.js.new
-        press_any_key
-        return
+        log_error "下载后端文件失败！"; rm -f sub-store.bundle.js.new; press_any_key; return
     fi
-
     log_info "正在下载最新的前端资源..."
     if ! curl -fsSL https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip -o dist.zip.new; then
-        log_error "下载前端资源失败！"
-        rm -f dist.zip.new sub-store.bundle.js.new
-        press_any_key
-        return
+        log_error "下载前端资源失败！"; rm -f dist.zip.new sub-store.bundle.js.new; press_any_key; return
     fi
-
     log_info "正在备份旧文件并应用更新..."
     mv sub-store.bundle.js sub-store.bundle.js.bak
     mv sub-store.bundle.js.new sub-store.bundle.js
-
     rm -rf frontend.bak
     mv frontend frontend.bak
     unzip -q -o dist.zip.new && mv dist frontend && rm dist.zip.new
-
     log_info "文件更新完毕，正在重启服务..."
     systemctl restart "$SUBSTORE_SERVICE_NAME"
     sleep 3
@@ -3355,56 +3693,114 @@ update_sub_store_app() {
 }
 
 substore_view_access_link() {
-    if ! is_substore_installed; then
-        log_warn "Sub-Store 未安装，无法查看链接。"
-        return
-    fi
-    clear
-    local frontend_port
-    frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local api_key
-    api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local ipv4_addr
-    ipv4_addr=$(get_public_ip v4)
-    local proxy_domain
-    proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    # 智能检测并显示不同版本的访问链接
+    if is_substore_installed_docker; then
+        # Docker 版的访问链接逻辑
+        clear
+        log_info "正在检测 Sub-Store (Docker版) 访问信息..."
+        # 增加容器不存在的保护
+        if ! docker inspect sub-store &>/dev/null; then
+            log_error "Sub-Store Docker 容器不存在或已被删除！"
+            press_any_key
+            return
+        fi
+        local container_info
+        container_info=$(docker inspect sub-store)
+        local external_port
+        external_port=$(echo "$container_info" | jq -r '.[0].HostConfig.PortBindings."3001/tcp"[0].HostPort')
+        local backend_path
+        backend_path=$(echo "$container_info" | jq -r '.[0].Config.Env[]' | grep 'SUB_STORE_FRONTEND_BACKEND_PATH' | cut -d'=' -f2)
+        local data_dir
+        data_dir=$(echo "$container_info" | jq -r '.[0].HostConfig.Binds[]' | grep ':/opt/app/data' | cut -d':' -f1)
 
-    echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
+        local public_ip
+        public_ip=$(get_public_ip v4)
 
-    if [ -n "$proxy_domain" ]; then
-        log_info "检测到反向代理域名，请使用以下链接访问："
-        local backend_url="https://$proxy_domain$api_key"
-        local final_url="https://$proxy_domain/?api=$backend_url"
+        echo -e "$CYAN----------------- Sub-Store (Docker版) 访问信息 -----------------$NC\n"
+
+        if [ -f "$data_dir/.proxy_domain_docker" ]; then
+            local domain
+            domain=$(cat "$data_dir/.proxy_domain_docker")
+            log_info "检测到反向代理域名，请使用以下链接访问："
+            local proxy_backend_url="https://$domain$backend_path"
+            local proxy_final_url="https://$domain/subs?api=$proxy_backend_url"
+            echo -e "\n  $YELLOW$proxy_final_url$NC\n"
+            echo -e "$CYAN-----------------------------------------------------------$NC"
+        fi
+
+        log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
+        local backend_url="http://${public_ip}:${external_port}${backend_path}"
+        local final_url="http://${public_ip}:${external_port}/subs?api=${backend_url}"
         echo -e "\n  $YELLOW$final_url$NC\n"
         echo -e "$CYAN-----------------------------------------------------------$NC"
-    fi
-
-    log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
-    local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
-    local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
-    echo -e "\n  $YELLOW$ip_final_url$NC\n"
-    echo -e "$CYAN-----------------------------------------------------------$NC"
-}
-
-substore_setup_reverse_proxy() {
-    if ! is_substore_installed; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
-
-    local frontend_port
-    frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
-    local domain
-
-    log_info "此功能将为您自动配置 Web 服务器 (如 Nginx 或 Caddy) 进行反向代理。"
-    log_info "您需要一个域名，并已将其 A/AAAA 记录解析到本服务器的 IP 地址。\n"
-
-    read -p "请输入您的域名: " domain
-    if [ -z "$domain" ]; then
-        log_error "域名不能为空，操作已取消。"
         press_any_key
         return
     fi
 
-    setup_auto_reverse_proxy "$domain" "$frontend_port"
+    if is_substore_installed_baremetal; then
+        # 宿主机版的访问链接逻辑
+        clear
+        local frontend_port
+        frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+        local api_key
+        api_key=$(grep 'SUB_STORE_FRONTEND_BACKEND_PATH=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+        local ipv4_addr
+        ipv4_addr=$(get_public_ip v4)
+        local proxy_domain
+        proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
+        echo -e "$CYAN----------------- Sub-Store (宿主机版) 访问信息 -----------------$NC\n"
+        if [ -n "$proxy_domain" ]; then
+            log_info "检测到反向代理域名，请使用以下链接访问："
+            local backend_url="https://$proxy_domain$api_key"
+            local final_url="https://$proxy_domain/?api=$backend_url"
+            echo -e "\n  $YELLOW$final_url$NC\n"
+            echo -e "$CYAN-----------------------------------------------------------$NC"
+        fi
+        log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
+        local ip_backend_url="http://$ipv4_addr:$frontend_port$api_key"
+        local ip_final_url="http://$ipv4_addr:$frontend_port/?api=$ip_backend_url"
+        echo -e "\n  $YELLOW$ip_final_url$NC\n"
+        echo -e "$CYAN-----------------------------------------------------------$NC"
+        press_any_key
+        return
+    fi
+
+    log_warn "未检测到任何 Sub-Store 安装，无法查看链接。"
+    press_any_key
+}
+
+substore_setup_reverse_proxy() {
+    if is_substore_installed_docker; then
+        log_info "为 Docker 版 Sub-Store 设置反向代理..."
+        local external_port
+        external_port=$(docker inspect sub-store | jq -r '.[0].HostConfig.PortBindings."3001/tcp"[0].HostPort')
+        local data_dir
+        data_dir=$(docker inspect sub-store | jq -r '.[0].HostConfig.Binds[]' | grep ':/opt/app/data' | cut -d':' -f1)
+
+        local domain
+        read -p "请输入您的域名: " domain
+        if [ -z "$domain" ]; then log_error "域名不能为空，操作已取消。"; press_any_key; return; fi
+
+        if setup_auto_reverse_proxy "$domain" "$external_port"; then
+            echo "$domain" > "$data_dir/.proxy_domain_docker"
+            log_info "✅ Sub-Store 反向代理设置完成！"
+            substore_view_access_link
+        else
+            log_error "自动反向代理配置失败，请检查之前的错误信息。"
+        fi
+        press_any_key
+        return
+    fi
+
+    if ! is_substore_installed_baremetal; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
+    log_info "为宿主机版 Sub-Store 设置反向代理..."
+    local frontend_port
+    frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
+    local domain
+    read -p "请输入您的域名: " domain
+    if [ -z "$domain" ]; then log_error "域名不能为空，操作已取消。"; press_any_key; return; fi
+    setup_auto_reverse_proxy "$domain" "$frontend_port"
     if [ $? -eq 0 ]; then
         log_info "正在将域名保存到服务配置中以供显示..."
         if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE"; then
@@ -3414,126 +3810,114 @@ substore_setup_reverse_proxy() {
         fi
         systemctl daemon-reload
         log_info "✅ Sub-Store 反向代理设置完成！"
-        log_info "正在显示最新的访问链接..."
-        sleep 1
+        log_info "正在显示最新的访问链接..."; sleep 1
         substore_view_access_link
     else
         log_error "自动反向代理配置失败，请检查之前的错误信息。"
     fi
-
-    press_any_key
-}
-
-substore_reset_ports() {
-    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
-    log_info "准备重置 Sub-Store 端口..."
-    local NEW_FRONTEND_PORT
-    while true; do
-        read -p "请输入新的前端访问端口 [默认: 3000]: " port_input
-        NEW_FRONTEND_PORT=${port_input:-"3000"}
-        if check_port "$NEW_FRONTEND_PORT"; then break; fi
-    done
-    local NEW_BACKEND_PORT
-    while true; do
-        read -p "请输入新的后端 API 端口 [默认: 3001]: " backend_port_input
-        NEW_BACKEND_PORT=${backend_port_input:-"3001"}
-        if [ "$NEW_BACKEND_PORT" == "$NEW_FRONTEND_PORT" ]; then log_error "后端端口不能与前端端口相同!"; else
-            if check_port "$NEW_BACKEND_PORT"; then break; fi
-        fi
-    done
-
-    sed -i.bak "s/SUB_STORE_FRONTEND_PORT=.*/SUB_STORE_FRONTEND_PORT=${NEW_FRONTEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    sed -i.bak "s/SUB_STORE_BACKEND_API_PORT=.*/SUB_STORE_BACKEND_API_PORT=${NEW_BACKEND_PORT}/" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ 端口已更新，服务已重启。新的前端端口为: $NEW_FRONTEND_PORT"
-    press_any_key
-}
-
-substore_reset_api_key() {
-    if ! is_substore_installed; then log_warn "Sub-Store 未安装"; press_any_key; return; fi
-    log_info "准备重置 API 密钥..."
-    local NEW_API_KEY
-    read -p "请输入新的 API 密钥 [回车则随机生成]: " user_api_key
-    NEW_API_KEY=${user_api_key:-$(generate_random_password)}
-
-    sed -i.bak "s|SUB_STORE_FRONTEND_BACKEND_PATH=.*|SUB_STORE_FRONTEND_BACKEND_PATH=/${NEW_API_KEY}|" "$SUBSTORE_SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl restart "$SUBSTORE_SERVICE_NAME"
-    log_info "✅ API 密钥已更新，服务已重启。"
-    log_info "新的 API 密钥是: $YELLOW$NEW_API_KEY$NC"
     press_any_key
 }
 
 substore_manage_menu() {
-    while true; do
-        clear
-        local rp_menu_text="设置反向代理 (推荐)"
-        if grep -q 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" 2>/dev/null; then
-            rp_menu_text="更换反代域名"
-        fi
+    # 此菜单现在需要根据安装类型显示不同的选项
+    # 为简化，我们只修改核心功能，保持此菜单结构，但内部命令会变得更智能
+    clear
 
-        local STATUS_COLOR
+    local install_type="未知"
+    local status_text="${RED}● 不活动   ${NC}"
+    local is_baremetal=false
+    local is_docker=false
+
+    if is_substore_installed_docker; then
+        install_type="Docker版"
+        is_docker=true
+        if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
+            status_text="${GREEN}● 活动     ${NC}"
+        fi
+    elif is_substore_installed_baremetal; then
+        install_type="宿主机版"
+        is_baremetal=true
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            STATUS_COLOR="$GREEN● 活动$NC"
-        else
-            STATUS_COLOR="$RED● 不活动$NC"
+            status_text="${GREEN}● 活动        ${NC}"
         fi
+    fi
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  Sub-Store 管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────── $WHITE服务控制$CYAN ────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 启动服务            2. 停止服务             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 重启服务            4. 查看状态             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 查看日志                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────── $WHITE参数配置$CYAN ────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 查看访问链接                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 重置端口                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. 重置 API 密钥                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $YELLOW$rp_menu_text$NC                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    local rp_menu_text="设置反向代理 (推荐)"
+    # ... 此处可以添加更智能的检测逻辑 ...
 
-        read -p "请输入选项: " choice
-        case $choice in
-        1) systemctl start "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        2) systemctl stop "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        3) systemctl restart "$SUBSTORE_SERVICE_NAME"; log_info "命令已发送"; sleep 1 ;;
-        4) clear; systemctl status "$SUBSTORE_SERVICE_NAME" -l --no-pager; press_any_key ;;
-        5) clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager ;;
-        6) substore_view_access_link; press_any_key ;;
-        7) substore_reset_ports ;;
-        8) substore_reset_api_key ;;
-        9) substore_setup_reverse_proxy ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    echo -e "$CYAN║$WHITE                  Sub-Store 管理                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$status_text" "$install_type"
+    echo -e "$CYAN╟──────────────────── $WHITE服务控制$CYAN ────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   1. 启动服务            2. 停止服务             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   3. 重启服务            4. 查看日志             $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────── $WHITE参数配置$CYAN ────────────────────╢$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   5. 查看访问链接                                $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. $YELLOW$rp_menu_text$NC                         $CYAN║$NC"
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+    read -p "请输入选项: " choice
+
+    if ! $is_docker && ! $is_baremetal; then
+        log_warn "未检测到任何 Sub-Store 安装。"; sleep 2; return;
+    fi
+
+    case $choice in
+    1) if $is_docker; then docker start sub-store; else systemctl start "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+    2) if $is_docker; then docker stop sub-store; else systemctl stop "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+    3) if $is_docker; then docker restart sub-store; else systemctl restart "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+    4) if $is_docker; then clear; docker logs -f sub-store; else clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager; fi ;;
+    5) substore_view_access_link ;;
+    6) substore_setup_reverse_proxy ;;
+    # 暂时移除重置端口和密钥的功能，因为对 Docker 版实现复杂
+    # 7) substore_reset_ports ;;
+    # 8) substore_reset_api_key ;;
+    0) return ;;
+    *) log_error "无效选项！"; sleep 1 ;;
+    esac
+    # 递归调用以刷新状态
+    substore_manage_menu
 }
 
+# --- 主菜单 (修改后) ---
 substore_main_menu() {
     while true; do
         clear
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
         echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_substore_installed; then
-            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then STATUS_COLOR="$GREEN● 活动$NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        local STATUS_COLOR install_type="未安装"
+        if is_substore_installed_docker; then
+            install_type="Docker版"
+            if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
+                STATUS_COLOR="$GREEN● 活动     $NC"
+            else
+                STATUS_COLOR="$RED● 不活动   $NC"
+            fi
+        elif is_substore_installed_baremetal; then
+            install_type="宿主机版"
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+                STATUS_COLOR="$GREEN● 活动        $NC"
+            else
+                STATUS_COLOR="$RED● 不活动      $NC"
+            fi
+        else
+            STATUS_COLOR="$YELLOW● 未安装     $NC"
+        fi
+
+        printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$STATUS_COLOR" "$install_type"
+        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+        if is_substore_installed_docker || is_substore_installed_baremetal; then
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -3550,8 +3934,6 @@ substore_main_menu() {
             3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
             echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
             echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -4797,52 +5179,28 @@ uninstall_maccms() {
 }
 
 install_uptime_kuma() {
-    if ! _install_docker_and_compose; then
-        log_error "Docker 环境准备失败，无法继续搭建 Uptime Kuma。"
-        press_any_key; return;
-    fi
-    clear
-    log_info "开始使用 Docker Compose 搭建 Uptime Kuma..."
-
-    local project_dir="/root/uptime-kuma"
-    mkdir -p "$project_dir"
-    cd "$project_dir" || return 1
-
-    local web_port
-    while true; do
-        read -p "请输入 Uptime Kuma 的外部访问端口 [默认: 3001]: " web_port
-        web_port=${web_port:-"3001"}
-        if check_port "$web_port"; then break; fi
-    done
-
-    cat > docker-compose.yml <<EOF
+    local compose_template="
 version: '3.8'
 
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: uptime-kuma
+    container_name: {{container_name}}
     restart: always
     ports:
-      - "$web_port:3001"
+      - \"{{ports_or_port}}:3001\"
     volumes:
       - uptime_kuma_data:/app/data
 
 volumes:
   uptime_kuma_data:
-EOF
-
-    log_info "正在启动 Uptime Kuma 服务..."
-    docker compose up -d
-
-    log_info "检查服务状态..."
-    sleep 5
-    docker compose ps
-
-    local public_ip=$(get_public_ip v4)
-    log_info "✅ Uptime Kuma 安装完成！"
-    log_info "请通过 http://$public_ip:$web_port 访问。"
-    press_any_key
+"
+    _install_docker_compose_app \
+      "Uptime Kuma" \
+      "/root/uptime-kuma" \
+      "port" \
+      "true" \
+      "$compose_template"
 }
 
 uninstall_uptime_kuma() {
@@ -4977,10 +5335,9 @@ uninstall_1panel() {
     fi
     press_any_key
 }
-
-
-# --- 新增：智能卸载菜单 ---
-
+# =================================================================
+#           智能卸载菜单 (V2.0 - 增强检测版)
+# =================================================================
 uninstall_panels_menu() {
     while true; do
         clear
@@ -4989,7 +5346,7 @@ uninstall_panels_menu() {
         local installed_items=()
         local function_map=()
 
-        # 检测逻辑
+        # --- Docker Compose 应用检测 (通过 docker-compose.yml) ---
         if [ -f "/root/wordpress/docker-compose.yml" ]; then
             installed_items+=("WordPress (位于 /root/wordpress)")
             function_map+=("uninstall_wordpress")
@@ -4998,40 +5355,49 @@ uninstall_panels_menu() {
             installed_items+=("苹果CMS (位于 /root/maccms)")
             function_map+=("uninstall_maccms")
         fi
-        if [ -d "/usr/local/x-ui/" ]; then
+        if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
+            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
+            function_map+=("uninstall_uptime_kuma")
+        fi
+
+        # --- 外部脚本安装检测 (通过特征命令或目录) ---
+        if command -v 3x-ui &>/dev/null || [ -d "/usr/local/x-ui/" ]; then
             installed_items+=("3x-ui 面板")
             function_map+=("uninstall_3xui")
         fi
-        if [ -d "/usr/local/s-ui/" ]; then
+        if command -v s-ui &>/dev/null || [ -d "/usr/local/s-ui/" ]; then
             installed_items+=("S-ui 面板")
             function_map+=("uninstall_sui")
-        fi
-         if [ -f "/root/uptime-kuma/docker-compose.yml" ]; then
-            installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
-            function_map+=("uninstall_uptime_kuma")
         fi
         if [ -d "/www/server/panel" ]; then
             installed_items+=("宝塔面板")
             function_map+=("uninstall_bt_panel")
         fi
-        if [ -d "/opt/1panel" ]; then
-            installed_items+=("1Panel")
+        if command -v 1pctl &>/dev/null; then
+            installed_items+=("1Panel 面板")
             function_map+=("uninstall_1panel")
         fi
-        if [ -f "/root/portainer/docker-compose.yml" ] || docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
+
+        # --- Docker 独立容器应用检测 (通过容器名) ---
+        if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
             installed_items+=("Portainer (通用Docker面板)")
-            function_map+=("uninstall_portainer") # 假设你有一个卸载它的函数
+            # 确保你有一个对应的 uninstall_portainer 函数
+            # 此处我们假设 uninstall_docker_compose_project 可以处理（如果它被改造得更通用）
+            # 或者你需要一个专门的 uninstall_portainer 函数。
+            # 为安全起见，我们暂时注释掉，除非你已创建该函数
+            # function_map+=("uninstall_portainer")
         fi
 
-
+        # --- 检查是否有可卸载项 ---
         if [ ${#installed_items[@]} -eq 0 ]; then
-            log_warn "未检测到任何通过本脚本安装的应用或面板。"
+            log_warn "未检测到任何通过本脚本安装且可识别的应用或面板。"
             press_any_key
             return
         fi
 
+        # --- 绘制菜单 ---
         echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 选择要卸载的面板                 $CYAN║$NC"
+        echo -e "$CYAN║$WHITE                 选择要卸载的应用或面板             $CYAN║$NC"
         echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
         for i in "${!installed_items[@]}"; do
@@ -5048,15 +5414,103 @@ uninstall_panels_menu() {
                 break
             else
                 local index=$((choice-1))
-                # 调用对应的卸载函数
+                # 清屏并调用对应的卸载函数
+                clear
                 ${function_map[$index]}
+
                 # 卸载后暂停，以便用户可以再次进入此菜单查看结果
-                press_any_key
+                # press_any_key
+                # 注释掉press_any_key，因为卸载函数内部通常已经有了，避免重复按键
             fi
         else
             log_error "无效选项！"; sleep 1
         fi
     done
+}
+# =================================================================
+#           新增：通用 Docker Compose 应用安装器
+# =================================================================
+_install_docker_compose_app() {
+    local app_name="$1"
+    local default_dir="$2"
+    local port_type="$3" # "ports" for external access, "port" for internal proxy
+    local needs_proxy="$4"
+    local compose_template="$5"
+
+    if ! _install_docker_and_compose; then
+        log_error "Docker 环境准备失败，无法继续搭建 $app_name。"
+        press_any_key
+        return 1
+    fi
+    clear
+    log_info "开始使用 Docker Compose 搭建 $app_name..."
+
+    local project_dir
+    while true; do
+        read -e -p "请输入新的 $app_name 项目的安装目录 [默认: $default_dir]: " project_dir
+        project_dir=${project_dir:-"$default_dir"}
+        if [ -f "$project_dir/docker-compose.yml" ]; then
+            log_error "错误：目录 \"$project_dir\" 下已存在一个 Docker 项目！"
+            log_warn "请为新的 $app_name 站点选择一个不同的、全新的目录。"
+            continue
+        else
+            break
+        fi
+    done
+    mkdir -p "$project_dir" || { log_error "无法创建目录 $project_dir！"; press_any_key; return 1; }
+    cd "$project_dir" || { log_error "无法进入目录 $project_dir！"; press_any_key; return 1; }
+    log_info "新的 $app_name 将被安装在: $(pwd)"
+
+    local app_port
+    while true; do
+        local prompt_msg="请输入 $app_name 的"
+        if [ "$port_type" == "ports" ]; then
+            prompt_msg+="外部访问端口"
+        else # "port"
+            prompt_msg+="内部代理端口 (外部无法直接访问)"
+        fi
+        read -p "$prompt_msg [回车则随机生成]: " app_port
+        app_port=${app_port:-$(generate_random_port)}
+        if check_port "$app_port"; then break; fi
+    done
+
+    # 替换模板变量
+    local container_name="${project_dir##*/}" # 使用目录名作为容器名
+    local final_compose_content="${compose_template//\{\{container_name\}\}/$container_name}"
+    final_compose_content="${final_compose_content//\{\{ports_or_port\}\}/$app_port}"
+
+    log_info "正在生成 docker-compose.yml 文件..."
+    echo -e "$final_compose_content" > docker-compose.yml
+
+    log_info "正在使用 Docker Compose 启动 $app_name 服务..."
+    log_warn "首次启动需要下载镜像，可能需要一些时间，请耐心等待..."
+    docker compose up -d
+    log_info "正在检查服务状态..."
+    sleep 5
+    docker compose ps
+    log_info "✅ $app_name 容器已成功启动！"
+
+    if [ "$needs_proxy" == "true" ]; then
+        local domain
+        while true; do
+            read -p "请输入您的网站访问域名 (例如 ${app_name,,}.example.com)，必须提前解析: " domain
+            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+        done
+        if setup_auto_reverse_proxy "$domain" "$app_port"; then
+            echo "$domain" > "$project_dir/.proxy_domain"
+            log_info "✅ $app_name 反向代理设置完成！"
+            log_info "请通过 https://$domain 访问您的应用。"
+        else
+            log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
+        fi
+    else
+        local public_ip
+        public_ip=$(get_public_ip v4)
+        log_info "✅ $app_name 安装完成！"
+        log_info "请通过 http://$public_ip:$app_port 访问。"
+    fi
+
+    press_any_key
 }
 # (这是被修改的函数, 全新的菜单结构)
 docker_apps_menu() {
@@ -5297,7 +5751,7 @@ _handle_caddy_cert() {
     return 1
 }
 
-# --- (优化) 增加用户输入邮箱的交互 ---
+# --- (优化) 自动处理 Nginx 证书申请，无需输入邮箱 ---
 _handle_nginx_cert() {
     local domain_name="$1"
     log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
@@ -5331,18 +5785,15 @@ EOF
         log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
     fi
 
-    # --- 新增邮箱输入 ---
-    local email
-    echo ""
-    read -p "请输入您的邮箱地址 (用于接收Let's Encrypt续期提醒) [回车则跳过]: " email
-    local email_arg
-    if [ -n "$email" ]; then
-        email_arg="--email $email"
-    else
-        email_arg="--register-unsafely-without-email"
-    fi
+    # --- 这里是核心修改 ---
+    # 移除了所有询问邮箱的交互代码
+    # 直接定义使用“无邮箱”参数
+    log_info "将使用 --register-unsafely-without-email 参数，自动跳过邮箱输入。"
+    local email_arg="--register-unsafely-without-email"
+    # --- 修改结束 ---
 
     log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
+    # 在 certbot 命令中直接使用定义好的 $email_arg
     certbot --nginx -d "$domain_name" --non-interactive --agree-tos $email_arg --redirect
 
     if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
@@ -5353,69 +5804,43 @@ EOF
         return 1
     fi
 }
-# 这是完整的、修改后的 _handle_nginx_cert 函数
-_handle_nginx_cert() {
+# --- (优化) 调用DNS预检查 ---
+apply_ssl_certificate() {
     local domain_name="$1"
-    log_info "检测到 Nginx，将使用 '--nginx' 插件模式。"
-    if ! systemctl is-active --quiet nginx; then
-        log_info "Nginx 服务未运行，正在启动..."
-        systemctl start nginx
-    fi
-    local NGINX_CONF_PATH="/etc/nginx/sites-available/$domain_name.conf"
-    if [ ! -f "$NGINX_CONF_PATH" ]; then
-        log_info "为域名验证创建临时的 HTTP Nginx 配置文件..."
-        cat <<EOF >"$NGINX_CONF_PATH"
-server {
-    listen 80;
-    listen [::]:80;
-    server_name $domain_name;
-    root /var/www/html;
-    index index.html index.htm;
-}
-EOF
-        if [ ! -L "/etc/nginx/sites-enabled/$domain_name.conf" ]; then
-            ln -s "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/"
-        fi
-        log_info "正在重载 Nginx 以应用临时配置..."
-        if ! nginx -t; then
-            log_error "Nginx 临时配置测试失败！请检查 Nginx 状态。"
-            rm -f "$NGINX_CONF_PATH" "/etc/nginx/sites-enabled/$domain_name.conf"
-            return 1
-        fi
-        systemctl reload nginx
-    else
-        log_warn "检测到已存在的 Nginx 配置文件，将直接在此基础上尝试申请证书。"
-    fi
 
-    # --- 新增邮箱输入逻辑 (核心修改) ---
-    local email
-    # 如果配置文件中有 CERTBOT_EMAIL，则将其作为默认值
-    read -p "请输入您的邮箱地址 (用于Let's Encrypt提醒) [默认: ${CERTBOT_EMAIL:-<无>}]: " email_input
-    # 如果用户没有输入新值，则使用配置文件中的值；否则使用新值
-    email=${email_input:-$CERTBOT_EMAIL}
-
-    local email_arg
-    if [ -n "$email" ]; then
-        # 如果最终email值非空，则保存到配置文件并用于命令
-        save_config "CERTBOT_EMAIL" "$email"
-        email_arg="--email $email"
-    else
-        # 如果最终email值为空，则不使用邮箱注册
-        email_arg="--register-unsafely-without-email"
-    fi
-    # --- 核心修改结束 ---
-
-    log_info "正在使用 'certbot --nginx' 模式为 $domain_name 申请证书..."
-    certbot --nginx -d "$domain_name" --non-interactive --agree-tos $email_arg --redirect
-
-    if [ -f "/etc/letsencrypt/live/$domain_name/fullchain.pem" ]; then
-        log_info "✅ Nginx 模式证书申请成功！"
-        return 0
-    else
-        log_error "Nginx 模式证书申请失败！"
+    # --- 新增DNS预检查调用 ---
+    if ! _precheck_domain_dns "$domain_name"; then
         return 1
     fi
+
+    local cert_dir="/etc/letsencrypt/live/$domain_name"
+    if [ -d "$cert_dir" ]; then
+        log_info "检测到域名 $domain_name 的证书已存在，跳过申请流程。"
+        return 0
+    fi
+    log_info "证书不存在，开始智能检测环境并为 $domain_name 申请新证书..."
+
+    local certbot_dep="certbot"
+    if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+        log_warn "在 RHEL/CentOS 上, Certbot 通常位于 EPEL 仓库。"
+        log_warn "如果安装失败，请先手动安装 epel-release 包。"
+    fi
+    ensure_dependencies "$certbot_dep"
+
+    if command -v caddy &>/dev/null; then
+        _handle_caddy_cert
+    else
+        log_info "未检测到 Caddy，将默认使用 Nginx 模式。"
+        local nginx_certbot_dep="python3-certbot-nginx"
+        if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+            nginx_certbot_dep="python3-certbot-nginx"
+        fi
+        ensure_dependencies "nginx" "$nginx_certbot_dep"
+        _handle_nginx_cert "$domain_name"
+    fi
+    return $?
 }
+
 # --- (优化) 增加HSTS头 ---
 _configure_nginx_proxy() {
     local domain="$1"
@@ -5591,7 +6016,28 @@ setup_auto_reverse_proxy() {
     fi
     return $status
 }
+# =================================================
+#           证书 & 反代 (新增的缺失函数)
+# =================================================
 
+# (新增) 查看/列出所有证书
+list_certificates() {
+    # 检查 certbot 命令是否存在
+    if ! command -v certbot &>/dev/null; then
+        log_error "Certbot 未安装，无法查看证书列表。"
+        return
+    fi
+
+    clear
+    log_info "正在获取由 Certbot 管理的所有证书列表..."
+    echo -e "$CYAN----------------------------------------------------------------------$NC"
+
+    # 直接执行 certbot certificates 命令，它会处理“找到证书”和“未找到证书”两种情况
+    # 并以友好的格式输出
+    certbot certificates
+
+    echo -e "$CYAN----------------------------------------------------------------------$NC"
+}
 # --- (新增) 仅申请证书的工作流函数 ---
 apply_ssl_certificate_only_workflow() {
     clear
@@ -5652,15 +6098,8 @@ certificate_management_menu() {
 
 do_update_script() {
     log_info "正在从 GitHub 下载最新版本的脚本..."
-    # 使用 mktemp 创建一个安全的临时文件
-    local temp_script
-    temp_script=$(mktemp /tmp/vps_tool_new.XXXXXX.sh)
-    if [ $? -ne 0 ]; then
-        log_error "无法创建安全的临时文件，更新中止。"
-        press_any_key
-        return 1
-    fi
-    register_temp_file "$temp_script" # 注册以便自动清理
+    local temp_script="/tmp/vps_tool_new.sh"
+    register_temp_file "$temp_script"
 
     if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
         log_error "下载脚本失败！请检查您的网络连接或 URL 是否正确。"
@@ -5773,7 +6212,7 @@ main_menu() {
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${GREEN}Docker 通用管理${NC}                             $CYAN║$NC"
+        echo -e "$CYAN║$NC   5. Docker 通用管理                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
         echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
         echo -e "$CYAN║$NC                                                  $CYAN║$NC"
@@ -5807,6 +6246,5 @@ main_menu() {
 # --- 脚本执行入口 ---
 check_root
 detect_os_and_package_manager
-load_config # <--- 在这里添加加载函数
 initial_setup_check
 main_menu

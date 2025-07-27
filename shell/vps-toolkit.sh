@@ -242,6 +242,64 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
+#           新增：通用菜单绘制函数 (V6)
+# =================================================
+# 函数: 绘制一个标准的菜单
+# 用法:
+#   local -a options=("选项1" "选项2" "选项3 (推荐)")
+#   local choice
+#   _draw_menu "我的菜单标题" choice "${options[@]}"
+#   echo "用户选择了: $choice"
+#
+# @param $1: 菜单标题 (字符串)
+# @param $2: 用于接收用户选择的变量名 (引用)
+# @param $3+: 菜单选项数组
+_draw_menu() {
+    local title="$1"
+    local -n choice_ref=$2 # 使用-n引用，可以直接修改外部变量的值
+    shift 2
+    local -a options=("$@")
+    local width=50
+
+    clear
+    # 打印上边框和标题
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    local title_len
+    # 使用纯文本计算标题长度，忽略颜色代码
+    title_len=$(echo -e "$title" | sed 's/\x1b\[[0-9;]*m//g' | wc -c)
+    ((title_len--)) # wc -c 会多计算一个换行符
+    local padding=$(((width - title_len) / 2))
+    printf "$CYAN║%*s$WHITE%b$CYAN%*s║$NC\n" "$padding" "" "$title" "$((width - title_len - padding))" ""
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+    # 打印菜单选项
+    for i in "${!options[@]}"; do
+        local option_text="${options[$i]}"
+        # 为特定关键词自动添加颜色
+        local formatted_option
+        formatted_option=$(echo -e "$option_text" | sed \
+            -e "s/(推荐)/${GREEN}(推荐)${NC}/g" \
+            -e "s/(推荐, 无需域名)/${GREEN}(推荐, 无需域名)${NC}/g" \
+            -e "s/(删除)/${RED}(删除)${NC}/g" \
+            -e "s/(卸载)/${RED}(卸载)${NC}/g" \
+            -e "s/(增强)/${BLUE}(增强)${NC}/g" \
+        )
+
+        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        # 使用 printf 和 -b 来正确处理带颜色的选项
+        printf "$CYAN║$NC  %2d. %-48b $CYAN║$NC\n" "$((i + 1))" "$formatted_option"
+    done
+
+    # 打印分隔符和返回选项
+    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+    echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+    # 读取用户输入
+    read -p "请输入选项: " choice_ref
+}
+# =================================================
 #           新增：系统健康巡检辅助函数
 # =================================================
 _check_service_status() {
@@ -500,56 +558,61 @@ firewall_helper_menu() {
     done
 }
 # =================================================
-#                系统管理 (sys_manage_menu)
+#                系统管理 (sys_manage_menu) - 优化版
 # =================================================
 sys_manage_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 修改 SSH 端口                               $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置系统时区                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. DNS 工具箱 (优化/备份/恢复)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
-        echo -e "$CYAN║$NC  12. 防火墙助手 (UFW/FirewallD)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检${NC}                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 定义菜单选项数组
+        local -a options=(
+            "系统信息查询"
+            "清理系统垃圾"
+            "修改主机名"
+            "设置 root 登录 (密钥/密码)"
+            "修改 SSH 端口"
+            "设置系统时区"
+            "网络优化 ->" # 使用 -> 符号表示子菜单
+            "实用工具 (增强) ->"
+            "${CYAN}系统健康巡检${NC}"
+        )
 
-        read -p "请输入选项: " choice
+        # 定义网络优化子菜单选项
+        local -a network_options=(
+             "设置网络优先级 (IPv4/v6)"
+             "DNS 工具箱 (优化/备份/恢复)"
+             "BBR 拥塞控制管理"
+             "安装 WARP 网络接口"
+        )
+
+        local choice
+        # 调用通用菜单函数
+        _draw_menu "系统综合管理" choice "${options[@]}"
+
+        # case语句处理用户选择
         case $choice in
-        1) show_system_info ;;
-        2) clean_system ;;
-        3) change_hostname ;;
-        4) manage_root_login ;;
-        5) change_ssh_port ;;
-        6) set_timezone ;;
-        7) network_priority_menu ;;
-        8) dns_toolbox_menu ;;
-        9) manage_bbr ;;
-        10) install_warp ;;
-        11) utility_tools_menu ;;
-        12) firewall_helper_menu ;;
-        13) system_health_check ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) show_system_info ;;
+            2) clean_system ;;
+            3) change_hostname ;;
+            4) manage_root_login ;;
+            5) change_ssh_port ;;
+            6) set_timezone ;;
+            7) # 网络优化子菜单
+                while true; do
+                    local net_choice
+                    _draw_menu "网络优化" net_choice "${network_options[@]}"
+                    case $net_choice in
+                        1) network_priority_menu ;;
+                        2) dns_toolbox_menu ;;
+                        3) manage_bbr ;;
+                        4) install_warp ;;
+                        0) break ;;
+                        *) log_error "无效选项！"; sleep 1 ;;
+                    esac
+                done
+                ;;
+            8) utility_tools_menu ;;
+            9) system_health_check ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
