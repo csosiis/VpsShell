@@ -3426,14 +3426,14 @@ substore_do_install_docker() {
     fi
     press_any_key
 }
-# --- 裸机版安装函数 (原 substore_do_install) ---
+# --- 宿主机版安装函数 (原 substore_do_install) ---
 substore_do_install_baremetal() {
     if ! ensure_dependencies "curl" "unzip" "git"; then
         log_error "基础依赖安装失败，无法继续。"
         press_any_key
         return
     fi
-    log_info "开始执行 Sub-Store [健壮版-裸机] 安装流程..."
+    log_info "开始执行 Sub-Store [健壮版-宿主机] 安装流程..."
     local FNM_DIR="/root/.fnm"
     local FNM_PATH="$FNM_DIR/fnm"
     if [ ! -f "$FNM_PATH" ]; then
@@ -3556,7 +3556,7 @@ substore_do_install() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. 裸机版安装 (直接部署, 占用低)               $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
@@ -3614,12 +3614,12 @@ substore_do_uninstall_docker() {
 }
 
 
-# --- 裸机版卸载函数 (原 substore_do_uninstall) ---
+# --- 宿主机版卸载函数 (原 substore_do_uninstall) ---
 substore_do_uninstall_baremetal() {
     if ! is_substore_installed_baremetal; then
-        log_warn "Sub-Store (裸机版) 未安装，无需卸载。"; press_any_key; return
+        log_warn "Sub-Store (宿主机版) 未安装，无需卸载。"; press_any_key; return
     fi
-    read -p "你确定要完全卸载 Sub-Store (裸机版) 吗？所有配置文件都将被删除！(y/N): " confirm
+    read -p "你确定要完全卸载 Sub-Store (宿主机版) 吗？所有配置文件都将被删除！(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         log_info "操作已取消。"; press_any_key; return
     fi
@@ -3633,7 +3633,7 @@ substore_do_uninstall_baremetal() {
     log_info "正在删除 Sub-Store 安装目录..."
     rm -rf "$SUBSTORE_INSTALL_DIR"
     set +e
-    log_info "✅ Sub-Store (裸机版) 已成功卸载。"; press_any_key
+    log_info "✅ Sub-Store (宿主机版) 已成功卸载。"; press_any_key
 }
 
 
@@ -3663,9 +3663,9 @@ update_sub_store_app() {
         return
     fi
     if ! is_substore_installed_baremetal; then
-        log_warn "Sub-Store (裸机版) 未安装，无法更新。"; press_any_key; return
+        log_warn "Sub-Store (宿主机版) 未安装，无法更新。"; press_any_key; return
     fi
-    log_info "正在准备更新 Sub-Store (裸机版)..."
+    log_info "正在准备更新 Sub-Store (宿主机版)..."
     cd "$SUBSTORE_INSTALL_DIR" || { log_error "无法进入安装目录: $SUBSTORE_INSTALL_DIR"; return; }
     log_info "正在下载最新的后端 bundle..."
     if ! curl -fsSL https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js -o sub-store.bundle.js.new; then
@@ -3738,7 +3738,7 @@ substore_view_access_link() {
     fi
 
     if is_substore_installed_baremetal; then
-        # 裸机版的访问链接逻辑
+        # 宿主机版的访问链接逻辑
         clear
         local frontend_port
         frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
@@ -3749,7 +3749,7 @@ substore_view_access_link() {
         local proxy_domain
         proxy_domain=$(grep 'SUB_STORE_REVERSE_PROXY_DOMAIN=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
 
-        echo -e "$CYAN----------------- Sub-Store (裸机版) 访问信息 -----------------$NC\n"
+        echo -e "$CYAN----------------- Sub-Store (宿主机版) 访问信息 -----------------$NC\n"
         if [ -n "$proxy_domain" ]; then
             log_info "检测到反向代理域名，请使用以下链接访问："
             local backend_url="https://$proxy_domain$api_key"
@@ -3794,7 +3794,7 @@ substore_setup_reverse_proxy() {
     fi
 
     if ! is_substore_installed_baremetal; then log_warn "请先安装 Sub-Store"; press_any_key; return; fi
-    log_info "为裸机版 Sub-Store 设置反向代理..."
+    log_info "为宿主机版 Sub-Store 设置反向代理..."
     local frontend_port
     frontend_port=$(grep 'SUB_STORE_FRONTEND_PORT=' "$SUBSTORE_SERVICE_FILE" | awk -F'=' '{print $NF}' | tr -d '"')
     local domain
@@ -3824,7 +3824,7 @@ substore_manage_menu() {
     clear
 
     local install_type="未知"
-    local status_text="${RED}● 不活动${NC}"
+    local status_text="${RED}● 不活动   ${NC}"
     local is_baremetal=false
     local is_docker=false
 
@@ -3832,13 +3832,13 @@ substore_manage_menu() {
         install_type="Docker版"
         is_docker=true
         if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-            status_text="${GREEN}● 活动${NC}"
+            status_text="${GREEN}● 活动    ${NC}"
         fi
     elif is_substore_installed_baremetal; then
-        install_type="裸机版"
+        install_type="宿主机版"
         is_baremetal=true
         if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            status_text="${GREEN}● 活动${NC}"
+            status_text="${GREEN}● 活动    ${NC}"
         fi
     fi
 
@@ -3859,7 +3859,7 @@ substore_manage_menu() {
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   5. 查看访问链接                                $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $YELLOW$rp_menu_text$NC                            $CYAN║$NC"
+    echo -e "$CYAN║$NC   6. $YELLOW$rp_menu_text$NC                         $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
@@ -3904,7 +3904,7 @@ substore_main_menu() {
                 STATUS_COLOR="$RED● 不活动$NC"
             fi
         elif is_substore_installed_baremetal; then
-            install_type="裸机版"
+            install_type="宿主机版"
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
                 STATUS_COLOR="$GREEN● 活动$NC"
             else
