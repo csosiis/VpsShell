@@ -142,9 +142,9 @@ _is_domain_valid() {
         return 1
     fi
 }
-
-# --- 新增：可移植性相关的函数 ---
-
+# =================================================
+#      检测操作系统和包管理器 (detect_os_and_package_manager) - 修正版
+# =================================================
 detect_os_and_package_manager() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -167,7 +167,6 @@ detect_os_and_package_manager() {
     fi
     # log_info "检测到系统: $OS_ID, 包管理器: $PKG_MANAGER"
 }
-
 # 统一的包安装函数
 install_packages() {
     local packages_to_install=("$@")
@@ -242,25 +241,100 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：系统健康巡检辅助函数
+#           通用菜单绘制函数 (V16 - 特殊页脚最终版)
 # =================================================
-_check_service_status() {
-    local service_name="$1"
-    local display_name="$2"
-    local status_text
-    if systemctl is-active --quiet "$service_name"; then
-        status_text="${GREEN}● 运行中${NC}"
+# 函数: 绘制一个标准的、完美对齐的菜单
+#
+# @param $1: 菜单标题 (字符串)
+# @param $2: 用于接收用户选择的变量名 (引用)
+# @param $3: (可选) 特殊指令 "exit" 或 "main_footer"
+# @param $...: 菜单选项数组
+_draw_menu() {
+    local title_block="$1"
+    local -n choice_ref=$2
+    local instruction="$3"
+    local exit_text
+
+    if [[ "$instruction" == "exit" || "$instruction" == "main_footer" ]]; then
+        shift 3
     else
-        # 如果服务文件存在但未运行，则为不活动；如果文件不存在，则为未安装
-        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
-            status_text="${RED}● 不活动${NC}"
-        else
-            status_text="${YELLOW}○ 未安装${NC}"
-        fi
+        shift 2
     fi
-    # 使用printf进行格式化对齐
-    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "$display_name" "$status_text"
+    local -a options=("$@")
+
+    # --- 核心参数 ---
+    local menu_width=50
+    local right_border_col=$((menu_width + 2))
+    local border_char="║"
+
+    _get_visual_width() {
+        awk -v text="$1" 'BEGIN { w=0; for(i=1; i<=length(text); i++) { char = substr(text, i, 1); if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; } } print w; }'
+    }
+
+    clear
+
+    # 1. 打印上边框和智能对齐的标题
+    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
+    local title_line_num=0
+    while IFS= read -r title_line; do
+        if [ $title_line_num -eq 0 ]; then
+            local clean_title
+            clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
+            local title_width
+            title_width=$(_get_visual_width "$clean_title")
+            local padding_left=$(((menu_width - title_width) / 2))
+            local padding_right=$((menu_width - title_width - padding_left))
+            printf "$CYAN%s%*s%b%*s%s$NC\n" "$border_char" "$padding_left" "" "$title_line" "$padding_right" "" "$border_char"
+        else
+            printf "$CYAN%s$NC  %b" "$border_char" "$title_line"
+            printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+        fi
+        title_line_num=$((title_line_num + 1))
+    done <<< "$(echo -e "$title_block")"
+
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+    # 2. 打印菜单选项
+    for i in "${!options[@]}"; do
+        local option_text="${options[$i]}"
+        local rendered_option
+        rendered_option=$(echo -e "$option_text")
+        local prefix_text
+        printf -v prefix_text "  %2d. " "$((i + 1))"
+        printf "$CYAN%s" "$border_char"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+        printf "$CYAN%s$NC%s%b" "$border_char" "$prefix_text" "$rendered_option"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    done
+
+    # 3. 打印结尾和 "0号选项"
+    printf "$CYAN%s" "$border_char"
+    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+
+    # --- 新增的特殊页脚判断逻辑 ---
+    if [[ "$instruction" == "main_footer" ]]; then
+        # 为主菜单绘制特殊的页脚
+        local update_text="${GREEN}9. 更新此脚本${NC}"
+        local exit_text="${RED}0. 退出脚本${NC}"
+        # 使用 printf 和光标定位来确保对齐
+        printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
+        printf "\033[35G%b" "$exit_text" # 大致定位到第35列
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    else
+        # 为所有其他子菜单绘制标准页脚
+        if [[ "$instruction" == "exit" ]]; then exit_text="${RED}退出脚本${NC}"; else exit_text="返回"; fi
+        printf "$CYAN%s$NC  0. %b" "$border_char" "$exit_text"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    fi
+    # --- 逻辑结束 ---
+
+    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+
+    # 4. 读取用户输入
+    read -p "请输入选项: " choice_ref
 }
+
 # =================================================
 #           修正版：系统健康巡检辅助函数
 # =================================================。
@@ -284,26 +358,11 @@ _get_service_status() {
     fi
 }
 # =================================================
-#     最终版：系统健康巡检主函数 (V6 - 系统信息查询风格)
+#     系统健康巡检主函数 (system_health_check) - 修正版
 # =================================================
 system_health_check() {
     clear
-    # 辅助函数：用于获取服务状态，但不打印 (此函数保持不变)
-    _get_service_status() {
-        local service_name="$1"
-        local -n status_text_ref=$2
-        local -n status_color_ref=$3
-        if systemctl is-active --quiet "$service_name"; then
-            status_text_ref="● 运行中"
-            status_color_ref=$GREEN
-        elif systemctl list-unit-files | grep -q "^${service_name}.service"; then
-            status_text_ref="● 不活动"
-            status_color_ref=$RED
-        else
-            status_text_ref="○ 未安装"
-            status_color_ref=$YELLOW
-        fi
-    }
+    # 注意：此处内部的 _get_service_status 函数定义已被移除，以使用全局函数
 
     echo -e "\n$CYAN-------------------- 系统健康巡检报告 ---------------------$NC"
 
@@ -371,7 +430,7 @@ system_health_check() {
     press_any_key
 }
 # =================================================
-#           新增：防火墙助手
+#      防火墙助手 (firewall_helper_menu) - 优化版
 # =================================================
 firewall_helper_menu() {
     local FW_COMMAND=""
@@ -393,10 +452,9 @@ firewall_helper_menu() {
     log_info "检测到防火墙类型: $FW_TYPE"
 
     while true; do
-        clear
+        # 1. 获取防火墙的动态状态
         local status_text
         if [ "$FW_TYPE" == "UFW" ]; then
-            # UFW状态输出比较长，这里简化显示
             if ufw status | grep -q 'Status: active'; then
                 status_text="${GREEN}● 活动 (Active)${NC}"
             else
@@ -410,27 +468,23 @@ firewall_helper_menu() {
             fi
         fi
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 防火墙助手 ($FW_TYPE)               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前状态: $status_text                              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 查看当前所有规则                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}开放一个端口 (Allow)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}关闭一个端口 (Delete/Remove)${NC}                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 开启防火墙                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 关闭防火墙                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 2. 构建包含动态信息的多行标题
+        local title="防火墙助手 ($FW_TYPE)\n  当前状态: $status_text"
 
-        read -p "请输入选项: " choice
+        # 3. 定义菜单选项数组
+        local -a options=(
+            "查看当前所有规则"
+            "开放一个端口 (Allow)"
+            "关闭一个端口 (Delete/Remove)"
+            "开启防火墙"
+            "关闭防火墙"
+        )
+
+        # 4. 调用通用菜单函数
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理用户选择 (这部分复杂的逻辑保持不变)
         case $choice in
         1)
             clear
@@ -500,56 +554,61 @@ firewall_helper_menu() {
     done
 }
 # =================================================
-#                系统管理 (sys_manage_menu)
+#                系统管理 (sys_manage_menu) - 优化版
 # =================================================
 sys_manage_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   系统综合管理                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统信息查询                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 清理系统垃圾                                $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 修改主机名                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 设置 root 登录 (密钥/密码)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 修改 SSH 端口                               $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 设置系统时区                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE网络优化$CYAN ─────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 设置网络优先级 (IPv4/v6)                    $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. DNS 工具箱 (优化/备份/恢复)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. BBR 拥塞控制管理                            $CYAN║$NC"
-        echo -e "$CYAN║$NC  10. 安装 WARP 网络接口                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  11. ${GREEN}实用工具 ${NC}                                   $CYAN║$NC"
-        echo -e "$CYAN║$NC  12. 防火墙助手 (UFW/FirewallD)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  13. ${CYAN}系统健康巡检${NC}                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 定义菜单选项数组
+        local -a options=(
+            "系统信息查询"
+            "清理系统垃圾"
+            "修改主机名"
+            "设置 root 登录 (密钥/密码)"
+            "修改 SSH 端口"
+            "设置系统时区"
+            "网络优化 ->" # 使用 -> 符号表示子菜单
+            "实用工具 (增强) ->"
+            "${CYAN}系统健康巡检${NC}"
+        )
 
-        read -p "请输入选项: " choice
+        # 定义网络优化子菜单选项
+        local -a network_options=(
+             "设置网络优先级 (IPv4/v6)"
+             "DNS 工具箱 (优化/备份/恢复)"
+             "BBR 拥塞控制管理"
+             "安装 WARP 网络接口"
+        )
+
+        local choice
+        # 调用通用菜单函数
+        _draw_menu "系统综合管理" choice "${options[@]}"
+
+        # case语句处理用户选择
         case $choice in
-        1) show_system_info ;;
-        2) clean_system ;;
-        3) change_hostname ;;
-        4) manage_root_login ;;
-        5) change_ssh_port ;;
-        6) set_timezone ;;
-        7) network_priority_menu ;;
-        8) dns_toolbox_menu ;;
-        9) manage_bbr ;;
-        10) install_warp ;;
-        11) utility_tools_menu ;;
-        12) firewall_helper_menu ;;
-        13) system_health_check ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) show_system_info ;;
+            2) clean_system ;;
+            3) change_hostname ;;
+            4) manage_root_login ;;
+            5) change_ssh_port ;;
+            6) set_timezone ;;
+            7) # 网络优化子菜单
+                while true; do
+                    local net_choice
+                    _draw_menu "网络优化" net_choice "${network_options[@]}"
+                    case $net_choice in
+                        1) network_priority_menu ;;
+                        2) dns_toolbox_menu ;;
+                        3) manage_bbr ;;
+                        4) install_warp ;;
+                        0) break ;;
+                        *) log_error "无效选项！"; sleep 1 ;;
+                    esac
+                done
+                ;;
+            8) utility_tools_menu ;;
+            9) system_health_check ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
@@ -861,64 +920,65 @@ recommend_best_dns() {
         press_any_key
     fi
 }
-
+# =================================================
+#      DNS 工具箱 (dns_toolbox_menu) - 优化版
+# =================================================
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-
+        # 1. 获取动态信息
+        local current_dns_list="读取失败"
         if command -v resolvectl &>/dev/null; then
             local status_output
             status_output=$(resolvectl status)
-            local current_dns_list
-            current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
-            if [ -z "$current_dns_list" ]; then
-                current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            local dns_list
+            dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            if [ -z "$dns_list" ]; then
+                dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
             fi
-            if [ -n "$current_dns_list" ]; then
-                 echo -e "$CYAN║$NC  当前DNS: $YELLOW$current_dns_list$NC $CYAN║$NC"
-            else
-                 echo -e "$CYAN║$NC  当前DNS: ${RED}读取失败$NC                               $CYAN║$NC"
+            if [ -n "$dns_list" ]; then
+                current_dns_list="$YELLOW$dns_list$NC"
             fi
         fi
 
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        # 2. 构建多行标题
+        local title="DNS 工具箱\n  当前DNS: $current_dns_list"
 
+        # 3. 定义菜单选项
+        local -a options=(
+            "自动测试并推荐最佳 DNS"
+            "手动选择 DNS 进行优化"
+            "备份当前 DNS 配置"
+        )
+        # 动态添加恢复选项
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
+            options+=("从备份恢复 DNS 配置 (推荐)")
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
+            options+=("${RED}从备份恢复 DNS 配置 (无备份)${NC}")
         fi
 
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 4. 调用通用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
+        # 5. 处理逻辑
         case $choice in
         1) recommend_best_dns ;;
         2) optimize_dns ;;
         3) backup_dns_config ;;
-        4) restore_dns_config ;;
+        4)
+            if [ -f "$backup_file" ]; then
+                restore_dns_config
+            else
+                log_error "没有可用的备份文件！"
+                sleep 1
+            fi
+            ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     log_info "开始备份当前 DNS 配置..."
@@ -1137,10 +1197,12 @@ test_and_recommend_priority() {
     fi
     press_any_key
 }
-
+# =================================================
+#      网络优先级 (network_priority_menu) - 优化版
+# =================================================
 network_priority_menu() {
     while true; do
-        clear
+        # 1. 获取动态状态
         local current_setting="未知"
         if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
              current_setting="${GREEN}IPv6 优先${NC}"
@@ -1148,25 +1210,21 @@ network_priority_menu() {
              current_setting="${YELLOW}IPv4 优先${NC}"
         fi
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 2. 构建标题
+        local title="网络优先级设置\n  当前设置: $current_setting"
 
-        read -p "请输入选项: " choice
+        # 3. 定义选项
+        local -a options=(
+            "自动测试并推荐最佳设置"
+            "手动设置为 [IPv6 优先]"
+            "手动设置为 [IPv4 优先]"
+        )
+
+        # 4. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理逻辑
         case $choice in
         1)
             test_and_recommend_priority
@@ -1191,7 +1249,6 @@ network_priority_menu() {
         esac
     done
 }
-
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -1233,45 +1290,44 @@ setup_ssh_key() {
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
 }
-
+# =================================================
+#      root 登录管理 (manage_root_login) - 优化版
+# =================================================
 manage_root_login() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                设置 root 登录方式                $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}设置 SSH 密钥登录$NC (更安全，推荐)            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${YELLOW}设置 root 密码登录$NC (方便，兼容性好)         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 定义菜单标题
+        local title="设置 root 登录方式"
 
-        read -p "请输入选项: " choice
+        # 2. 定义菜单选项数组
+        local -a options=(
+            "设置 SSH 密钥登录 (更安全，推荐)"
+            "设置 root 密码登录 (方便，兼容性好)"
+        )
+
+        # 3. 调用通用菜单函数来绘制菜单并获取用户选择
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 根据用户的选择执行相应操作
         case $choice in
-        1)
-            setup_ssh_key
-            break
-            ;;
-        2)
-            set_root_password
-            break
-            ;;
-        0)
-            break
-            ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+            1)
+                setup_ssh_key
+                break # 操作完成后退出此菜单，返回上一级
+                ;;
+            2)
+                set_root_password
+                break # 操作完成后退出此菜单，返回上一级
+                ;;
+            0)
+                break # 用户选择返回
+                ;;
+            *)
+                log_error "无效选项！"
+                sleep 1
+                ;;
         esac
     done
 }
-
 set_root_password() {
     log_info "开始设置 root 密码..."
     read -s -p "请输入新的 root 密码: " new_password
@@ -1492,9 +1548,8 @@ install_warp() {
     press_any_key
 }
 # =================================================
-#           实用工具 (增强) - 新增及优化
+#      Fail2Ban 管理 (fail2ban_menu) - 优化版
 # =================================================
-# (这是被修改的函数, 修复了状态显示逻辑)
 fail2ban_menu() {
     ensure_dependencies "fail2ban"
     if ! command -v fail2ban-client &>/dev/null; then
@@ -1518,114 +1573,71 @@ EOF
         systemctl restart fail2ban
     fi
 
-
     while true; do
-        clear
-
-        # --- 全新的、更健壮的状态检测逻辑 ---
-        local f2b_status_text
-        local jail_count="N/A"
-        local banned_count="N/A"
-        local total_banned="N/A"
-
-        # 每次循环都重新检查服务的真实状态
+        # 1. 获取所有动态信息
+        local f2b_status_text jail_count="N/A" banned_count="N/A" total_banned="N/A"
         if systemctl is-active --quiet fail2ban; then
             f2b_status_text="${GREEN}● 活动$NC"
-
-            # 仅在服务活动时才获取统计信息，并隐藏可能的错误输出
             local status
             status=$(fail2ban-client status 2>/dev/null)
-            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | xargs)
-
+            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | wc -w)
             local sshd_status
             sshd_status=$(fail2ban-client status sshd 2>/dev/null)
             if [ -n "$sshd_status" ]; then
                 banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
                 total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
             else
-                banned_count="0"
-                total_banned="0"
+                banned_count="0"; total_banned="0"
             fi
         else
             f2b_status_text="${RED}● 不活动$NC"
-            # 当服务不活动时，统计信息保持为 N/A
         fi
-        # --- 状态检测逻辑结束 ---
 
+        # 2. 构建复杂的、包含多行动态信息和颜色的标题
+        local title="Fail2Ban 防护管理\n  状态: $f2b_status_text | Jails: $jail_count\n  SSH防护: 当前封禁 ${RED}$banned_count${NC}, 历史共封禁 ${YELLOW}$total_banned${NC}"
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        # 使用变量动态显示状态和数据
-        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 3. 定义选项
+        local -a options=(
+            "查看 Fail2Ban 状态 (及SSH防护详情)"
+            "查看最近的日志"
+            "手动解封一个 IP 地址"
+            "重启 Fail2Ban 服务"
+            "卸载 Fail2Ban (卸载)"
+        )
 
-        read -p "请输入选项: " choice
+        # 4. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理逻辑
         case $choice in
         1)
-            clear
-            log_info "Fail2Ban 总体状态:"
-            fail2ban-client status
-            echo -e "\n$CYAN----------------------------------------------------$NC"
-            log_info "SSHD 防护详情:"
-            fail2ban-client status sshd
+            clear; log_info "Fail2Ban 总体状态:"; fail2ban-client status;
+            echo -e "\n$CYAN---$NC"; log_info "SSHD 防护详情:"; fail2ban-client status sshd;
             press_any_key
             ;;
         2)
-            clear
-            log_info "显示最近 50 条 Fail2Ban 日志:"
-            tail -50 /var/log/fail2ban.log
+            clear; log_info "显示最近 50 条 Fail2Ban 日志:"; tail -50 /var/log/fail2ban.log;
             press_any_key
             ;;
         3)
             read -p "请输入要解封的 IP 地址: " ip_to_unban
             if [ -n "$ip_to_unban" ]; then
-                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
-                fail2ban-client set sshd unbanip "$ip_to_unban"
+                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."; fail2ban-client set sshd unbanip "$ip_to_unban"
             else
                 log_error "IP 地址不能为空！"
             fi
             press_any_key
             ;;
         4)
-            log_info "正在重启 Fail2Ban..."
-            systemctl restart fail2ban
-            sleep 1
-            log_info "服务已重启。"
+            log_info "正在重启 Fail2Ban..."; systemctl restart fail2ban; sleep 1; log_info "服务已重启。"
             ;;
         5)
             read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                log_info "正在停止并卸载 Fail2Ban..."
-                systemctl stop fail2ban
-                systemctl disable fail2ban
-                if [ "$PKG_MANAGER" == "apt" ]; then
-                    apt-get remove --purge -y fail2ban
-                else
-                    "$PKG_MANAGER" remove -y fail2ban
-                fi
-                rm -rf /etc/fail2ban
-                log_info "✅ Fail2Ban 已卸载。"
-                press_any_key
-                return
+                log_info "正在停止并卸载 Fail2Ban..."; systemctl stop fail2ban; systemctl disable fail2ban
+                if [ "$PKG_MANAGER" == "apt" ]; then apt-get remove --purge -y fail2ban; else "$PKG_MANAGER" remove -y fail2ban; fi
+                rm -rf /etc/fail2ban; log_info "✅ Fail2Ban 已卸载."; press_any_key; return
             fi
             ;;
         0) return ;;
@@ -1656,24 +1668,16 @@ list_normal_users() {
 }
 
 manage_users_menu() {
-    ensure_dependencies "sudo" "shadow" # shadow provides useradd/usermod on some systems
+   ensure_dependencies "sudo" "shadow"
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有普通用户                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 创建一个新的 Sudo 用户                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        local title="Sudo 用户管理"
+        local -a options=(
+            "列出所有普通用户"
+            "创建一个新的 Sudo 用户"
+            "删除一个用户及其主目录 (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
         case $choice in
         1)
             list_normal_users
@@ -1868,62 +1872,37 @@ setup_auto_updates() {
     log_warn "系统现在会自动安装重要的安全更新。"
     press_any_key
 }
-
+# =================================================
+#      性能测试 (performance_test_menu) - 优化版
+# =================================================
 performance_test_menu() {
      while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 VPS 性能测试                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${CYAN}流媒体解锁测试${NC}                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="VPS 性能测试"
+        local -a options=(
+            "VPS 综合性能测试 (bench.sh)"
+            "网络速度测试 (speedtest-cli)"
+            "实时资源监控 (btop)"
+            "流媒体解锁测试"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
-        1)
-            log_info "正在执行 bench.sh 脚本..."
-            ensure_dependencies "curl"
-            curl -Lso- bench.sh | bash
-            press_any_key
-            ;;
-        2)
-            log_info "正在执行 speedtest-cli..."
-            ensure_dependencies "speedtest-cli"
-            speedtest-cli
-            press_any_key
-            ;;
+        1) log_info "正在执行 bench.sh 脚本..."; ensure_dependencies "curl"; curl -Lso- bench.sh | bash; press_any_key ;;
+        2) log_info "正在执行 speedtest-cli..."; ensure_dependencies "speedtest-cli"; speedtest-cli; press_any_key ;;
         3)
-            log_info "正在启动 btop..."
-            local btop_dep="btop"
-            if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
-                log_warn "在 CentOS/RHEL 上, btop 通常位于 EPEL 仓库。"
-                log_warn "如果安装失败，请先手动安装 epel-release 包。"
+            log_info "正在启动 btop...";
+            if [[ "$PKG_MANAGER" == "yum" || "$PKG_MANAGER" == "dnf" ]]; then
+                log_warn "在 CentOS/RHEL 上, btop 通常位于 EPEL 仓库。如果安装失败，请先手动安装 epel-release 包。"
             fi
-            ensure_dependencies "$btop_dep"
-            btop
+            ensure_dependencies "btop"; btop
             ;;
-        4)
-            log_info "正在执行流媒体解锁测试脚本 (by lmc999)..."
-            ensure_dependencies "bash" "curl" "jq"
-            bash <(curl -L -s https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/check.sh)
-            press_any_key
-            ;;
+        4) log_info "正在执行流媒体解锁测试脚本..."; ensure_dependencies "bash" "curl" "jq"; bash <(curl -L -s https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/check.sh); press_any_key ;;
         0) return ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
 backup_directory() {
     clear
     log_info "开始手动备份指定目录..."
@@ -2012,23 +1991,19 @@ upload_file_to_transfer() {
     fi
     press_any_key
 }
-
+# =================================================
+#      文件分享 (file_sharing_menu) - 优化版
+# =================================================
 file_sharing_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  简易文件分享                    $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 启动临时 Web 服务器 (分享目录)              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 上传单个文件 (获取分享链接)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="简易文件分享"
+        local -a options=(
+            "启动临时 Web 服务器 (分享目录)"
+            "上传单个文件 (获取分享链接)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) start_temp_web_server ;;
         2) upload_file_to_transfer ;;
@@ -2037,43 +2012,39 @@ file_sharing_menu() {
         esac
     done
 }
-
-
+# =================================================
+#      实用工具菜单 (utility_tools_menu) - 优化版
+# =================================================
 utility_tools_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟───────────────── $WHITE性能 & 分享 & 备份$CYAN ─────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 简易文件分享                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 定义菜单标题
+        local title="实用工具 (增强)"
 
-        read -p "请输入选项: " choice
+        # 2. 定义菜单选项数组
+        #    为保持简洁，我们移除了子标题，直接列出所有选项
+        local -a options=(
+            "Fail2Ban 防护管理"
+            "Sudo 用户管理"
+            "配置自动安全更新"
+            "VPS 性能测试"
+            "手动备份指定目录"
+            "简易文件分享"
+        )
+
+        # 3. 调用通用菜单函数
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 根据用户选择执行相应操作
         case $choice in
-        1) fail2ban_menu ;;
-        2) manage_users_menu ;;
-        3) setup_auto_updates ;;
-        4) performance_test_menu ;;
-        5) backup_directory ;;
-        6) file_sharing_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) fail2ban_menu ;;
+            2) manage_users_menu ;;
+            3) setup_auto_updates ;;
+            4) performance_test_menu ;;
+            5) backup_directory ;;
+            6) file_sharing_menu ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
@@ -2224,57 +2195,44 @@ _create_self_signed_cert() {
         return 1
     fi
 }
-
+# 函数优化版：提示用户选择协议
 _singbox_prompt_for_protocols() {
     local -n protocols_ref=$1
     local -n is_one_click_ref=$2
 
-    clear
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE              Sing-Box 节点协议选择               $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${GREEN}VLESS + REALITY (推荐, 无需域名)${NC}            $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. VLESS + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. VMess + WSS                                 $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   4. Trojan + WSS                                $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. Hysteria2 (UDP)                             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. TUIC v5 (UDP)                               $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   7. $YELLOW一键生成 (除REALITY外) 全部节点$NC             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+    local title="Sing-Box 节点协议选择"
+    local -a options=(
+        "${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}"
+        "VLESS + WSS"
+        "VMess + WSS"
+        "Trojan + WSS"
+        "Hysteria2 (UDP)"
+        "TUIC v5 (UDP)"
+        "${GREEN}一键生成 (除REALITY外) 全部节点${NC}"
+    )
 
-    read -p "请输入选项: " protocol_choice
+    local choice
+    _draw_menu "$title" choice "${options[@]}"
 
-    case $protocol_choice in
-    1) protocols_ref=("VLESS-REALITY") ;;
-    2) protocols_ref=("VLESS") ;;
-    3) protocols_ref=("VMess") ;;
-    4) protocols_ref=("Trojan") ;;
-    5) protocols_ref=("Hysteria2") ;;
-    6) protocols_ref=("TUIC") ;;
-    7)
-        protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
-        is_one_click_ref=true
-        ;;
-    0) return 1 ;;
-    *)
-        log_error "无效选择，操作中止。"
-        press_any_key
-        return 1
-        ;;
+    case $choice in
+        1) protocols_ref=("VLESS-REALITY") ;;
+        2) protocols_ref=("VLESS") ;;
+        3) protocols_ref=("VMess") ;;
+        4) protocols_ref=("Trojan") ;;
+        5) protocols_ref=("Hysteria2") ;;
+        6) protocols_ref=("TUIC") ;;
+        7)
+            protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+            is_one_click_ref=true
+            ;;
+        0) return 1 ;; # 用户选择返回
+        *)
+            log_error "无效选择，操作中止。"
+            press_any_key
+            return 1
+            ;;
     esac
-    return 0
+    return 0 # 表示用户成功做出了选择
 }
 # =================================================
 #           函数：确保服务器时间精准 (新增)
@@ -2457,7 +2415,7 @@ _singbox_prompt_for_ports() {
 
     # 针对 REALITY 的端口特殊提示
     if [[ " ${protocols_ref[*]} " =~ " VLESS-REALITY " ]]; then
-         log_info "\nREALITY 协议需要一个 TCP 端口进行连接。"
+         log_info "REALITY 协议需要一个 TCP 端口进行连接。"
     fi
 
     if $is_one_click; then
@@ -3216,63 +3174,57 @@ generate_tuic_client_config() {
     echo -e "${CYAN}--------------------------------------------------------------------${NC}"
     press_any_key
 }
-
+# =================================================
+#           Sing-Box 管理 (singbox_main_menu) - 优化版
+# =================================================
 singbox_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sing-Box 管理                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR
-        if is_singbox_installed; then
-            if systemctl is-active --quiet sing-box; then STATUS_COLOR="$GREEN● 活动  $NC"; else STATUS_COLOR="$RED● 不活动$NC"; fi
-            echo -e "$CYAN║$NC  当前状态: $STATUS_COLOR                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 新增节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. 管理节点                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. 启动 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 停止 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. 重启 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   6. 查看日志                                    $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   7. $RED卸载 Sing-Box$NC                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local choice
 
-            read -p "请输入选项: " choice
+        if is_singbox_installed; then
+            # --- Sing-Box 已安装时显示的菜单 ---
+            local STATUS_COLOR
+            if systemctl is-active --quiet sing-box; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+            local title="Sing-Box 管理\n\n  ${NC}当前状态: $STATUS_COLOR\n"
+
+            local -a options=(
+                "${GREEN}新增节点${NC}"
+                "${YELLOW}管理节点${NC}"
+                "启动 Sing-Box"
+                "停止 Sing-Box"
+                "重启 Sing-Box"
+                "查看日志"
+                "${RED}卸载 Sing-Box (卸载)${NC}"
+            )
+
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
-            1) singbox_add_node_orchestrator ;; 2) view_node_info ;;
-            3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
-            4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
-            5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
-            6) clear; journalctl -u sing-box -f --no-pager ;;
-            7) singbox_do_uninstall ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_add_node_orchestrator ;;
+                2) view_node_info ;;
+                3) systemctl start sing-box; log_info "命令已发送"; sleep 1 ;;
+                4) systemctl stop sing-box; log_info "命令已发送"; sleep 1 ;;
+                5) systemctl restart sing-box; log_info "命令已发送"; sleep 1 ;;
+                6) clear; journalctl -u sing-box -f --no-pager ;;
+                7) singbox_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC  当前状态: $YELLOW● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sing-Box                               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            # --- Sing-Box 未安装时显示的菜单 ---
+            local title="Sing-Box 管理\n$CYAN──────────────────────────────────────────────────\n  ${NC}当前状态: $YELLOW● 未安装$NC"
+            local -a options=("安装 Sing-Box")
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
-            1) singbox_do_install ;; 0) break ;; *) log_error "无效选项！"; sleep 1 ;;
+                1) singbox_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         fi
     done
@@ -3411,7 +3363,7 @@ substore_do_install_docker() {
                         log_info "✅ 反向代理设置成功！请通过 https://$domain 访问。"
                         local proxy_backend_url="https://$domain$backend_path"
                         local proxy_final_url="https://$domain/subs?api=$proxy_backend_url"
-                        echo -e "优化后的访问链接为: \n\n$YELLOW$proxy_final_url$NC\n"
+                        echo -e "\n反向代理后的访问链接为: \n\n$YELLOW$proxy_final_url$NC\n"
                         echo "$domain" > "$data_dir/.proxy_domain_docker"
                     else
                         log_error "反向代理设置失败。"
@@ -3545,23 +3497,18 @@ EOF
         press_any_key
     fi
 }
-
-
-# --- 安装方式选择 (新的路由函数) ---
+# =================================================
+#      Sub-Store 安装方式选择 (substore_do_install) - 优化版
+# =================================================
 substore_do_install() {
-    clear
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                 选择安装方式                     $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. 宿主机版安装 (直接部署, 占用低)             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-    read -p "请输入选项: " choice
+    local title="选择 Sub-Store 安装方式"
+    local -a options=(
+        "Docker 版安装 (推荐, 隔离性好)"
+        "宿主机版安装 (直接部署, 占用低)"
+    )
+    local choice
+    _draw_menu "$title" choice "${options[@]}"
+
     case $choice in
         1) substore_do_install_docker ;;
         2) substore_do_install_baremetal ;;
@@ -3569,8 +3516,6 @@ substore_do_install() {
         *) log_error "无效选项!"; sleep 1 ;;
     esac
 }
-
-
 # --- Docker 版卸载函数 (新增) ---
 substore_do_uninstall_docker() {
     if ! is_substore_installed_docker; then
@@ -3817,132 +3762,119 @@ substore_setup_reverse_proxy() {
     fi
     press_any_key
 }
-
+# =================================================
+#      Sub-Store 管理菜单 (substore_manage_menu) - 优化版
+# =================================================
 substore_manage_menu() {
-    # 此菜单现在需要根据安装类型显示不同的选项
-    # 为简化，我们只修改核心功能，保持此菜单结构，但内部命令会变得更智能
-    clear
-
-    local install_type="未知"
-    local status_text="${RED}● 不活动   ${NC}"
-    local is_baremetal=false
-    local is_docker=false
-
-    if is_substore_installed_docker; then
-        install_type="Docker版"
-        is_docker=true
-        if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-            status_text="${GREEN}● 活动     ${NC}"
-        fi
-    elif is_substore_installed_baremetal; then
-        install_type="宿主机版"
-        is_baremetal=true
-        if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-            status_text="${GREEN}● 活动        ${NC}"
-        fi
-    fi
-
-    local rp_menu_text="设置反向代理 (推荐)"
-    # ... 此处可以添加更智能的检测逻辑 ...
-
-    echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                  Sub-Store 管理                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$status_text" "$install_type"
-    echo -e "$CYAN╟──────────────────── $WHITE服务控制$CYAN ────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   1. 启动服务            2. 停止服务             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   3. 重启服务            4. 查看日志             $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────── $WHITE参数配置$CYAN ────────────────────╢$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   5. 查看访问链接                                $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   6. $YELLOW$rp_menu_text$NC                         $CYAN║$NC"
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-    echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-    read -p "请输入选项: " choice
-
-    if ! $is_docker && ! $is_baremetal; then
-        log_warn "未检测到任何 Sub-Store 安装。"; sleep 2; return;
-    fi
-
-    case $choice in
-    1) if $is_docker; then docker start sub-store; else systemctl start "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    2) if $is_docker; then docker stop sub-store; else systemctl stop "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    3) if $is_docker; then docker restart sub-store; else systemctl restart "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
-    4) if $is_docker; then clear; docker logs -f sub-store; else clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager; fi ;;
-    5) substore_view_access_link ;;
-    6) substore_setup_reverse_proxy ;;
-    # 暂时移除重置端口和密钥的功能，因为对 Docker 版实现复杂
-    # 7) substore_reset_ports ;;
-    # 8) substore_reset_api_key ;;
-    0) return ;;
-    *) log_error "无效选项！"; sleep 1 ;;
-    esac
-    # 递归调用以刷新状态
-    substore_manage_menu
-}
-
-# --- 主菜单 (修改后) ---
-substore_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   Sub-Store 管理                 $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        local STATUS_COLOR install_type="未安装"
+        # 1. 检测安装状态和类型
+        local install_type="未知"
+        local status_text="${RED}● 不活动$NC"
+        local is_baremetal=false
+        local is_docker=false
+
         if is_substore_installed_docker; then
             install_type="Docker版"
+            is_docker=true
             if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-                STATUS_COLOR="$GREEN● 活动     $NC"
-            else
-                STATUS_COLOR="$RED● 不活动   $NC"
+                status_text="${GREEN}● 活动$NC"
             fi
         elif is_substore_installed_baremetal; then
             install_type="宿主机版"
+            is_baremetal=true
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-                STATUS_COLOR="$GREEN● 活动        $NC"
-            else
-                STATUS_COLOR="$RED● 不活动      $NC"
+                status_text="${GREEN}● 活动$NC"
             fi
         else
-            STATUS_COLOR="$YELLOW● 未安装     $NC"
+             log_warn "未检测到任何 Sub-Store 安装。"; sleep 2; return;
         fi
 
-        printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$STATUS_COLOR" "$install_type"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        # 2. 构建标题和选项
+        local title="Sub-Store 管理\n\n  状态: $status_text | 类型: $install_type"
+        local -a options=(
+            "启动服务"
+            "停止服务"
+            "重启服务"
+            "查看日志"
+            "${GREEN}查看访问链接${NC}"
+            "${YELLOW}设置反向代理 (推荐)${NC}"
+        )
 
-        if is_substore_installed_docker || is_substore_installed_baremetal; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 管理 Sub-Store (启停/日志/配置)             $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. $GREEN更新 Sub-Store 应用$NC                         $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. $RED卸载 Sub-Store$NC                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
+        # 3. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 处理逻辑
+        case $choice in
+        1) if $is_docker; then docker start sub-store; else systemctl start "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        2) if $is_docker; then docker stop sub-store; else systemctl stop "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        3) if $is_docker; then docker restart sub-store; else systemctl restart "$SUBSTORE_SERVICE_NAME"; fi; log_info "命令已发送"; sleep 1 ;;
+        4) if $is_docker; then clear; docker logs -f sub-store; else clear; journalctl -u "$SUBSTORE_SERVICE_NAME" -f --no-pager; fi ;;
+        5) substore_view_access_link ;;
+        6) substore_setup_reverse_proxy ;;
+        0) break ;;
+        *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+#      Sub-Store 主菜单 (substore_main_menu) - 优化版
+# =================================================
+substore_main_menu() {
+    while true; do
+        # 1. 检测安装状态
+        local STATUS_COLOR install_type="未安装"
+        local is_installed=false
+        if is_substore_installed_docker; then
+            install_type="Docker版"
+            is_installed=true
+            if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+        elif is_substore_installed_baremetal; then
+            install_type="宿主机版"
+            is_installed=true
+            if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
+                STATUS_COLOR="$GREEN● 活动$NC"
+            else
+                STATUS_COLOR="$RED● 不活动$NC"
+            fi
+        else
+            STATUS_COLOR="$YELLOW● 未安装$NC"
+        fi
+
+        # 2. 根据安装状态，准备不同的标题和选项
+        local title="Sub-Store 管理\n\n  状态: $STATUS_COLOR | 类型: $install_type"
+        local -a options
+        if $is_installed; then
+            options=(
+                "${GREEN}管理 Sub-Store (启停/日志/配置)${NC}"
+                "更新 Sub-Store 应用"
+                "${RED}卸载 Sub-Store (卸载)${NC}"
+            )
+        else
+            options=("安装 Sub-Store")
+        fi
+
+        # 3. 调用菜单并处理逻辑
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        if $is_installed; then
             case $choice in
-            1) substore_manage_menu ;; 2) update_sub_store_app ;;
-            3) substore_do_uninstall ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_manage_menu ;;
+                2) update_sub_store_app ;;
+                3) substore_do_uninstall ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. 安装 Sub-Store                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-            read -p "请输入选项: " choice
             case $choice in
-            1) substore_do_install ;; 0) break ;; *) log_warn "无效选项！"; sleep 1 ;;
+                1) substore_do_install ;;
+                0) break ;;
+                *) log_error "无效选项！"; sleep 1 ;;
             esac
         fi
     done
@@ -4115,76 +4047,45 @@ install_nezha_dashboard_v1() {
     press_any_key
 }
 
-nezha_agent_menu() {
+# =================================================
+#      哪吒监控主菜单 (nezha_main_menu) - 优化版
+# =================================================
+nezha_main_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE               哪吒探针 (Agent) 管理              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        local title="哪吒监控管理"
+        local -a options=(
+            "Agent 管理 (本机探针)"
+            "Dashboard 管理 (服务器面板)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        local v0_status
-        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
-        local phoenix_status
-        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
-
-        echo -e "$CYAN║$NC   1. 安装/重装 NEZHA V0 探针 $v0_status            $CYAN║$NC"
-        if is_nezha_agent_v0_installed; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   xz0. $RED卸载 NEZHA V0 探针$NC                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        fi
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装/重装 NEZHA V1 探针 $phoenix_status            $CYAN║$NC"
-        if is_nezha_agent_phoenix_installed; then
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   xz1. $RED卸载 NEZHA V1 探针$NC                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        else
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        fi
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
         case $choice in
-        1) install_nezha_agent_v0 ;;
-        xz0) uninstall_nezha_agent_v0 ;;
-        2) install_nezha_agent_phoenix ;;
-        xz1) uninstall_nezha_agent_phoenix ;;
+        1) nezha_agent_menu ;;
+        2) nezha_dashboard_menu ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
+# =================================================
+#      哪吒面板管理 (nezha_dashboard_menu) - 优化版
+# =================================================
 nezha_dashboard_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                哪吒面板 (Dashboard) 管理         $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装/管理 V0 面板 (by fscarmen)             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装/管理 V1 面板 (Official)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 将提示信息整合进多行标题
+        local title="哪吒面板 (Dashboard) 管理\n${YELLOW}面板脚本来自第三方,已集成管理/卸载功能\n如需管理,请再次运行对应的安装选项${NC}"
 
-        log_warn "面板安装脚本均来自第三方，其内部已集成卸载和管理功能。"
-        log_warn "如需卸载或管理，请再次运行对应的安装选项即可。"
+        # 2. 定义选项
+        local -a options=(
+            "安装/管理 V0 面板 (by fscarmen)"
+            "安装/管理 V1 面板 (Official)"
+        )
 
-        read -p "请输入选项: " choice
+        # 3. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
         case $choice in
         1) install_nezha_dashboard_v0 ;;
         2) install_nezha_dashboard_v1 ;;
@@ -4193,31 +4094,51 @@ nezha_dashboard_menu() {
         esac
     done
 }
-
-nezha_main_menu() {
+# =================================================
+#      哪吒探针管理 (nezha_agent_menu) - 优化版
+# =================================================
+nezha_agent_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 哪吒监控管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Agent 管理 (本机探针)                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Dashboard 管理 (服务器面板)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="哪吒探针 (Agent) 管理"
 
-        read -p "请输入选项: " choice
-        case $choice in
-        1) nezha_agent_menu ;;
-        2) nezha_dashboard_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
-        esac
+        # 1. 动态构建选项数组
+        local -a options=()
+        local v0_status phoenix_status
+
+        # V0 探针选项
+        if is_nezha_agent_v0_installed; then v0_status="${GREEN}(已安装)$NC"; else v0_status="${YELLOW}(未安装)$NC"; fi
+        options+=("安装/重装 NEZHA V0 探针 $v0_status")
+        if is_nezha_agent_v0_installed; then
+            options+=("卸载 NEZHA V0 探针 (卸载)")
+        fi
+
+        # V1 探针选项
+        if is_nezha_agent_phoenix_installed; then phoenix_status="${GREEN}(已安装)$NC"; else phoenix_status="${YELLOW}(未安装)$NC"; fi
+        options+=("安装/重装 NEZHA V1 探针 $phoenix_status")
+        if is_nezha_agent_phoenix_installed; then
+            options+=("卸载 NEZHA V1 探针 (卸载)")
+        fi
+
+        # 2. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 3. 智能处理选择
+        #    因为选项是动态的，我们通过判断选项的文本内容来决定执行哪个操作
+        if [ -n "$choice" ] && [ "$choice" -ne 0 ]; then
+            local selected_option="${options[$((choice-1))]}"
+            case "$selected_option" in
+                *"安装/重装 NEZHA V0"*) install_nezha_agent_v0 ;;
+                *"卸载 NEZHA V0"*) uninstall_nezha_agent_v0 ;;
+                *"安装/重装 NEZHA V1"*) install_nezha_agent_phoenix ;;
+                *"卸载 NEZHA V1"*) uninstall_nezha_agent_phoenix ;;
+                *) log_error "无效的内部选项！" ; sleep 1 ;;
+            esac
+        elif [ "$choice" -eq 0 ]; then
+            break
+        else
+            log_error "无效输入！"; sleep 1
+        fi
     done
 }
 # =================================================
@@ -4538,37 +4459,24 @@ uninstall_docker() {
     sleep 3s
     docker_menu
 }
-
-# --- 子菜单定义 ---
-
+# =================================================
+#      容器管理 (docker_container_menu) - 优化版
+# =================================================
 docker_container_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     容器管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 启动一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 停止一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 重启一个容器                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 查看容器实时日志                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. ${YELLOW}删除已停止的容器$NC                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. ${RED}强制删除容器 (并清理数据)${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="容器管理"
+        local -a options=(
+            "列出所有容器"
+            "启动一个容器"
+            "停止一个容器"
+            "重启一个容器"
+            "查看容器实时日志"
+            "删除已停止的容器"
+            "强制删除容器 (并清理数据) (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) docker_list_containers ;;
         2) docker_start_container ;;
@@ -4582,25 +4490,20 @@ docker_container_menu() {
         esac
     done
 }
-
+# =================================================
+#      镜像管理 (docker_image_menu) - 优化版
+# =================================================
 docker_image_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     镜像管理                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有镜像                                $CYAN║$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${YELLOW}删除一个指定镜像$NC                            $CYAN║$NC"
-       echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}清理所有未使用的镜像${NC}                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="镜像管理"
+        local -a options=(
+            "列出所有镜像"
+            "删除一个指定镜像"
+            "清理所有未使用的镜像 (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) docker_list_images ;;
         2) docker_remove_image ;;
@@ -4610,32 +4513,24 @@ docker_image_menu() {
         esac
     done
 }
-# --- 主管理菜单 (V2.0) ---
+# =================================================
+#      Docker 主菜单 (docker_manage_menu) - 优化版
+# =================================================
 docker_manage_menu() {
     while true; do
-        clear
-        # 核心逻辑：首先检查 'docker' 命令是否存在
+        local choice
+
         if ! command -v docker &>/dev/null; then
             # --- Docker 未安装时显示的菜单 ---
-            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC  当前状态: ${YELLOW}● 未安装$NC                              $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}安装 Docker & Docker Compose${NC}                $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            local title="Docker 通用管理\n\n  当前状态: ${YELLOW}● 未安装${NC}"
+            local -a options=("安装 Docker & Docker Compose")
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
             1)
-                # 调用脚本中已有的安装函数
                 _install_docker_and_compose
                 press_any_key
-                # 不跳出循环，安装后会自动刷新菜单
                 ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
@@ -4643,36 +4538,23 @@ docker_manage_menu() {
         else
             # --- Docker 已安装时显示的菜单 ---
             local DOCKER_STATUS_COLOR
-            # 检测 Docker 服务是否正在运行
             if systemctl is-active --quiet docker; then
                 DOCKER_STATUS_COLOR="$GREEN● 活动$NC"
             else
                 DOCKER_STATUS_COLOR="$RED● 不活动$NC"
             fi
 
-            echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-            echo -e "$CYAN║$WHITE                 Docker 通用管理                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC  当前状态: $DOCKER_STATUS_COLOR                                $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   1. ${GREEN}容器管理${NC} (启停/删除/日志)                   $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   2. ${GREEN}镜像管理${NC} (删除/清理)                        $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   3. ${YELLOW}清理 Docker 系统 (释放空间)${NC}                 $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   4. 安装 Portainer 图形化管理面板               $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   5. ${RED}完全卸载Docker${NC}                              $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-            echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-            echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+            local title="Docker 通用管理\n  当前状态: $DOCKER_STATUS_COLOR"
+            local -a options=(
+                "${GREEN}容器管理 (启停/删除/日志)${NC}"
+                "镜像管理 (删除/清理)"
+                "清理 Docker 系统 (释放空间)"
+                "安装 Portainer 图形化管理面板"
+                "${RED}完全卸载Docker (卸载)${NC}"
+            )
 
-            read -p "请输入选项: " choice
+            _draw_menu "$title" choice "${options[@]}"
+
             case $choice in
             1) docker_container_menu ;;
             2) docker_image_menu ;;
@@ -5335,9 +5217,9 @@ uninstall_1panel() {
     fi
     press_any_key
 }
-# =================================================================
-#           智能卸载菜单 (V2.0 - 增强检测版)
-# =================================================================
+# =================================================
+#      智能卸载菜单 (uninstall_panels_menu) - 优化版
+# =================================================
 uninstall_panels_menu() {
     while true; do
         clear
@@ -5346,7 +5228,7 @@ uninstall_panels_menu() {
         local installed_items=()
         local function_map=()
 
-        # --- Docker Compose 应用检测 (通过 docker-compose.yml) ---
+        # --- 检测逻辑 (保持不变) ---
         if [ -f "/root/wordpress/docker-compose.yml" ]; then
             installed_items+=("WordPress (位于 /root/wordpress)")
             function_map+=("uninstall_wordpress")
@@ -5359,8 +5241,6 @@ uninstall_panels_menu() {
             installed_items+=("Uptime Kuma (位于 /root/uptime-kuma)")
             function_map+=("uninstall_uptime_kuma")
         fi
-
-        # --- 外部脚本安装检测 (通过特征命令或目录) ---
         if command -v 3x-ui &>/dev/null || [ -d "/usr/local/x-ui/" ]; then
             installed_items+=("3x-ui 面板")
             function_map+=("uninstall_3xui")
@@ -5377,50 +5257,27 @@ uninstall_panels_menu() {
             installed_items+=("1Panel 面板")
             function_map+=("uninstall_1panel")
         fi
+        # --- 检测逻辑结束 ---
 
-        # --- Docker 独立容器应用检测 (通过容器名) ---
-        if docker ps -a --format '{{.Names}}' | grep -q "^portainer$"; then
-            installed_items+=("Portainer (通用Docker面板)")
-            # 确保你有一个对应的 uninstall_portainer 函数
-            # 此处我们假设 uninstall_docker_compose_project 可以处理（如果它被改造得更通用）
-            # 或者你需要一个专门的 uninstall_portainer 函数。
-            # 为安全起见，我们暂时注释掉，除非你已创建该函数
-            # function_map+=("uninstall_portainer")
-        fi
-
-        # --- 检查是否有可卸载项 ---
         if [ ${#installed_items[@]} -eq 0 ]; then
             log_warn "未检测到任何通过本脚本安装且可识别的应用或面板。"
             press_any_key
             return
         fi
 
-        # --- 绘制菜单 ---
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 选择要卸载的应用或面板             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        # --- 改造核心：直接使用检测结果作为选项调用菜单函数 ---
+        local title="选择要卸载的应用或面板"
+        local choice
+        _draw_menu "$title" choice "${installed_items[@]}"
 
-        for i in "${!installed_items[@]}"; do
-            printf "$CYAN║$NC  %2d. %-45s $CYAN║$NC\n" "$((i+1))" "${installed_items[$i]}"
-        done
-
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        # --- 处理逻辑 (保持不变) ---
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 0 ] && [ "$choice" -le ${#installed_items[@]} ]; then
             if [ "$choice" -eq 0 ]; then
                 break
             else
                 local index=$((choice-1))
-                # 清屏并调用对应的卸载函数
                 clear
                 ${function_map[$index]}
-
-                # 卸载后暂停，以便用户可以再次进入此菜单查看结果
-                # press_any_key
-                # 注释掉press_any_key，因为卸载函数内部通常已经有了，避免重复按键
             fi
         else
             log_error "无效选项！"; sleep 1
@@ -5512,37 +5369,25 @@ _install_docker_compose_app() {
 
     press_any_key
 }
-# (这是被修改的函数, 全新的菜单结构)
+# =================================================
+#      应用 & 面板安装 (docker_apps_menu) - 优化版
+# =================================================
 docker_apps_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                     应用 & 面板安装              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 搭建 WordPress                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 搭建苹果CMS影视站                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 安装 3x-ui (搭建节点-Xray)                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 安装 S-ui (搭建节点-SingBox)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 安装 Uptime Kuma 监控面板                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 安装宝塔面板 (BT Panel)                     $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 安装 1Panel 面板                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   8. ${RED}卸载应用或面板${NC}                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="应用 & 面板安装"
+        local -a options=(
+            "${GREEN}搭建 WordPress${NC}"
+            "搭建苹果CMS影视站"
+            "安装 3x-ui (搭建节点-Xray)"
+            "安装 S-ui (搭建节点-SingBox)"
+            "安装 Uptime Kuma 监控面板"
+            "安装宝塔面板 (BT Panel)"
+            "安装 1Panel 面板"
+            "${RED}卸载应用或面板 (卸载)${NC}"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) install_wordpress ;;
         2) install_maccms ;;
@@ -5557,24 +5402,19 @@ docker_apps_menu() {
         esac
     done
 }
-
+# =================================================
+#      UI 面板安装选择 (ui_panels_menu) - 优化版
+# =================================================
 ui_panels_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 UI 面板安装选择                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 安装 S-ui 面板                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 安装 3X-ui 面板                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-        read -p "请输入选项: " choice
+        local title="UI 面板安装选择"
+        local -a options=(
+            "安装 S-ui 面板"
+            "安装 3X-ui 面板"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
         case $choice in
             1) install_sui; break ;;
             2) install_3xui; break ;;
@@ -5657,44 +5497,41 @@ _cleanup_caddy_proxy_config() {
         log_warn "Caddy 服务重载失败，请手动检查配置。"
     fi
 }
-
-# --- (重写) 交互更友好，并支持清理 Caddy 配置 ---
+# =================================================
+#      删除证书 (delete_certificate_and_proxy) - 优化版
+# =================================================
 delete_certificate_and_proxy() {
     clear
     log_info "准备删除证书及其关联配置..."
-
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法执行操作。"; press_any_key; return;
     fi
 
-    # 从 certbot 获取原始数据
     local certs_data
     certs_data=$(certbot certificates 2>/dev/null)
     if [[ ! "$certs_data" =~ "Found the following certs:" ]]; then
         log_warn "未找到任何由 Certbot 管理的证书。"; press_any_key; return;
     fi
 
-    # 构建选择菜单
+    # 1. 动态构建证书名称数组和菜单选项数组
     local cert_names=()
-    local display_options=()
-    local i=1
+    local options_for_menu=()
     while read -r line; do
         if [[ $line =~ "Certificate Name:" ]]; then
             local name=$(echo "$line" | awk '{print $3}')
-            local domains=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
+            # 从原始数据中提取与该证书相关的域名信息
+            local domains_line
+            domains_line=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
             cert_names+=("$name")
-            display_options+=("$i. $name ($domains)")
-            ((i++))
+            options_for_menu+=("$name ($domains_line)")
         fi
     done <<< "$certs_data"
 
-    log_info "请选择要删除的证书:\n"
-    for option in "${display_options[@]}"; do
-        echo "  $option"
-    done
-    echo -e "\n  0. 返回\n"
+    # 2. 调用通用菜单函数显示动态选项
+    local title="请选择要删除的证书"
+    local choice
+    _draw_menu "$title" choice "${options_for_menu[@]}"
 
-    read -p "请输入选项: " choice
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 0 ] || [ "$choice" -gt ${#cert_names[@]} ]; then
         log_error "无效选项！"; press_any_key; return
     fi
@@ -5702,6 +5539,7 @@ delete_certificate_and_proxy() {
 
     local cert_to_delete=${cert_names[$((choice-1))]}
 
+    # 3. 后续的确认和删除逻辑保持不变
     read -p "警告：这将永久删除证书 '$cert_to_delete' 及其相关的 Web 服务器配置。此操作不可逆！是否继续？(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         log_info "操作已取消。"; press_any_key; return
@@ -5718,10 +5556,7 @@ delete_certificate_and_proxy() {
         log_warn "检测到关联的 Nginx 配置文件，正在清理..."
         rm -f "/etc/nginx/sites-enabled/$cert_to_delete.conf"
         rm -f "$nginx_conf"
-        if nginx -t >/dev/null 2>&1; then
-            systemctl reload nginx
-            log_info "✅ Nginx 残留配置已清理。"
-        fi
+        if nginx -t >/dev/null 2>&1; then systemctl reload nginx; log_info "✅ Nginx 残留配置已清理."; fi
     fi
 
     # 清理 Caddy
@@ -5730,7 +5565,6 @@ delete_certificate_and_proxy() {
     log_info "✅ 清理流程完成。"
     press_any_key
 }
-
 renew_certificates() {
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法续签。"
@@ -5891,7 +5725,7 @@ EOF
     if [ ! -L "/etc/nginx/sites-enabled/$domain.conf" ]; then
         ln -s "$conf_path" "/etc/nginx/sites-enabled/"
     fi
-    log_info "正在测试并重载 Nginx 配置..."
+    log_info "正在测试并重载 Nginx 配置...\n"
     if ! nginx -t; then
         log_error "Nginx 配置测试失败！请手动检查。"
         return 1
@@ -6055,32 +5889,22 @@ apply_ssl_certificate_only_workflow() {
     fi
     press_any_key
 }
-
-# --- (重写) 采用新的菜单结构 ---
+# =================================================
+#      证书管理主菜单 (certificate_management_menu) - 优化版
+# =================================================
 certificate_management_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE             证书管理 & 网站反代 (v2.0)           $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 新建网站反代 (自动申请证书)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}仅为域名申请证书${NC}                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 查看/列出所有证书                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 手动续签所有证书                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}删除证书 (并清理反代配置)${NC}                   $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="证书管理 & 网站反代 (v2.0)"
+        local -a options=(
+            "新建网站反代 (自动申请证书)"
+            "仅为域名申请证书"
+            "查看/列出所有证书"
+            "手动续签所有证书"
+            "删除证书 (并清理反代配置) (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) setup_auto_reverse_proxy "" "" ;; # 传递空参数以启动完整交互流程
         2) apply_ssl_certificate_only_workflow ;;
@@ -6143,106 +5967,50 @@ initial_setup_check() {
         sleep 2
     fi
 }
-
+# =================================================
+#      脚本主入口 (main_menu) - 特殊页脚版
+# =================================================
 main_menu() {
     while true; do
-        clear
-
-        # 获取 IP 地址以供显示
         local ipv4
         ipv4=$(get_public_ip v4)
         local ipv6
         ipv6=$(get_public_ip v6)
+        [ -z "$ipv4" ] && ipv4="N/A"
+        [ -z "$ipv6" ] && ipv6="N/A"
 
-        # --- 以下是菜单的绘制 ---
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE              全功能 VPS & 应用管理脚本           $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
+        local title="全功能 VPS & 应用管理脚本\n\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
 
-        # --- IP 显示逻辑 (精确对齐版) ---
-        if [ -n "$ipv4" ] && [ -n "$ipv6" ]; then
-            # 情况1: IPv4 和 IPv6 都存在，换行显示
+        # 1. 从选项列表中移除 "更新此脚本"
+        local -a options=(
+            "系统综合管理"
+            "Sing-Box 管理"
+            "Sub-Store 管理"
+            "哪吒监控管理"
+            "Docker 通用管理"
+            "应用 & 面板安装"
+            "证书管理 & 网站反代"
+        )
 
-            # 处理 IPv4 行
-            local text1="  IPv4: ${ipv4}"
-            local display1="  ${WHITE}IPv4: ${ipv4}${CYAN}"
-            local len1=${#text1}
-            local pad1=$((50 - len1)); [ $pad1 -lt 0 ] && pad1=0
-            local space1
-            space1=$(printf "%${pad1}s")
-            echo -e "$CYAN║${display1}${space1}$CYAN║$NC"
+        local choice
+        # 2. 调用 _draw_menu 时，使用新的 "main_footer" 指令
+        _draw_menu "$title" choice "main_footer" "${options[@]}"
 
-            # 处理 IPv6 行
-            local text2="  IPv6: ${ipv6}"
-            local display2="  ${WHITE}IPv6: ${ipv6}${CYAN}"
-            local len2=${#text2}
-            local pad2=$((50 - len2)); [ $pad2 -lt 0 ] && pad2=0
-            local space2
-            space2=$(printf "%${pad2}s")
-            echo -e "$CYAN║${display2}${space2}$CYAN║$NC"
-
-        else
-            # 情况2: 只有一个IP或都没有，显示单行
-            local text=""
-            local display=""
-            if [ -n "$ipv4" ]; then
-                text="  IPv4: ${ipv4}"
-                display="  ${WHITE}IPv4: ${ipv4}${CYAN}"
-            elif [ -n "$ipv6" ]; then
-                text="  IPv6: ${ipv6}"
-                display="  ${WHITE}IPv6: ${ipv6}${CYAN}"
-            else
-                text="  IP: 获取失败"
-                display="  ${RED}IP: 获取失败${CYAN}"
-            fi
-            local len=${#text}
-            local pad=$((50 - len)); [ $pad -lt 0 ] && pad=0
-            local space
-            space=$(printf "%${pad}s")
-            echo -e "$CYAN║${display}${space}$CYAN║$NC"
-        fi
-
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 系统综合管理                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sing-Box 管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. Sub-Store 管理                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 哪吒监控管理                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. Docker 通用管理                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 应用 & 面板安装                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   7. 证书管理 & 网站反代                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   9. $GREEN更新此脚本$NC                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. $RED退出脚本$NC                                    $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        # 3. 更新 case 语句，将“更新脚本”的选项从 8 改为 9
         case $choice in
-        1) sys_manage_menu ;;
-        2) singbox_main_menu ;;
-        3) substore_main_menu ;;
-        4) nezha_main_menu ;;
-        5) docker_manage_menu ;;
-        6) docker_apps_menu ;;
-        7) certificate_management_menu ;;
-        9) do_update_script ;;
-        0) exit 0 ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) sys_manage_menu ;;
+            2) singbox_main_menu ;;
+            3) substore_main_menu ;;
+            4) nezha_main_menu ;;
+            5) docker_manage_menu ;;
+            6) docker_apps_menu ;;
+            7) certificate_management_menu ;;
+            9) do_update_script ;; # <--- 注意：这里从 8 改为了 9
+            0) exit 0 ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
-
 # --- 脚本执行入口 ---
 check_root
 detect_os_and_package_manager
