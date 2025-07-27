@@ -242,61 +242,91 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           新增：通用菜单绘制函数 (V6)
+#           新增：通用菜单绘制函数 (V7 - 对齐修正版)
 # =================================================
-# 函数: 绘制一个标准的菜单
-# 用法:
-#   local -a options=("选项1" "选项2" "选项3 (推荐)")
-#   local choice
-#   _draw_menu "我的菜单标题" choice "${options[@]}"
-#   echo "用户选择了: $choice"
+# 函数: 绘制一个标准的、完美对齐的菜单
 #
 # @param $1: 菜单标题 (字符串)
 # @param $2: 用于接收用户选择的变量名 (引用)
 # @param $3+: 菜单选项数组
 _draw_menu() {
     local title="$1"
-    local -n choice_ref=$2 # 使用-n引用，可以直接修改外部变量的值
+    local -n choice_ref=$2
     shift 2
     local -a options=("$@")
-    local width=50
+
+    # --- 核心参数 ---
+    local menu_width=50 # 菜单内部总宽度
+    local border_char="║"
+
+    # --- 辅助函数：计算字符串的视觉宽度 (处理中英文混合) ---
+    _get_visual_width() {
+        local text="$1"
+        local width=0
+        local char
+        for (( i=0; i<${#text}; i++ )); do
+            char="${text:i:1}"
+            # 使用 printf 的 %b 格式来处理可能的多字节字符
+            if [ "$(printf "%b" "$char" | wc -c)" -gt 1 ]; then
+                # 假设非单字节字符都占2个宽度
+                width=$((width + 2))
+            else
+                width=$((width + 1))
+            fi
+        done
+        echo $width
+    }
 
     clear
-    # 打印上边框和标题
+
+    # 1. 打印上边框和居中的标题
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    local title_len
-    # 使用纯文本计算标题长度，忽略颜色代码
-    title_len=$(echo -e "$title" | sed 's/\x1b\[[0-9;]*m//g' | wc -c)
-    ((title_len--)) # wc -c 会多计算一个换行符
-    local padding=$(((width - title_len) / 2))
-    printf "$CYAN║%*s$WHITE%b$CYAN%*s║$NC\n" "$padding" "" "$title" "$((width - title_len - padding))" ""
+    # 剥离颜色代码以计算真实宽度
+    local clean_title
+    clean_title=$(echo -e "$title" | sed 's/\x1b\[[0-9;]*m//g')
+    local title_width
+    title_width=$(_get_visual_width "$clean_title")
+    local padding_left=$(((menu_width - title_width) / 2))
+    local padding_right=$((menu_width - title_width - padding_left))
+    # 使用 %b 来正确打印带颜色的标题
+    printf "$CYAN%s%*s$WHITE%b$CYAN%*s%s$NC\n" "$border_char" "$padding_left" "" "$title" "$padding_right" "" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # 打印菜单选项
+    # 2. 打印菜单选项
     for i in "${!options[@]}"; do
         local option_text="${options[$i]}"
-        # 为特定关键词自动添加颜色
-        local formatted_option
-        formatted_option=$(echo -e "$option_text" | sed \
-            -e "s/(推荐)/${GREEN}(推荐)${NC}/g" \
-            -e "s/(推荐, 无需域名)/${GREEN}(推荐, 无需域名)${NC}/g" \
-            -e "s/(删除)/${RED}(删除)${NC}/g" \
-            -e "s/(卸载)/${RED}(卸载)${NC}/g" \
-            -e "s/(增强)/${BLUE}(增强)${NC}/g" \
-        )
+        # 将颜色变量渲染成实际的 ANSI escape codes
+        local rendered_option
+        rendered_option=$(echo -e "$option_text")
+        # 剥离颜色代码，用于计算宽度
+        local clean_option
+        clean_option=$(echo -e "$rendered_option" | sed 's/\x1b\[[0-9;]*m//g')
 
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        # 使用 printf 和 -b 来正确处理带颜色的选项
-        printf "$CYAN║$NC  %2d. %-48b $CYAN║$NC\n" "$((i + 1))" "$formatted_option"
+        # 计算选项编号部分 "  1. " 的宽度 (固定为5)
+        local prefix_width=5
+        # 计算选项文本的视觉宽度
+        local option_width
+        option_width=$(_get_visual_width "$clean_option")
+
+        # 计算需要填充的空格数
+        local padding_spaces=$((menu_width - prefix_width - option_width))
+
+        # 打印空行，增加间距
+        printf "$CYAN%s%*s%s$NC\n" "$border_char" "$menu_width" "" "$border_char"
+        # 打印带对齐的选项行
+        printf "$CYAN%s$NC  %2d. %b%*s$CYAN%s$NC\n" "$border_char" "$((i + 1))" "$rendered_option" "$padding_spaces" "" "$border_char"
     done
 
-    # 打印分隔符和返回选项
-    echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+    # 3. 打印结尾和 "返回" 选项
+    printf "$CYAN%s%*s%s$NC\n" "$border_char" "$menu_width" "" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
+    local return_text="0. 返回"
+    local return_width=$(_get_visual_width "$return_text")
+    local return_padding=$((menu_width - return_width - 2)) # 减去 "  " 的宽度
+    printf "$CYAN%s$NC  %s%*s$CYAN%s$NC\n" "$border_char" "$return_text" "$return_padding" "" "$border_char"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-    # 读取用户输入
+    # 4. 读取用户输入
     read -p "请输入选项: " choice_ref
 }
 # =================================================
