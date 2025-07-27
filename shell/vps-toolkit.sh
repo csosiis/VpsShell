@@ -3293,9 +3293,7 @@ is_substore_installed_docker() {
         return 1
     fi
 }
-
-
-# --- Docker 版安装函数 (新增) ---
+# --- Docker 版安装函数 (修正版) ---
 substore_do_install_docker() {
     # 1. 确保 Docker 已安装
     if ! _install_docker_and_compose; then
@@ -3332,7 +3330,6 @@ substore_do_install_docker() {
     local backend_path
     read -p "请输入后端的访问路径 (API Key) [回车则随机生成]: " backend_path_input
     backend_path=${backend_path_input:-$(generate_random_password)}
-    # 确保路径以 / 开头
     if [[ ! "$backend_path" == /* ]]; then
         backend_path="/$backend_path"
     fi
@@ -3349,7 +3346,13 @@ substore_do_install_docker() {
     read -p "请输入后端的自动同步 CRON 表达式 [默认: 55 23 * * *]: " cron_schedule
     cron_schedule=${cron_schedule:-"55 23 * * *"}
 
-    local push_service_env=""
+    # 4. 构建并执行命令 (使用数组以保证健壮性)
+    log_info "正在构建 docker run 命令..."
+
+    local docker_args=("run" "-d" "--restart=always")
+    docker_args+=("-e" "SUB_STORE_FRONTEND_BACKEND_PATH=${backend_path}")
+    docker_args+=("-e" "SUB_STORE_BACKEND_SYNC_CRON=${cron_schedule}")
+
     read -p "是否要配置 Telegram 推送通知? (y/N): " configure_tg
     if [[ "$configure_tg" =~ ^[Yy]$ ]]; then
         local tg_api_key tg_chat_id
@@ -3357,31 +3360,34 @@ substore_do_install_docker() {
         read -p "请输入 Telegram Chat ID: " tg_chat_id
         if [ -n "$tg_api_key" ] && [ -n "$tg_chat_id" ]; then
             local push_url="https://api.telegram.org/bot${tg_api_key}/sendMessage?chat_id=${tg_chat_id}&text=[推送标题][推送内容]?group=SubStore&autoCopy=1&isArchive=1&sound=shake&level=timeSensitive&icon=https%3A%2F%2Fraw.githubusercontent.com%2F58xinian%2Ficon%2Fmaster%2FSub-Store1.png"
-            push_service_env="-e SUB_STORE_PUSH_SERVICE=${push_url}"
+            docker_args+=("-e" "SUB_STORE_PUSH_SERVICE=${push_url}")
             log_info "Telegram 推送已配置。"
         else
             log_warn "API Key 或 Chat ID 为空，已跳过 Telegram 配置。"
         fi
     fi
 
-    # 4. 构建并执行命令
-    log_info "正在构建 docker run 命令..."
-    # 使用 \ 来换行，使命令更清晰
-    local docker_command="docker run -d --restart=always \\
-        -e SUB_STORE_FRONTEND_BACKEND_PATH=${backend_path} \\
-        -e \"SUB_STORE_BACKEND_SYNC_CRON=${cron_schedule}\" \\
-        ${push_service_env} \\
-        -p ${external_port}:3001 \\
-        -v ${data_dir}:/opt/app/data \\
-        --name sub-store \\
-        xream/sub-store"
+    docker_args+=("-p" "${external_port}:3001")
+    docker_args+=("-v" "${data_dir}:/opt/app/data")
+    docker_args+=("--name" "sub-store")
+    docker_args+=("xream/sub-store")
 
     echo -e "\n${YELLOW}将要执行以下命令:${NC}"
-    echo "$docker_command"
-    echo ""
+    # 使用 printf 安全地打印命令数组
+    printf "docker "
+    for arg in "${docker_args[@]}"; do
+        # 如果参数包含空格，则用引号括起来，以便于复制粘贴
+        if [[ "$arg" == *" "* ]]; then
+            printf "'%s' " "$arg"
+        else
+            printf "%s " "$arg"
+        fi
+    done
+    echo -e "\n"
     read -p "确认无误后按 Enter 键继续..."
 
-    if eval "$docker_command"; then
+    # 直接使用数组执行命令，无需 eval
+    if docker "${docker_args[@]}"; then
         log_info "正在等待容器启动 (等待 5 秒)..."
         sleep 5
         if is_substore_installed_docker; then
@@ -3397,7 +3403,6 @@ substore_do_install_docker() {
             echo -e "\n  $YELLOW$final_url$NC\n"
             echo -e "$CYAN-----------------------------------------------------------$NC"
 
-            # 标记为docker安装，用于卸载和管理
             touch "$data_dir/.docker_install_flag"
 
             read -p "安装已完成，是否立即设置反向代理 (推荐)? (y/N): " choice
@@ -3411,24 +3416,20 @@ substore_do_install_docker() {
                         proxy_backend_url_encoded=$(echo -n "https://$domain$backend_path" | base64 -w0)
                         local proxy_final_url="https://$domain/?api=$proxy_backend_url_encoded"
                         echo -e "优化后的访问链接为: \n\n$YELLOW$proxy_final_url$NC\n"
-                        # 记录反代域名，方便卸载时清理
                         echo "$domain" > "$data_dir/.proxy_domain_docker"
                     else
                         log_error "反向代理设置失败。"
                     fi
                 fi
             fi
-
         else
             log_error "Sub-Store 容器启动失败！请使用 'docker logs sub-store' 查看日志排查。"
         fi
     else
-        log_error "执行 docker run 命令失败！"
+        log_error "执行 docker 命令失败！请检查 Docker 是否正在运行以及镜像名称是否正确。"
     fi
     press_any_key
 }
-
-
 # --- 裸机版安装函数 (原 substore_do_install) ---
 substore_do_install_baremetal() {
     if ! ensure_dependencies "curl" "unzip" "git"; then
