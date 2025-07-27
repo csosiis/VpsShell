@@ -241,31 +241,25 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           通用菜单绘制函数 (V15 - 智能默认版)
+#           通用菜单绘制函数 (V16 - 特殊页脚最终版)
 # =================================================
 # 函数: 绘制一个标准的、完美对齐的菜单
 #
 # @param $1: 菜单标题 (字符串)
 # @param $2: 用于接收用户选择的变量名 (引用)
-# @param $3: (可选) 特殊指令 "exit"，用于主菜单显示 "退出脚本"
+# @param $3: (可选) 特殊指令 "exit" 或 "main_footer"
 # @param $...: 菜单选项数组
 _draw_menu() {
     local title_block="$1"
     local -n choice_ref=$2
+    local instruction="$3"
     local exit_text
 
-    # --- 新增的智能判断逻辑 ---
-    if [[ "$3" == "exit" ]]; then
-        # 如果第三个参数是 "exit"，说明是主菜单调用
-        exit_text="${RED}退出脚本${NC}"
-        shift 3 # 跳过 title, choice_ref, 和 "exit" 指令
+    if [[ "$instruction" == "exit" || "$instruction" == "main_footer" ]]; then
+        shift 3
     else
-        # 否则，就是普通的子菜单调用
-        exit_text="返回"
-        shift 2 # 只跳过 title 和 choice_ref，保留选项
+        shift 2
     fi
-    # --- 逻辑结束 ---
-
     local -a options=("$@")
 
     # --- 核心参数 ---
@@ -273,23 +267,14 @@ _draw_menu() {
     local right_border_col=$((menu_width + 2))
     local border_char="║"
 
-    # --- 辅助函数：使用 awk -v 的安全方式计算视觉宽度 ---
     _get_visual_width() {
-        awk -v text="$1" 'BEGIN {
-            w=0;
-            for(i=1; i<=length(text); i++) {
-                char = substr(text, i, 1);
-                if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; }
-            }
-            print w;
-        }'
+        awk -v text="$1" 'BEGIN { w=0; for(i=1; i<=length(text); i++) { char = substr(text, i, 1); if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; } } print w; }'
     }
 
     clear
 
     # 1. 打印上边框和智能对齐的标题
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-
     local title_line_num=0
     while IFS= read -r title_line; do
         if [ $title_line_num -eq 0 ]; then
@@ -326,9 +311,24 @@ _draw_menu() {
     printf "$CYAN%s" "$border_char"
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    # 使用 %b 来正确渲染带颜色的退出文本
-    printf "$CYAN%s$NC  0. %b" "$border_char" "$exit_text"
-    printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+
+    # --- 新增的特殊页脚判断逻辑 ---
+    if [[ "$instruction" == "main_footer" ]]; then
+        # 为主菜单绘制特殊的页脚
+        local update_text="9. 更新此脚本"
+        local exit_text="${RED}0. 退出脚本${NC}"
+        # 使用 printf 和光标定位来确保对齐
+        printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
+        printf "\033[35G%b" "$exit_text" # 大致定位到第35列
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    else
+        # 为所有其他子菜单绘制标准页脚
+        if [[ "$instruction" == "exit" ]]; then exit_text="${RED}退出脚本${NC}"; else exit_text="返回"; fi
+        printf "$CYAN%s$NC  0. %b" "$border_char" "$exit_text"
+        printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
+    fi
+    # --- 逻辑结束 ---
+
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
     # 4. 读取用户输入
@@ -6002,7 +6002,7 @@ initial_setup_check() {
     fi
 }
 # =================================================
-#      脚本主入口 (main_menu) - 特殊指令版
+#      脚本主入口 (main_menu) - 特殊页脚版
 # =================================================
 main_menu() {
     while true; do
@@ -6015,6 +6015,7 @@ main_menu() {
 
         local title="全功能 VPS & 应用管理脚本\n${WHITE}IPv4: ${ipv4}\n${WHITE}IPv6: ${ipv6}"
 
+        # 1. 从选项列表中移除 "更新此脚本"
         local -a options=(
             "系统综合管理"
             "Sing-Box 管理"
@@ -6023,13 +6024,13 @@ main_menu() {
             "Docker 通用管理"
             "应用 & 面板安装"
             "证书管理 & 网站反代"
-            "${GREEN}更新此脚本${NC}"
         )
 
         local choice
-        # <-- 核心改动：在这里传入 "exit" 作为特殊指令
-        _draw_menu "$title" choice "exit" "${options[@]}"
+        # 2. 调用 _draw_menu 时，使用新的 "main_footer" 指令
+        _draw_menu "$title" choice "main_footer" "${options[@]}"
 
+        # 3. 更新 case 语句，将“更新脚本”的选项从 8 改为 9
         case $choice in
             1) sys_manage_menu ;;
             2) singbox_main_menu ;;
@@ -6038,7 +6039,7 @@ main_menu() {
             5) docker_manage_menu ;;
             6) docker_apps_menu ;;
             7) certificate_management_menu ;;
-            8) do_update_script ;;
+            9) do_update_script ;; # <--- 注意：这里从 8 改为了 9
             0) exit 0 ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
