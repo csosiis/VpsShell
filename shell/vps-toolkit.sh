@@ -3899,19 +3899,19 @@ substore_main_menu() {
         if is_substore_installed_docker; then
             install_type="Docker版"
             if docker ps -q --filter "name=sub-store" --filter "status=running" | grep -q .; then
-                STATUS_COLOR="$GREEN● 活动    $NC"
+                STATUS_COLOR="$GREEN● 活动     $NC"
             else
                 STATUS_COLOR="$RED● 不活动   $NC"
             fi
         elif is_substore_installed_baremetal; then
             install_type="宿主机版"
             if systemctl is-active --quiet "$SUBSTORE_SERVICE_NAME"; then
-                STATUS_COLOR="$GREEN● 活动$NC"
+                STATUS_COLOR="$GREEN● 活动     $NC"
             else
-                STATUS_COLOR="$RED● 不活动$NC"
+                STATUS_COLOR="$RED● 不活动   $NC"
             fi
         else
-            STATUS_COLOR="$YELLOW● 未安装$NC"
+            STATUS_COLOR="$YELLOW● 未安装   $NC"
         fi
 
         printf "$CYAN║$NC  当前状态: %-10s  |  类型: %-16s $CYAN║$NC\n" "$STATUS_COLOR" "$install_type"
