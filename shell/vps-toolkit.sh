@@ -142,9 +142,9 @@ _is_domain_valid() {
         return 1
     fi
 }
-
-# --- 新增：可移植性相关的函数 ---
-
+# =================================================
+#      检测操作系统和包管理器 (detect_os_and_package_manager) - 修正版
+# =================================================
 detect_os_and_package_manager() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -167,7 +167,6 @@ detect_os_and_package_manager() {
     fi
     # log_info "检测到系统: $OS_ID, 包管理器: $PKG_MANAGER"
 }
-
 # 统一的包安装函数
 install_packages() {
     local packages_to_install=("$@")
@@ -319,7 +318,7 @@ _draw_menu() {
     printf "$CYAN%s" "$border_char"
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-    printf "$CYAN%s$NC  0. 返回" "$border_char"
+    printf "$CYAN%s$NC   0. 返回" "$border_char"
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
@@ -456,7 +455,7 @@ system_health_check() {
     press_any_key
 }
 # =================================================
-#           新增：防火墙助手
+#      防火墙助手 (firewall_helper_menu) - 优化版
 # =================================================
 firewall_helper_menu() {
     local FW_COMMAND=""
@@ -478,10 +477,9 @@ firewall_helper_menu() {
     log_info "检测到防火墙类型: $FW_TYPE"
 
     while true; do
-        clear
+        # 1. 获取防火墙的动态状态
         local status_text
         if [ "$FW_TYPE" == "UFW" ]; then
-            # UFW状态输出比较长，这里简化显示
             if ufw status | grep -q 'Status: active'; then
                 status_text="${GREEN}● 活动 (Active)${NC}"
             else
@@ -495,27 +493,23 @@ firewall_helper_menu() {
             fi
         fi
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 防火墙助手 ($FW_TYPE)               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前状态: $status_text                              $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 查看当前所有规则                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${GREEN}开放一个端口 (Allow)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}关闭一个端口 (Delete/Remove)${NC}                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 开启防火墙                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 关闭防火墙                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 2. 构建包含动态信息的多行标题
+        local title="防火墙助手 ($FW_TYPE)\n  当前状态: $status_text"
 
-        read -p "请输入选项: " choice
+        # 3. 定义菜单选项数组
+        local -a options=(
+            "查看当前所有规则"
+            "开放一个端口 (Allow)"
+            "关闭一个端口 (Delete/Remove)"
+            "开启防火墙"
+            "关闭防火墙"
+        )
+
+        # 4. 调用通用菜单函数
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理用户选择 (这部分复杂的逻辑保持不变)
         case $choice in
         1)
             clear
@@ -951,64 +945,65 @@ recommend_best_dns() {
         press_any_key
     fi
 }
-
+# =================================================
+#      DNS 工具箱 (dns_toolbox_menu) - 优化版
+# =================================================
 dns_toolbox_menu() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                   DNS 工具箱                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-
+        # 1. 获取动态信息
+        local current_dns_list="读取失败"
         if command -v resolvectl &>/dev/null; then
             local status_output
             status_output=$(resolvectl status)
-            local current_dns_list
-            current_dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
-            if [ -z "$current_dns_list" ]; then
-                current_dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            local dns_list
+            dns_list=$(echo "$status_output" | grep 'Current DNS Server:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
+            if [ -z "$dns_list" ]; then
+                dns_list=$(echo "$status_output" | grep 'DNS Servers:' | awk '{for(i=3;i<=NF;i++) printf "%s ", $i}')
             fi
-            if [ -n "$current_dns_list" ]; then
-                 echo -e "$CYAN║$NC  当前DNS: $YELLOW$current_dns_list$NC $CYAN║$NC"
-            else
-                 echo -e "$CYAN║$NC  当前DNS: ${RED}读取失败$NC                               $CYAN║$NC"
+            if [ -n "$dns_list" ]; then
+                current_dns_list="$YELLOW$dns_list$NC"
             fi
         fi
 
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳 DNS$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 手动选择 DNS 进行优化                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 备份当前 DNS 配置                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
+        # 2. 构建多行标题
+        local title="DNS 工具箱\n  当前DNS: $current_dns_list"
 
+        # 3. 定义菜单选项
+        local -a options=(
+            "自动测试并推荐最佳 DNS"
+            "手动选择 DNS 进行优化"
+            "备份当前 DNS 配置"
+        )
+        # 动态添加恢复选项
         if [ -f "$backup_file" ]; then
-            echo -e "$CYAN║$NC   4. ${GREEN}从备份恢复 DNS 配置$NC                         $CYAN║$NC"
+            options+=("从备份恢复 DNS 配置 (推荐)")
         else
-            echo -e "$CYAN║$NC   4. ${RED}从备份恢复 DNS 配置 (无备份)${NC}                $CYAN║$NC"
+            options+=("${RED}从备份恢复 DNS 配置 (无备份)${NC}")
         fi
 
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 4. 调用通用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
+        # 5. 处理逻辑
         case $choice in
         1) recommend_best_dns ;;
         2) optimize_dns ;;
         3) backup_dns_config ;;
-        4) restore_dns_config ;;
+        4)
+            if [ -f "$backup_file" ]; then
+                restore_dns_config
+            else
+                log_error "没有可用的备份文件！"
+                sleep 1
+            fi
+            ;;
         0) break ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
 backup_dns_config() {
     local backup_file="/etc/vps_toolkit_dns_backup"
     log_info "开始备份当前 DNS 配置..."
@@ -1227,10 +1222,12 @@ test_and_recommend_priority() {
     fi
     press_any_key
 }
-
+# =================================================
+#      网络优先级 (network_priority_menu) - 优化版
+# =================================================
 network_priority_menu() {
     while true; do
-        clear
+        # 1. 获取动态状态
         local current_setting="未知"
         if [ ! -f /etc/gai.conf ] || ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf; then
              current_setting="${GREEN}IPv6 优先${NC}"
@@ -1238,25 +1235,21 @@ network_priority_menu() {
              current_setting="${YELLOW}IPv4 优先${NC}"
         fi
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 网络优先级设置                   $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC  当前设置: $current_setting                             $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}自动测试并推荐最佳设置$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 手动设置为 [IPv6 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 手动设置为 [IPv4 优先]                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 2. 构建标题
+        local title="网络优先级设置\n  当前设置: $current_setting"
 
-        read -p "请输入选项: " choice
+        # 3. 定义选项
+        local -a options=(
+            "自动测试并推荐最佳设置"
+            "手动设置为 [IPv6 优先]"
+            "手动设置为 [IPv4 优先]"
+        )
+
+        # 4. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理逻辑
         case $choice in
         1)
             test_and_recommend_priority
@@ -1281,7 +1274,6 @@ network_priority_menu() {
         esac
     done
 }
-
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -1323,45 +1315,44 @@ setup_ssh_key() {
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
 }
-
+# =================================================
+#      root 登录管理 (manage_root_login) - 优化版
+# =================================================
 manage_root_login() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                设置 root 登录方式                $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. ${GREEN}设置 SSH 密钥登录$NC (更安全，推荐)            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. ${YELLOW}设置 root 密码登录$NC (方便，兼容性好)         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   0. 返回上一级菜单                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 定义菜单标题
+        local title="设置 root 登录方式"
 
-        read -p "请输入选项: " choice
+        # 2. 定义菜单选项数组
+        local -a options=(
+            "设置 SSH 密钥登录 (更安全，推荐)"
+            "设置 root 密码登录 (方便，兼容性好)"
+        )
+
+        # 3. 调用通用菜单函数来绘制菜单并获取用户选择
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 根据用户的选择执行相应操作
         case $choice in
-        1)
-            setup_ssh_key
-            break
-            ;;
-        2)
-            set_root_password
-            break
-            ;;
-        0)
-            break
-            ;;
-        *)
-            log_error "无效选项！"
-            sleep 1
-            ;;
+            1)
+                setup_ssh_key
+                break # 操作完成后退出此菜单，返回上一级
+                ;;
+            2)
+                set_root_password
+                break # 操作完成后退出此菜单，返回上一级
+                ;;
+            0)
+                break # 用户选择返回
+                ;;
+            *)
+                log_error "无效选项！"
+                sleep 1
+                ;;
         esac
     done
 }
-
 set_root_password() {
     log_info "开始设置 root 密码..."
     read -s -p "请输入新的 root 密码: " new_password
@@ -1582,9 +1573,8 @@ install_warp() {
     press_any_key
 }
 # =================================================
-#           实用工具 (增强) - 新增及优化
+#      Fail2Ban 管理 (fail2ban_menu) - 优化版
 # =================================================
-# (这是被修改的函数, 修复了状态显示逻辑)
 fail2ban_menu() {
     ensure_dependencies "fail2ban"
     if ! command -v fail2ban-client &>/dev/null; then
@@ -1608,114 +1598,71 @@ EOF
         systemctl restart fail2ban
     fi
 
-
     while true; do
-        clear
-
-        # --- 全新的、更健壮的状态检测逻辑 ---
-        local f2b_status_text
-        local jail_count="N/A"
-        local banned_count="N/A"
-        local total_banned="N/A"
-
-        # 每次循环都重新检查服务的真实状态
+        # 1. 获取所有动态信息
+        local f2b_status_text jail_count="N/A" banned_count="N/A" total_banned="N/A"
         if systemctl is-active --quiet fail2ban; then
             f2b_status_text="${GREEN}● 活动$NC"
-
-            # 仅在服务活动时才获取统计信息，并隐藏可能的错误输出
             local status
             status=$(fail2ban-client status 2>/dev/null)
-            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | xargs)
-
+            jail_count=$(echo "$status" | grep "Jail list" | sed -E 's/.*Jail list:\s*//' | wc -w)
             local sshd_status
             sshd_status=$(fail2ban-client status sshd 2>/dev/null)
             if [ -n "$sshd_status" ]; then
                 banned_count=$(echo "$sshd_status" | grep "Currently banned" | awk '{print $NF}')
                 total_banned=$(echo "$sshd_status" | grep "Total banned" | awk '{print $NF}')
             else
-                banned_count="0"
-                total_banned="0"
+                banned_count="0"; total_banned="0"
             fi
         else
             f2b_status_text="${RED}● 不活动$NC"
-            # 当服务不活动时，统计信息保持为 N/A
         fi
-        # --- 状态检测逻辑结束 ---
 
+        # 2. 构建复杂的、包含多行动态信息和颜色的标题
+        local title="Fail2Ban 防护管理\n  状态: $f2b_status_text | Jails: $jail_count\n  SSH防护: 当前封禁 ${RED}$banned_count${NC}, 历史共封禁 ${YELLOW}$total_banned${NC}"
 
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  Fail2Ban 防护管理               $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        # 使用变量动态显示状态和数据
-        echo -e "$CYAN║$NC  当前状态: $f2b_status_text, Jails: ${jail_count}                       $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC  SSH 防护: 当前封禁 ${RED}$banned_count$NC,   历史共封禁 ${YELLOW}$total_banned$NC            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 查看 Fail2Ban 状态 (及SSH防护详情)          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 查看最近的日志                              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${YELLOW}手动解封一个 IP 地址$NC                        $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. 重启 Fail2Ban 服务                          $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. ${RED}卸载 Fail2Ban$NC                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 3. 定义选项
+        local -a options=(
+            "查看 Fail2Ban 状态 (及SSH防护详情)"
+            "查看最近的日志"
+            "手动解封一个 IP 地址"
+            "重启 Fail2Ban 服务"
+            "卸载 Fail2Ban (卸载)"
+        )
 
-        read -p "请输入选项: " choice
+        # 4. 调用菜单
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 5. 处理逻辑
         case $choice in
         1)
-            clear
-            log_info "Fail2Ban 总体状态:"
-            fail2ban-client status
-            echo -e "\n$CYAN----------------------------------------------------$NC"
-            log_info "SSHD 防护详情:"
-            fail2ban-client status sshd
+            clear; log_info "Fail2Ban 总体状态:"; fail2ban-client status;
+            echo -e "\n$CYAN---$NC"; log_info "SSHD 防护详情:"; fail2ban-client status sshd;
             press_any_key
             ;;
         2)
-            clear
-            log_info "显示最近 50 条 Fail2Ban 日志:"
-            tail -50 /var/log/fail2ban.log
+            clear; log_info "显示最近 50 条 Fail2Ban 日志:"; tail -50 /var/log/fail2ban.log;
             press_any_key
             ;;
         3)
             read -p "请输入要解封的 IP 地址: " ip_to_unban
             if [ -n "$ip_to_unban" ]; then
-                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."
-                fail2ban-client set sshd unbanip "$ip_to_unban"
+                log_info "正在为 SSH 防护解封 IP: $ip_to_unban..."; fail2ban-client set sshd unbanip "$ip_to_unban"
             else
                 log_error "IP 地址不能为空！"
             fi
             press_any_key
             ;;
         4)
-            log_info "正在重启 Fail2Ban..."
-            systemctl restart fail2ban
-            sleep 1
-            log_info "服务已重启。"
+            log_info "正在重启 Fail2Ban..."; systemctl restart fail2ban; sleep 1; log_info "服务已重启。"
             ;;
         5)
             read -p "确定要卸载 Fail2Ban 吗？(y/N): " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                log_info "正在停止并卸载 Fail2Ban..."
-                systemctl stop fail2ban
-                systemctl disable fail2ban
-                if [ "$PKG_MANAGER" == "apt" ]; then
-                    apt-get remove --purge -y fail2ban
-                else
-                    "$PKG_MANAGER" remove -y fail2ban
-                fi
-                rm -rf /etc/fail2ban
-                log_info "✅ Fail2Ban 已卸载。"
-                press_any_key
-                return
+                log_info "正在停止并卸载 Fail2Ban..."; systemctl stop fail2ban; systemctl disable fail2ban
+                if [ "$PKG_MANAGER" == "apt" ]; then apt-get remove --purge -y fail2ban; else "$PKG_MANAGER" remove -y fail2ban; fi
+                rm -rf /etc/fail2ban; log_info "✅ Fail2Ban 已卸载."; press_any_key; return
             fi
             ;;
         0) return ;;
@@ -1746,24 +1693,16 @@ list_normal_users() {
 }
 
 manage_users_menu() {
-    ensure_dependencies "sudo" "shadow" # shadow provides useradd/usermod on some systems
+   ensure_dependencies "sudo" "shadow"
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 Sudo 用户管理                    $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 列出所有普通用户                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 创建一个新的 Sudo 用户                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${RED}删除一个用户及其主目录$NC                      $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
-
-        read -p "请输入选项: " choice
+        local title="Sudo 用户管理"
+        local -a options=(
+            "列出所有普通用户"
+            "创建一个新的 Sudo 用户"
+            "删除一个用户及其主目录 (删除)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
         case $choice in
         1)
             list_normal_users
@@ -1958,62 +1897,37 @@ setup_auto_updates() {
     log_warn "系统现在会自动安装重要的安全更新。"
     press_any_key
 }
-
+# =================================================
+#      性能测试 (performance_test_menu) - 优化版
+# =================================================
 performance_test_menu() {
      while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 VPS 性能测试                     $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. VPS 综合性能测试 (bench.sh)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 网络速度测试 (speedtest-cli)                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. ${GREEN}实时资源监控 (btop)${NC}                         $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. ${CYAN}流媒体解锁测试${NC}                             $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="VPS 性能测试"
+        local -a options=(
+            "VPS 综合性能测试 (bench.sh)"
+            "网络速度测试 (speedtest-cli)"
+            "实时资源监控 (btop)"
+            "流媒体解锁测试"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
-        1)
-            log_info "正在执行 bench.sh 脚本..."
-            ensure_dependencies "curl"
-            curl -Lso- bench.sh | bash
-            press_any_key
-            ;;
-        2)
-            log_info "正在执行 speedtest-cli..."
-            ensure_dependencies "speedtest-cli"
-            speedtest-cli
-            press_any_key
-            ;;
+        1) log_info "正在执行 bench.sh 脚本..."; ensure_dependencies "curl"; curl -Lso- bench.sh | bash; press_any_key ;;
+        2) log_info "正在执行 speedtest-cli..."; ensure_dependencies "speedtest-cli"; speedtest-cli; press_any_key ;;
         3)
-            log_info "正在启动 btop..."
-            local btop_dep="btop"
-            if [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
-                log_warn "在 CentOS/RHEL 上, btop 通常位于 EPEL 仓库。"
-                log_warn "如果安装失败，请先手动安装 epel-release 包。"
+            log_info "正在启动 btop...";
+            if [[ "$PKG_MANAGER" == "yum" || "$PKG_MANAGER" == "dnf" ]]; then
+                log_warn "在 CentOS/RHEL 上, btop 通常位于 EPEL 仓库。如果安装失败，请先手动安装 epel-release 包。"
             fi
-            ensure_dependencies "$btop_dep"
-            btop
+            ensure_dependencies "btop"; btop
             ;;
-        4)
-            log_info "正在执行流媒体解锁测试脚本 (by lmc999)..."
-            ensure_dependencies "bash" "curl" "jq"
-            bash <(curl -L -s https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/check.sh)
-            press_any_key
-            ;;
+        4) log_info "正在执行流媒体解锁测试脚本..."; ensure_dependencies "bash" "curl" "jq"; bash <(curl -L -s https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/check.sh); press_any_key ;;
         0) return ;;
         *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
-
 backup_directory() {
     clear
     log_info "开始手动备份指定目录..."
@@ -2102,23 +2016,19 @@ upload_file_to_transfer() {
     fi
     press_any_key
 }
-
+# =================================================
+#      文件分享 (file_sharing_menu) - 优化版
+# =================================================
 file_sharing_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                  简易文件分享                    $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. 启动临时 Web 服务器 (分享目录)              $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. 上传单个文件 (获取分享链接)                 $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        local title="简易文件分享"
+        local -a options=(
+            "启动临时 Web 服务器 (分享目录)"
+            "上传单个文件 (获取分享链接)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
 
-        read -p "请输入选项: " choice
         case $choice in
         1) start_temp_web_server ;;
         2) upload_file_to_transfer ;;
@@ -2127,43 +2037,39 @@ file_sharing_menu() {
         esac
     done
 }
-
-
+# =================================================
+#      实用工具菜单 (utility_tools_menu) - 优化版
+# =================================================
 utility_tools_menu() {
     while true; do
-        clear
-        echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-        echo -e "$CYAN║$WHITE                 实用工具 (增强)                  $CYAN║$NC"
-        echo -e "$CYAN╟─────────────────── $WHITE安全与加固$CYAN ───────────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   1. Fail2Ban 防护管理                           $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   2. Sudo 用户管理                               $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   3. 配置自动安全更新                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟───────────────── $WHITE性能 & 分享 & 备份$CYAN ─────────────╢$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   4. VPS 性能测试                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   5. 手动备份指定目录                            $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN║$NC   6. 简易文件分享                                $CYAN║$NC"
-        echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-        echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
-        echo -e "$CYAN║$NC   0. 返回主菜单                                  $CYAN║$NC"
-        echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
+        # 1. 定义菜单标题
+        local title="实用工具 (增强)"
 
-        read -p "请输入选项: " choice
+        # 2. 定义菜单选项数组
+        #    为保持简洁，我们移除了子标题，直接列出所有选项
+        local -a options=(
+            "Fail2Ban 防护管理"
+            "Sudo 用户管理"
+            "配置自动安全更新"
+            "VPS 性能测试"
+            "手动备份指定目录"
+            "简易文件分享"
+        )
+
+        # 3. 调用通用菜单函数
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        # 4. 根据用户选择执行相应操作
         case $choice in
-        1) fail2ban_menu ;;
-        2) manage_users_menu ;;
-        3) setup_auto_updates ;;
-        4) performance_test_menu ;;
-        5) backup_directory ;;
-        6) file_sharing_menu ;;
-        0) break ;;
-        *) log_error "无效选项！"; sleep 1 ;;
+            1) fail2ban_menu ;;
+            2) manage_users_menu ;;
+            3) setup_auto_updates ;;
+            4) performance_test_menu ;;
+            5) backup_directory ;;
+            6) file_sharing_menu ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
         esac
     done
 }
