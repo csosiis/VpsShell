@@ -332,11 +332,11 @@ system_health_check() {
     elif [ "$disk_usage_percent" -gt 65 ]; then disk_status_color="$YELLOW";
     else disk_status_color="$GREEN"; fi
     disk_info=$(df -h / | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}')
-    printf "$GREEN%-20s: ${disk_status_color}%s${NC}\n" "根目录磁盘" "$disk_info"
+    printf "$GREEN%-20s: ${disk_status_color}%s${NC}\n" "根目录磁盘  " "$disk_info"
 
     local mem_info
     mem_info=$(free -h | awk '/^Mem:/ {printf "%s / %s", $3, $2}')
-    printf "$GREEN%-20s: $WHITE%s${NC}\n" "内存使用" "$mem_info"
+    printf "$GREEN%-20s: $WHITE%s${NC}\n" "内存使用 " "$mem_info"
 
     # --- Docker 容器概览 ---
     if command -v docker &>/dev/null; then
@@ -346,7 +346,7 @@ system_health_check() {
         running_containers=$(docker ps --format '{{.Names}}' | wc -l)
         restarting_containers=$(docker ps --filter "status=restarting" --format '{{.Names}}' | tr '\n' ' ')
 
-        printf "$GREEN%-20s: $WHITE%s${NC}\n" "总容器数" "$total_containers"
+        printf "$GREEN%-20s: $WHITE%s${NC}\n" "总容器数 " "$total_containers"
         printf "$GREEN%-20s: ${GREEN}%s${NC}\n" "运行中" "$running_containers"
         if [ -n "$restarting_containers" ]; then
              printf "$GREEN%-20s: ${RED}%s${NC}\n" "异常(重启中)" "$restarting_containers"
