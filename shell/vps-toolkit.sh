@@ -315,7 +315,7 @@ _draw_menu() {
     # --- 新增的特殊页脚判断逻辑 ---
     if [[ "$instruction" == "main_footer" ]]; then
         # 为主菜单绘制特殊的页脚
-        local update_text="9. 更新此脚本"
+        local update_text="${GREEN}9. 更新此脚本${NC}"
         local exit_text="${RED}0. 退出脚本${NC}"
         # 使用 printf 和光标定位来确保对齐
         printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
@@ -334,26 +334,7 @@ _draw_menu() {
     # 4. 读取用户输入
     read -p "请输入选项: " choice_ref
 }
-# =================================================
-#           新增：系统健康巡检辅助函数
-# =================================================
-_check_service_status() {
-    local service_name="$1"
-    local display_name="$2"
-    local status_text
-    if systemctl is-active --quiet "$service_name"; then
-        status_text="${GREEN}● 运行中${NC}"
-    else
-        # 如果服务文件存在但未运行，则为不活动；如果文件不存在，则为未安装
-        if systemctl list-unit-files | grep -q "^${service_name}.service"; then
-            status_text="${RED}● 不活动${NC}"
-        else
-            status_text="${YELLOW}○ 未安装${NC}"
-        fi
-    fi
-    # 使用printf进行格式化对齐
-    printf "$CYAN║$NC  %-16s: %-29s $CYAN║$NC\n" "$display_name" "$status_text"
-}
+
 # =================================================
 #           修正版：系统健康巡检辅助函数
 # =================================================。
@@ -377,26 +358,11 @@ _get_service_status() {
     fi
 }
 # =================================================
-#     最终版：系统健康巡检主函数 (V6 - 系统信息查询风格)
+#     系统健康巡检主函数 (system_health_check) - 修正版
 # =================================================
 system_health_check() {
     clear
-    # 辅助函数：用于获取服务状态，但不打印 (此函数保持不变)
-    _get_service_status() {
-        local service_name="$1"
-        local -n status_text_ref=$2
-        local -n status_color_ref=$3
-        if systemctl is-active --quiet "$service_name"; then
-            status_text_ref="● 运行中"
-            status_color_ref=$GREEN
-        elif systemctl list-unit-files | grep -q "^${service_name}.service"; then
-            status_text_ref="● 不活动"
-            status_color_ref=$RED
-        else
-            status_text_ref="○ 未安装"
-            status_color_ref=$YELLOW
-        fi
-    }
+    # 注意：此处内部的 _get_service_status 函数定义已被移除，以使用全局函数
 
     echo -e "\n$CYAN-------------------- 系统健康巡检报告 ---------------------$NC"
 
