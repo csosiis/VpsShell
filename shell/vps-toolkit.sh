@@ -3293,7 +3293,7 @@ is_substore_installed_docker() {
         return 1
     fi
 }
-# --- Docker 版安装函数 (修正版) ---
+# --- Docker 版安装函数 (链接修正版) ---
 substore_do_install_docker() {
     # 1. 确保 Docker 已安装
     if ! _install_docker_and_compose; then
@@ -3373,10 +3373,8 @@ substore_do_install_docker() {
     docker_args+=("xream/sub-store")
 
     echo -e "\n${YELLOW}将要执行以下命令:${NC}"
-    # 使用 printf 安全地打印命令数组
     printf "docker "
     for arg in "${docker_args[@]}"; do
-        # 如果参数包含空格，则用引号括起来，以便于复制粘贴
         if [[ "$arg" == *" "* ]]; then
             printf "'%s' " "$arg"
         else
@@ -3386,7 +3384,6 @@ substore_do_install_docker() {
     echo -e "\n"
     read -p "确认无误后按 Enter 键继续..."
 
-    # 直接使用数组执行命令，无需 eval
     if docker "${docker_args[@]}"; then
         log_info "正在等待容器启动 (等待 5 秒)..."
         sleep 5
@@ -3394,9 +3391,9 @@ substore_do_install_docker() {
             log_info "✅ Sub-Store (Docker版) 安装并启动成功！"
             local public_ip
             public_ip=$(get_public_ip v4)
-            local backend_url_encoded
-            backend_url_encoded=$(echo -n "http://${public_ip}:${external_port}${backend_path}" | base64 -w0)
-            local final_url="http://${public_ip}:${external_port}/?api=${backend_url_encoded}"
+
+            local backend_url="http://${public_ip}:${external_port}${backend_path}"
+            local final_url="http://${public_ip}:${external_port}/subs?api=${backend_url}"
 
             echo -e "$CYAN-------------------- Sub-Store 访问信息 ---------------------$NC\n"
             log_info "请通过以下链接访问 (如果防火墙允许):"
@@ -3412,9 +3409,8 @@ substore_do_install_docker() {
                 if [ -n "$domain" ]; then
                     if setup_auto_reverse_proxy "$domain" "$external_port"; then
                         log_info "✅ 反向代理设置成功！请通过 https://$domain 访问。"
-                        local proxy_backend_url_encoded
-                        proxy_backend_url_encoded=$(echo -n "https://$domain$backend_path" | base64 -w0)
-                        local proxy_final_url="https://$domain/?api=$proxy_backend_url_encoded"
+                        local proxy_backend_url="https://$domain$backend_path"
+                        local proxy_final_url="https://$domain/subs?api=$proxy_backend_url"
                         echo -e "优化后的访问链接为: \n\n$YELLOW$proxy_final_url$NC\n"
                         echo "$domain" > "$data_dir/.proxy_domain_docker"
                     else
@@ -3555,12 +3551,12 @@ EOF
 substore_do_install() {
     clear
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
-    echo -e "$CYAN║$WHITE                 选择安装方式                   $CYAN║$NC"
+    echo -e "$CYAN║$WHITE                 选择安装方式                     $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN║$NC   1. ${GREEN}Docker 版安装 (推荐, 隔离性好)${NC}              $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
-    echo -e "$CYAN║$NC   2. 裸机版安装 (直接部署, 占用低)             $CYAN║$NC"
+    echo -e "$CYAN║$NC   2. 裸机版安装 (直接部署, 占用低)               $CYAN║$NC"
     echo -e "$CYAN║$NC                                                  $CYAN║$NC"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
     echo -e "$CYAN║$NC   0. 返回                                        $CYAN║$NC"
@@ -3702,6 +3698,12 @@ substore_view_access_link() {
         # Docker 版的访问链接逻辑
         clear
         log_info "正在检测 Sub-Store (Docker版) 访问信息..."
+        # 增加容器不存在的保护
+        if ! docker inspect sub-store &>/dev/null; then
+            log_error "Sub-Store Docker 容器不存在或已被删除！"
+            press_any_key
+            return
+        fi
         local container_info
         container_info=$(docker inspect sub-store)
         local external_port
@@ -3720,17 +3722,15 @@ substore_view_access_link() {
             local domain
             domain=$(cat "$data_dir/.proxy_domain_docker")
             log_info "检测到反向代理域名，请使用以下链接访问："
-            local proxy_backend_url_encoded
-            proxy_backend_url_encoded=$(echo -n "https://$domain$backend_path" | base64 -w0)
-            local proxy_final_url="https://$domain/?api=$proxy_backend_url_encoded"
+            local proxy_backend_url="https://$domain$backend_path"
+            local proxy_final_url="https://$domain/subs?api=$proxy_backend_url"
             echo -e "\n  $YELLOW$proxy_final_url$NC\n"
             echo -e "$CYAN-----------------------------------------------------------$NC"
         fi
 
         log_info "您也可以通过 IP 地址访问 (如果防火墙允许):"
-        local backend_url_encoded
-        backend_url_encoded=$(echo -n "http://${public_ip}:${external_port}${backend_path}" | base64 -w0)
-        local final_url="http://${public_ip}:${external_port}/?api=${backend_url_encoded}"
+        local backend_url="http://${public_ip}:${external_port}${backend_path}"
+        local final_url="http://${public_ip}:${external_port}/subs?api=${backend_url}"
         echo -e "\n  $YELLOW$final_url$NC\n"
         echo -e "$CYAN-----------------------------------------------------------$NC"
         press_any_key
