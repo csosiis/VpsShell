@@ -6163,26 +6163,77 @@ setup_auto_reverse_proxy() {
     return $status
 }
 # =================================================
-#           证书 & 反代 (新增的缺失函数)
+#           查看证书 (list_certificates) - V2.0 美化版
 # =================================================
-
-# (新增) 查看/列出所有证书
 list_certificates() {
     # 检查 certbot 命令是否存在
     if ! command -v certbot &>/dev/null; then
         log_error "Certbot 未安装，无法查看证书列表。"
+        press_any_key
         return
     fi
 
     clear
-    log_info "正在获取由 Certbot 管理的所有证书列表..."
-    echo -e "$CYAN----------------------------------------------------------------------$NC"
+    log_info "正在解析由 Certbot 管理的所有证书..."
 
-    # 直接执行 certbot certificates 命令，它会处理“找到证书”和“未找到证书”两种情况
-    # 并以友好的格式输出
-    certbot certificates
+    local certs_data
+    certs_data=$(certbot certificates 2>/dev/null) # 使用 2>/dev/null 忽略烦人的 OCSP 错误信息
 
-    echo -e "$CYAN----------------------------------------------------------------------$NC"
+    if [[ ! "$certs_data" =~ "Found the following certs:" ]]; then
+        log_warn "未找到任何由 Certbot 管理的证书。"
+        press_any_key
+        return
+    fi
+
+    echo -e "$CYAN┌────────────────────────────────────────────────────────────────────┐$NC"
+    echo -e "$CYAN│$WHITE                 SSL 证书状态概览                             $CYAN│$NC"
+    echo -e "$CYAN├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤$NC"
+
+    # 使用 awk 来解析和格式化输出
+    echo "$certs_data" | awk -v GREEN="$GREEN" -v YELLOW="$YELLOW" -v RED="$RED" -v NC="$NC" -v CYAN="$CYAN" -v WHITE="$WHITE" '
+    BEGIN {
+        cert_count = 0;
+    }
+    # 以 "Certificate Name:" 行为处理单元的开始
+    /Certificate Name:/ {
+        name = $3;
+        getline; # 读取下一行 (Domains)
+        sub(/^ *Domains: */, "");
+        domains = $0;
+        getline; # 读取下一行 (Expiry)
+        expiry_line = $0;
+
+        valid_days = 0;
+        # 从 "VALID: xx days" 中提取天数
+        if (match(expiry_line, /\(VALID: ([0-9]+) days\)/, arr)) {
+            valid_days = arr[1];
+        }
+        # 清理到期时间字符串，只保留日期和时间
+        sub(/ *\(VALID.*/, "", expiry_line);
+        sub(/^ *Expiry Date: /, "", expiry_line);
+
+        # 根据剩余天数设置颜色
+        color = GREEN;
+        if (valid_days < 30) {
+            color = RED;
+        } else if (valid_days < 60) {
+            color = YELLOW;
+        }
+
+        cert_count++;
+
+        # 格式化输出
+        printf("%s %-3s %-35s\n", CYAN"│"NC, cert_count".", WHITE name NC);
+        printf("%s   %-12s %s\n", CYAN"│"NC, "域名:", domains);
+        printf("%s   %-12s %s\n", CYAN"│"NC, "到期时间:", expiry_line);
+        printf("%s   %-12s %s%s 天%s\n", CYAN"│"NC, "剩余有效期:", color, valid_days, NC);
+        printf("%s╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌%s\n", CYAN"├"NC, CYAN"┤"NC);
+
+    }
+    ' | sed '$d' # 使用 sed 删除由最后一个分隔符产生的多余行
+
+    echo -e "$CYAN└────────────────────────────────────────────────────────────────────┘$NC"
+    press_any_key
 }
 # --- (新增) 仅申请证书的工作流函数 ---
 apply_ssl_certificate_only_workflow() {
@@ -6206,7 +6257,7 @@ apply_ssl_certificate_only_workflow() {
 # =================================================
 certificate_management_menu() {
     while true; do
-        local title="证书管理 & 网站反代 (v2.0)"
+        local title="证书管理 & 网站反代"
         local -a options=(
             "新建网站反代 (自动申请证书)"
             "仅为域名申请证书"
