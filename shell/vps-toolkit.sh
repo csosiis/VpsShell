@@ -241,17 +241,19 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           通用菜单绘制函数 (V16 - 特殊页脚最终版)
+#           通用菜单绘制函数 (V17 - 超级全局页脚)
 # =================================================
 _draw_menu() {
     local title_block="$1"
     local -n choice_ref=$2
     local instruction="$3"
-    local exit_text
 
-    if [[ "$instruction" == "exit" || "$instruction" == "main_footer" ]]; then
+    # 检查指令，如果是特殊指令则移动参数指针
+    if [[ "$instruction" == "main_footer" ]]; then
         shift 3
     else
+        # 所有子菜单将使用新的标准页脚，不再需要特殊指令
+        instruction="sub_footer"
         shift 2
     fi
     local -a options=("$@")
@@ -262,20 +264,19 @@ _draw_menu() {
     local border_char="║"
 
     _get_visual_width() {
+        # awk函数保持不变
         awk -v text="$1" 'BEGIN { w=0; for(i=1; i<=length(text); i++) { char = substr(text, i, 1); if (char ~ /^[ -~]$/) { w += 1; } else { w += 2; } } print w; }'
     }
 
     clear
 
-    # 1. 打印上边框和智能对齐的标题
+    # 1. 打印上边框和标题 (保持不变)
     echo -e "$CYAN╔══════════════════════════════════════════════════╗$NC"
     local title_line_num=0
     while IFS= read -r title_line; do
         if [ $title_line_num -eq 0 ]; then
-            local clean_title
-            clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
-            local title_width
-            title_width=$(_get_visual_width "$clean_title")
+            local clean_title=$(echo -e "$title_line" | sed 's/\x1b\[[0-9;]*m//g')
+            local title_width=$(_get_visual_width "$clean_title")
             local padding_left=$(((menu_width - title_width) / 2))
             local padding_right=$((menu_width - title_width - padding_left))
             printf "$CYAN%s%*s%b%*s%s$NC\n" "$border_char" "$padding_left" "" "$title_line" "$padding_right" "" "$border_char"
@@ -288,11 +289,10 @@ _draw_menu() {
 
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # 2. 打印菜单选项
+    # 2. 打印菜单选项 (保持不变)
     for i in "${!options[@]}"; do
         local option_text="${options[$i]}"
-        local rendered_option
-        rendered_option=$(echo -e "$option_text")
+        local rendered_option=$(echo -e "$option_text")
         local prefix_text
         printf -v prefix_text "  %2d. " "$((i + 1))"
         printf "$CYAN%s" "$border_char"
@@ -306,26 +306,31 @@ _draw_menu() {
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # --- 新增的特殊页脚判断逻辑 ---
+    # --- 【核心修改】页脚逻辑 ---
     if [[ "$instruction" == "main_footer" ]]; then
         # 为主菜单绘制特殊的页脚
         local update_text="${GREEN}9. 更新此脚本${NC}"
         local exit_text="${RED}0. 退出脚本${NC}"
-        # 使用 printf 和光标定位来确保对齐
         printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
         printf "\033[35G%b" "$exit_text" # 大致定位到第35列
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
-    else
-        # 为所有其他子菜单绘制标准页脚
-        if [[ "$instruction" == "exit" ]]; then exit_text="${RED}退出脚本${NC}"; else exit_text="返回"; fi
-        printf "$CYAN%s$NC  0. %b" "$border_char" "$exit_text"
+    else # instruction == "sub_footer"
+        # 为所有其他子菜单绘制新的、包含三个选项的全局页脚
+        local return_text="0. 返回"
+        local update_text="${GREEN}99. 更新${NC}"
+        local exit_text="${RED}00. 退出${NC}"
+
+        # 使用光标定位来确保完美对齐
+        printf "$CYAN%s$NC  %s" "$border_char" "$return_text"
+        printf "\033[24G%b" "$update_text"  # 定位到第24列
+        printf "\033[40G%b" "$exit_text"   # 定位到第40列
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     fi
     # --- 逻辑结束 ---
 
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-    # 4. 读取用户输入
+    # 4. 读取用户输入 (保持不变)
     read -p "请输入选项: " choice_ref
 }
 
