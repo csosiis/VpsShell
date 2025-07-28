@@ -5018,27 +5018,28 @@ download_maccms_source() {
     return 0
 }
 # =================================================================
-#           搭建苹果CMS (已优化用户体验)
+#           搭建苹果CMS (最终完整修复版)
 # =================================================================
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
-        press_any_key; return
+        press_any_key
+        return
     fi
     ensure_dependencies "unzip" "file" "curl"
 
-    # --- 变量定义 ---
     local project_dir db_root_password db_user_password web_port domain
 
-    # --- 收集信息 ---
     read -e -p "请输入苹果CMS的安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
+
     if [ -f "$project_dir/docker-compose.yml" ]; then
-        log_warn "检测到安装目录已存在 Docker 项目，请选择其他目录或先卸载。"; press_any_key; return 1;
+        log_warn "检测到安装目录已存在 Docker 项目，请选择其他目录或先卸载。"
+        press_any_key
+        return 1
     fi
 
-    # 【优化点1】密码在这里被读入或生成，但不再立刻显示
     read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password_input
     db_root_password=${db_root_password_input:-$(generate_random_password)}
     echo ""
@@ -5046,21 +5047,27 @@ install_maccms() {
     db_user_password=${db_user_password_input:-$(generate_random_password)}
     echo ""
 
-    read -p "请输入一个内部代理端口 (例如 8880，用于反代) [默认 8880]: " web_port_input
-    web_port=${web_port_input:-"8880"}
-    if ! check_port "$web_port"; then press_any_key; return; fi
+    # 【已修复】使用 while 循环处理端口输入
+    while true; do
+        read -p "请输入一个内部代理端口 (例如 8880，用于反代) [默认 8880]: " web_port_input
+        web_port=${web_port_input:-"8880"}
+        if check_port "$web_port"; then
+            break # 端口可用，跳出循环
+        else
+            # 端口被占用，提示用户后循环会继续
+            log_error "端口 $web_port 已被占用，请更换一个。"
+        fi
+    done
 
-    # --- 创建目录和文件 (无变化) ---
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
-    # ... (所有创建 supervisord.conf, Dockerfile, Nginx default.conf, docker-compose.yml 的代码保持不变) ...
-    # (此处省略大量配置文件生成代码，因为它们没有变化)
     log_info "正在创建 Supervisor 守护进程配置文件..."
     cat > "$project_dir/php/supervisord.conf" <<'EOF'
 [supervisord]
 nodaemon=true
 user=root
+
 [program:php-fpm]
 command=/usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/www.conf
 autostart=true
@@ -5072,26 +5079,80 @@ stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
-    log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
+
+    log_info "正在为 PHP 创建自定义配置文件 (Dockerfile)..."
+    # 【已修复】在 Dockerfile 中增加创建目录和授权的命令
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
-RUN apt-get update && apt-get install -y supervisor libfreetype6-dev libjpeg62-turbo-dev libpng-dev libzip-dev unzip && rm -rf /var/lib/apt/lists/*
-RUN sed -i 's#^error_log = .*#error_log = /proc/self/fd/2#' /usr/local/etc/php-fpm.conf \
-    && sed -i 's#;catch_workers_output = yes#catch_workers_output = yes#' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's#^php_admin_value\[error_log\] = .*#php_admin_value[error_log] = /proc/self/fd/2#' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's#^php_admin_flag\[log_errors\] = .*#php_admin_flag[log_errors] = on#' /usr/local/etc/php-fpm.d/www.conf
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
+
+# 安装 Supervisor 和其他依赖
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libzip-dev \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- 核心修复：创建日志目录并赋予 www-data 用户权限 ---
+RUN mkdir -p /usr/local/var/log && chown -R www-data:www-data /usr/local/var/log
+
+# 安装PHP扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
+
+# 复制 Supervisor 配置文件到镜像中
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# 设置容器启动时执行的命令为 Supervisor
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 EOF
+
+    local maccms_version
+    maccms_version=$(get_latest_maccms_tag)
+    if [ -z "$maccms_version" ]; then
+        log_error "获取 maccms 最新版本标签失败！"
+        press_any_key
+        return 1
+    fi
+    log_info "获取到最新版标签: $maccms_version"
+
+    if ! download_maccms_source "$maccms_version"; then
+        press_any_key
+        return 1
+    fi
+
+    unzip -q source.zip || { log_error "解压失败"; return 1; }
+    rm -f source.zip
+    local dir="maccms10-${maccms_version#v}"
+    if [ ! -d "$dir" ]; then
+        log_error "解压后目录不存在"
+        return 1
+    fi
+    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
+    rm -rf "$dir"
+
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
-    listen 80; server_name localhost; root /var/www/html; index index.php index.html index.htm;
-    location / { try_files $uri $uri/ /index.php?$query_string; }
-    location ~ \.php$ { include fastcgi_params; fastcgi_pass php:9000; fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; }
-    location ~ /\.ht { deny all; }
+    listen 80;
+    server_name localhost;
+    root /var/www/html;
+    index index.php index.html index.htm;
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass php:9000;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+    location ~ /\.ht {
+        deny all;
+    }
 }
 EOF
+
     cat >"$project_dir/docker-compose.yml" <<EOF
 services:
   db:
@@ -5103,54 +5164,59 @@ services:
       MYSQL_DATABASE: "maccms"
       MYSQL_USER: "maccms_user"
       MYSQL_PASSWORD: "$db_user_password"
-    volumes: [db_data:/var/lib/mysql]
-    networks: [maccms_net]
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - maccms_net
+
   php:
     build: ./php
     container_name: ${project_dir##*/}_php
-    volumes: [./source:/var/www/html]
+    volumes:
+      - ./source:/var/www/html
     restart: always
-    depends_on: [db]
-    networks: [maccms_net]
+    depends_on:
+      - db
+    networks:
+      - maccms_net
+
   nginx:
     image: nginx:1.21-alpine
     container_name: ${project_dir##*/}_nginx
-    ports: ["$web_port:80"]
-    volumes: [./source:/var/www/html, ./nginx/default.conf:/etc/nginx/conf.d/default.conf]
+    ports:
+      - "$web_port:80"
+    volumes:
+      - ./source:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     restart: always
-    depends_on: [php]
-    networks: [maccms_net]
+    depends_on:
+      - php
+    networks:
+      - maccms_net
+
 volumes:
   db_data:
+
 networks:
   maccms_net:
 EOF
 
-
-    # --- 下载和构建 (无变化) ---
-    local maccms_version; maccms_version=$(get_latest_maccms_tag)
-    if [ -z "$maccms_version" ]; then log_error "获取 maccms 最新版本标签失败！"; press_any_key; return 1; fi
-    log_info "获取到最新版标签: $maccms_version"
-    if ! download_maccms_source "$maccms_version"; then press_any_key; return 1; fi
-    unzip -q source.zip || { log_error "解压失败"; return 1; }
-    rm -f source.zip
-    local dir="maccms10-${maccms_version#v}";
-    if [ ! -d "$dir" ]; then log_error "解压后目录不存在"; return 1; fi
-    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
-    rm -rf "$dir"
-
     log_info "正在构建集成Supervisor的PHP镜像并启动所有服务..."
     log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
     docker compose up -d --build
+
+    log_info "等待容器初始化 (8秒)..."
     sleep 8
+
+    log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
+    log_info "正在检查服务最终状态..."
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
         log_error "最终检查发现 PHP 容器未能保持运行状态！"
         log_info "问题可能出在容器内部，以下是该容器的最后部分日志以供诊断:"
         echo -e "$CYAN-------------------- [${project_dir##*/}_php] 容器日志 ---------------------$NC"
-        # 使用 tail 显示最后20行，避免信息刷屏
         docker compose logs --no-log-prefix php | tail -n 20
         echo -e "$CYAN----------------------------------------------------------------------$NC"
         log_warn "请仔细检查上面的日志，常见的错误包括权限问题或PHP-FPM配置错误。"
@@ -5161,7 +5227,6 @@ EOF
     log_info "✅ 所有服务均已成功启动！"
     docker compose ps
 
-    # --- 【优化点2】最后的摘要信息 ---
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
     local install_url
     if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
@@ -5173,10 +5238,13 @@ EOF
             echo "$domain" > "$project_dir/.proxy_domain"
             install_url="https://$domain/install.php"
         else
-            log_error "反向代理设置失败！"; press_any_key; return 1;
+            log_error "反向代理设置失败！"
+            press_any_key
+            return 1
         fi
     else
-        local public_ip; public_ip=$(get_public_ip v4)
+        local public_ip
+        public_ip=$(get_public_ip v4)
         install_url="http://$public_ip:$web_port/install.php"
     fi
 
