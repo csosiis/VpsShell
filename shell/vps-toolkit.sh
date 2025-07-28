@@ -241,7 +241,7 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           通用菜单绘制函数 (V17 - 超级全局页脚)
+#           通用菜单绘制函数 (V18 - 内置全局指令)
 # =================================================
 _draw_menu() {
     local title_block="$1"
@@ -306,32 +306,38 @@ _draw_menu() {
     printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     echo -e "$CYAN╟──────────────────────────────────────────────────╢$NC"
 
-    # --- 【核心修改】页脚逻辑 ---
+    # 页脚逻辑 (保持不变)
     if [[ "$instruction" == "main_footer" ]]; then
-        # 为主菜单绘制特殊的页脚
         local update_text="${GREEN}9. 更新此脚本${NC}"
         local exit_text="${RED}0. 退出脚本${NC}"
         printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
-        printf "\033[35G%b" "$exit_text" # 大致定位到第35列
+        printf "\033[35G%b" "$exit_text"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     else # instruction == "sub_footer"
-        # 为所有其他子菜单绘制新的、包含三个选项的全局页脚
         local return_text="0. 返回"
         local update_text="${GREEN}99. 更新${NC}"
         local exit_text="${RED}00. 退出${NC}"
-
-        # 使用光标定位来确保完美对齐
         printf "$CYAN%s$NC  %s" "$border_char" "$return_text"
-        printf "\033[24G%b" "$update_text"  # 定位到第24列
-        printf "\033[40G%b" "$exit_text"   # 定位到第40列
+        printf "\033[24G%b" "$update_text"
+        printf "\033[40G%b" "$exit_text"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
     fi
-    # --- 逻辑结束 ---
 
     echo -e "$CYAN╚══════════════════════════════════════════════════╝$NC"
 
-    # 4. 读取用户输入 (保持不变)
+    # 4. 读取用户输入
     read -p "请输入选项: " choice_ref
+
+    # --- 【核心修改】在这里直接处理全局指令 ---
+    # 注意：这里的 choice_ref 是变量本身，而不是它的值
+    case $choice_ref in
+        99) do_update_script ;; # 执行更新并重启脚本
+        00)
+            log_info "脚本退出。"
+            exit 0
+            ;;
+    esac
+    # 对于其他输入 (包括 0), 函数会正常返回，由调用它的子菜单去处理
 }
 
 # =================================================
