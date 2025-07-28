@@ -5888,19 +5888,115 @@ apply_ssl_certificate() {
     fi
     return $?
 }
+# =================================================================
+#           证书 & 反代 (新增辅助函数)
+# =================================================================
 
-# --- (优化) 增加HSTS头 ---
+# 辅助函数：确保 DH 参数文件存在，只在首次需要时生成
+_ensure_dh_param() {
+    local dh_param_file="/etc/nginx/ssl/dhparam.pem"
+    if [ ! -f "$dh_param_file" ]; then
+        log_info "首次配置Nginx反代，正在生成 DH (Diffie-Hellman) 参数文件 (2048位)..."
+        log_warn "这可能需要几分钟时间，这期间脚本会暂停，请耐心等待..."
+        # 确保目录存在
+        mkdir -p /etc/nginx/ssl
+        if openssl dhparam -out "$dh_param_file" 2048; then
+            log_info "✅ DH 参数文件已成功生成于 $dh_param_file"
+        else
+            log_error "DH 参数文件生成失败！后续的 Nginx 配置可能无法加载。"
+            # 即使失败也允许继续，但Nginx reload时会报错
+        fi
+    fi
+}
+
+# 辅助函数：在配置完成后测试反向代理连接
+_test_reverse_proxy_connection() {
+    local domain="$1"
+    if [ -z "$domain" ]; then return; fi
+
+    log_info "正在对 https://$domain 进行最终连接测试..."
+    # 使用 curl -I 获取响应头，-s 静默模式，-L 跟随重定向，-m 8 设置8秒超时
+    local http_status
+    http_status=$(curl -o /dev/null -s -w "%{http_code}" -L -m 8 --insecure "https://$domain")
+
+    # 成功的状态码通常是 2xx (成功), 3xx (重定向), 401/403 (需要认证), 甚至 404 (页面不存在但服务通了)
+    if [[ "$http_status" -ge 200 && "$http_status" -lt 500 ]]; then
+        log_info "✅ 连接测试成功！HTTP 状态码: $http_status。您的网站应该可以正常访问了。"
+    else
+        log_error "连接测试失败！HTTP 状态码: $http_status。"
+        log_warn "这可能由以下原因导致："
+        log_warn "  1. 本机防火墙或云服务商安全组未放行 443 端口。"
+        log_warn "  2. 后端应用 (端口 $local_port) 未能正常启动或响应。"
+        log_warn "  3. 域名解析尚未在全球生效。"
+    fi
+}
+# (这是修改后的函数，增加了模板选择逻辑)
 _configure_nginx_proxy() {
     local domain="$1"
     local port="$2"
+    local template_type="$3" # 接收第三个参数
     local conf_path="/etc/nginx/sites-available/$domain.conf"
-    log_info "正在为 $domain -> http://127.0.0.1:$port 创建 Nginx 配置文件..."
+
+    _ensure_dh_param
+
+    log_info "正在为 $domain -> http://127.0.0.1:$port 创建 Nginx 配置文件 (使用 '$template_type' 模板)..."
     local cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
     local key_path="/etc/letsencrypt/live/$domain/privkey.pem"
     if [ ! -f "$cert_path" ]; then
         log_error "未找到预期的证书文件，无法配置 HTTPS。"
         return 1
     fi
+
+    # 预先定义通用代理头，避免重复
+    local proxy_headers_config="
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \"upgrade\";"
+
+    # === 根据模板类型，定义不同的 location 配置块 ===
+    local location_config
+    if [ "$template_type" == "cache" ]; then
+        # 静态资源缓存优化模板
+        location_config=$(cat <<LOCATION
+    location / {
+        proxy_pass http://127.0.0.1:$port;
+        $proxy_headers_config
+    }
+
+    # 为常见的静态文件类型启用浏览器缓存
+    location ~* \.(?:css|js|gif|ico|jpeg|jpg|png|svg|webp|woff|woff2)$ {
+        proxy_pass http://127.0.0.1:$port;
+        $proxy_headers_config
+
+        # 设置缓存有效期为7天
+        expires 7d;
+
+        # 移除一些不必要的头信息
+        proxy_hide_header "Set-Cookie";
+        proxy_ignore_headers "Cache-Control" "Expires";
+
+        # 添加缓存控制头
+        add_header Pragma public;
+        add_header Cache-Control "public";
+    }
+LOCATION
+)
+    else
+        # 默认通用模板
+        location_config=$(cat <<LOCATION
+    location / {
+        proxy_pass http://127.0.0.1:$port;
+        $proxy_headers_config
+    }
+LOCATION
+)
+    fi
+    # === location 配置定义结束 ===
+
     cat >"$conf_path" <<EOF
 server {
     listen 80;
@@ -5914,41 +6010,41 @@ server {
     listen [::]:443 ssl http2;
     server_name $domain;
 
+    # --- SSL 证书与安全配置 (此部分不变) ---
     ssl_certificate $cert_path;
     ssl_certificate_key $key_path;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
-
-    # --- (新增) HSTS 头，增强安全性 ---
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    ssl_dhparam /etc/nginx/ssl/dhparam.pem;
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
 
     client_max_body_size 512M;
 
-    location / {
-        proxy_pass http://127.0.0.1:$port;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
+    # === 插入动态生成的 location 配置 ===
+    $location_config
 }
 EOF
+
     if [ ! -L "/etc/nginx/sites-enabled/$domain.conf" ]; then
         ln -s "$conf_path" "/etc/nginx/sites-enabled/"
     fi
     log_info "正在测试并重载 Nginx 配置...\n"
     if ! nginx -t; then
-        log_error "Nginx 配置测试失败！请手动检查。"
+        log_error "Nginx 配置测试失败！请手动执行 'nginx -t' 查看错误详情。"
+        rm -f "$conf_path" "/etc/nginx/sites-enabled/$domain.conf"
         return 1
     fi
     systemctl reload nginx
     log_info "✅ Nginx 反向代理配置成功！"
     return 0
 }
-
 _configure_caddy_proxy() {
     local domain="$1"
     local port="$2"
@@ -5972,17 +6068,17 @@ _configure_caddy_proxy() {
     log_info "✅ Caddy 反向代理配置成功！Caddy 会自动处理 HTTPS。"
     return 0
 }
-
-# --- (重写) 增加端口检查、操作前确认、Web服务器选择 ---
+# (这是重写后的函数，增加了模板选择和自动连接测试)
 setup_auto_reverse_proxy() {
     local domain_input="$1"
     local local_port="$2"
     local web_server_choice=""
+    local proxy_template_choice="default" # 默认为通用模板
 
     clear
     log_info "欢迎使用通用反向代理设置向导。\n"
 
-    # --- 收集和验证输入 ---
+    # --- 收集和验证输入 (此部分不变) ---
     if [ -z "$domain_input" ]; then
         while true; do
             read -p "请输入您要设置反代的域名: " domain_input
@@ -5997,9 +6093,6 @@ setup_auto_reverse_proxy() {
             read -p "请输入要代理到的本地端口 (例如 8080): " local_port
             if [[ ! "$local_port" =~ ^[0-9]+$ ]] || [ "$local_port" -lt 1 ] || [ "$local_port" -gt 65535 ]; then
                 log_error "端口号必须是 1-65535 之间的数字。"
-            elif ! check_port "$local_port"; then
-                # check_port 失败时会自己打印错误，这里不用重复
-                :
             else
                 break
             fi
@@ -6008,12 +6101,12 @@ setup_auto_reverse_proxy() {
         log_info "将代理到预设的本地端口: $local_port"
     fi
 
-    # --- (新增) Web服务器选择逻辑 ---
-    local has_nginx=$(command -v nginx &>/dev/null)
-    local has_caddy=$(command -v caddy &>/dev/null)
+    # --- Web服务器选择逻辑 (此部分不变) ---
+    local has_nginx; has_nginx=$(command -v nginx &>/dev/null)
+    local has_caddy; has_caddy=$(command -v caddy &>/dev/null)
 
     if [ -n "$has_nginx" ] && [ -n "$has_caddy" ]; then
-        echo -e "\n检测到您同时安装了 Nginx 和 Caddy，请选择使用哪一个：\n  1. Nginx\n  2. Caddy\n"
+        echo -e "\n检测到您同时安装了 Nginx 和 Caddy，请选择使用哪一个：\n  1. Nginx (推荐)\n  2. Caddy\n"
         read -p "请输入选项: " server_choice_num
         if [ "$server_choice_num" == "2" ]; then web_server_choice="caddy"; else web_server_choice="nginx"; fi
     elif [ -n "$has_nginx" ]; then
@@ -6024,23 +6117,39 @@ setup_auto_reverse_proxy() {
         log_warn "未检测到任何 Web 服务器。将为您自动安装 Nginx..."
         ensure_dependencies "nginx"
         if command -v nginx &>/dev/null; then web_server_choice="nginx"; else
-            log_error "Nginx 安装失败，无法继续。"
-            press_any_key
-            return 1
+            log_error "Nginx 安装失败，无法继续。"; press_any_key; return 1;
         fi
     fi
     log_info "将使用 [$web_server_choice] 进行反向代理配置。"
 
-    # --- (新增) 操作前确认 ---
+    # === 新增：如果使用 Nginx，则询问模板类型 ===
+    if [ "$web_server_choice" == "nginx" ]; then
+        echo ""
+        echo -e "${CYAN}请为 Nginx 选择反代模板类型：${NC}"
+        echo "  1. 通用反代 (适用于大多数应用, 默认)"
+        echo "  2. 静态资源缓存优化 (适用于博客、论坛等内容网站)"
+        read -p "请输入选项 [1-2, 默认: 1]: " template_num
+        if [ "$template_num" == "2" ]; then
+            proxy_template_choice="cache"
+        fi
+        log_info "已选择模板: $proxy_template_choice"
+    fi
+    # === 新增逻辑结束 ===
+
+    # --- 操作前确认 ---
     echo ""
     log_warn "----------- 操作确认 -----------"
     log_warn "  域名: $domain_input"
     log_warn "  本地端口: $local_port"
     log_warn "  Web 服务器: $web_server_choice"
+    if [ "$web_server_choice" == "nginx" ]; then
+      log_warn "  Nginx 模板: $proxy_template_choice"
+    fi
     log_warn "--------------------------------"
     read -p "请确认以上信息无误，是否继续执行？(y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        log_info "操作已取消。"; press_any_key; return;
+        log_info "操作已取消。";
+        if [ -n "$1" ]; then return 1; else press_any_key; return; fi
     fi
 
     # --- 执行核心逻辑 ---
@@ -6053,12 +6162,17 @@ setup_auto_reverse_proxy() {
             log_error "证书处理失败，无法继续配置 Nginx 反代。"
             status=1
         else
-            _configure_nginx_proxy "$domain_input" "$local_port"
+            # 将模板选择传递给配置函数
+            _configure_nginx_proxy "$domain_input" "$local_port" "$proxy_template_choice"
             status=$?
         fi
     fi
 
-    # 如果是独立调用此函数，则需要暂停
+    # --- 连接测试 (此部分不变) ---
+    if [ "$status" -eq 0 ]; then
+        _test_reverse_proxy_connection "$domain_input"
+    fi
+
     if [ -z "$1" ]; then
         press_any_key
     fi
