@@ -5772,22 +5772,56 @@ apply_ssl_certificate() {
     return $?
 }
 # =================================================================
+#           新增：动态旋转光标辅助函数
+# =================================================================
+_spinner() {
+    local command_to_run=("$@") # 将所有参数视为一个命令
+    local pid
+    local spinner_chars="|/-\\"
+    # 隐藏光标
+    tput civis
+    # 在后台执行传入的命令，并将输出重定向到/dev/null
+    "${command_to_run[@]}" &> /dev/null &
+    pid=$!
+
+    # 等待命令开始执行
+    sleep 0.1
+
+    while kill -0 $pid 2>/dev/null; do
+        for (( i=0; i<${#spinner_chars}; i++ )); do
+            echo -ne "${GREEN}${spinner_chars:$i:1}${NC}"
+            echo -ne "\r" # 光标返回行首
+            sleep 0.1
+        done
+    done
+
+    # 恢复光标
+    tput cnorm
+
+    # 清理行并检查命令的最终退出状态
+    echo -ne " \r"
+    wait $pid
+    return $?
+}
+# =================================================================
 #           证书 & 反代 (新增辅助函数)
 # =================================================================
-
-# 辅助函数：确保 DH 参数文件存在，只在首次需要时生成
 _ensure_dh_param() {
     local dh_param_file="/etc/nginx/ssl/dhparam.pem"
     if [ ! -f "$dh_param_file" ]; then
+        # 移除了旧的 log_warn，新的提示由 _spinner 函数处理
         log_info "首次配置Nginx反代，正在生成 DH (Diffie-Hellman) 参数文件 (2048位)..."
-        log_warn "这可能需要几分钟时间，这期间脚本会暂停，请耐心等待..."
-        # 确保目录存在
+        echo -e "${YELLOW}这可能需要几分钟时间，请耐心等待...${NC}"
+
         mkdir -p /etc/nginx/ssl
-        if openssl dhparam -out "$dh_param_file" 2048; then
+
+        # 【核心修改】调用 _spinner 函数来执行耗时操作
+        # 将命令和所有参数直接传递给 _spinner
+        if _spinner openssl dhparam -out "$dh_param_file" 2048; then
             log_info "✅ DH 参数文件已成功生成于 $dh_param_file"
         else
-            log_error "DH 参数文件生成失败！后续的 Nginx 配置可能无法加载。"
-            # 即使失败也允许继续，但Nginx reload时会报错
+            # 如果 _spinner 返回非0状态码，说明命令执行失败
+            log_error "DH 参数文件生成失败！"
         fi
     fi
 }
