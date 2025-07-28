@@ -4518,7 +4518,198 @@ docker_image_menu() {
     done
 }
 # =================================================
-#      Docker 主菜单 (docker_manage_menu) - 优化版
+#      新增：Docker Compose 项目管理
+# =================================================
+docker_compose_menu() {
+    while true; do
+        clear
+        log_info "正在扫描 /root 目录下的 Docker Compose 项目..."
+
+        # 扫描/root下一级的目录，查找 docker-compose.yml 文件
+        local projects=()
+        local project_paths=()
+        while IFS= read -r compose_file; do
+            local project_path
+            project_path=$(dirname "$compose_file")
+            local project_name
+            project_name=$(basename "$project_path")
+            projects+=("$project_name (位于 $project_path)")
+            project_paths+=("$project_path")
+        done < <(find /root -maxdepth 2 -name "docker-compose.yml")
+
+        if [ ${#projects[@]} -eq 0 ]; then
+            log_warn "在 /root 目录下未找到任何 Docker Compose 项目。"
+            press_any_key
+            return
+        fi
+
+        local title="选择要管理的 Docker Compose 项目"
+        local choice
+        _draw_menu "$title" choice "${projects[@]}"
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -gt 0 ] && [ "$choice" -le ${#projects[@]} ]; then
+            local selected_path="${project_paths[$((choice-1))]}"
+            manage_single_compose_project "$selected_path"
+        elif [ "$choice" -eq 0 ]; then
+            break
+        else
+            log_error "无效选项！"; sleep 1
+        fi
+    done
+}
+
+manage_single_compose_project() {
+    local project_path="$1"
+    local project_name
+    project_name=$(basename "$project_path")
+
+    while true; do
+        # 确保我们在正确的项目目录中执行命令
+        cd "$project_path" || { log_error "无法进入目录 $project_path"; press_any_key; return; }
+
+        # 获取项目状态
+        local project_status
+        # 使用 docker compose ps 并检查输出是否包含 "running" 或 "up"
+        if docker compose ps 2>/dev/null | grep -q -E "(running|up)"; then
+            project_status="${GREEN}● 运行中${NC}"
+        else
+            project_status="${RED}● 已停止${NC}"
+        fi
+
+        local title="管理项目: $project_name\n  路径: $project_path\n  状态: $project_status"
+        local -a options=(
+            "启动或更新项目 (up -d --pull always)"
+            "停止项目 (stop)"
+            "停止并移除容器 (down)"
+            "查看实时日志 (logs -f)"
+            "拉取最新镜像 (pull)"
+            "强制重新构建镜像 (build --no-cache)"
+            "编辑 docker-compose.yml 文件 (nano)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        case $choice in
+            1) log_info "正在启动/更新..."; docker compose up -d --pull always ;;
+            2) log_info "正在停止..."; docker compose stop ;;
+            3) log_info "正在停止并移除容器..."; docker compose down ;;
+            4) clear; log_info "按 Ctrl+C 退出日志查看"; docker compose logs -f ;;
+            5) log_info "正在拉取最新镜像..."; docker compose pull ;;
+            6) log_info "正在强制重新构建..."; docker compose build --no-cache ;;
+            7)
+                if command -v nano &>/dev/null; then
+                    nano docker-compose.yml
+                else
+                    log_error "未找到 nano 编辑器，请先安装。"
+                fi
+                ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+        # 对非交互式操作进行暂停，以便用户看到命令输出
+        if [[ "$choice" -ne 0 && "$choice" -ne 4 && "$choice" -ne 7 ]]; then
+             press_any_key
+        fi
+    done
+    cd - > /dev/null # 安全地返回之前的目录
+}
+# =================================================
+#      新增：Docker 数据卷管理
+# =================================================
+
+# 核心备份函数
+backup_docker_volume() {
+    clear
+    log_info "当前所有 Docker 数据卷:"
+    docker volume ls
+    echo ""
+
+    read -p "请输入要备份的数据卷名称: " volume_name
+    if [ -z "$volume_name" ]; then log_error "数据卷名称不能为空！"; press_any_key; return; fi
+
+    # 检查数据卷是否存在
+    if ! docker volume inspect "$volume_name" &>/dev/null; then
+        log_error "数据卷 '$volume_name' 不存在！"
+        press_any_key
+        return
+    fi
+
+    local backup_dest="/root/docker_backups"
+    mkdir -p "$backup_dest"
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_filename="${volume_name}_${timestamp}.tar.gz"
+    local full_backup_path="$backup_dest/$backup_filename"
+
+    log_info "准备将数据卷 '$volume_name' 备份到 '$full_backup_path' ..."
+
+    # 使用一个轻量的 alpine 容器来执行备份，避免在本机安装不必要的工具
+    # --rm: 容器执行完毕后自动删除
+    # -v volume_name:/volume_data:ro : 将目标数据卷以只读方式挂载到容器的 /volume_data 目录
+    # -v /local/path:/backup_target : 将本机的备份目录挂载到容器的 /backup_target 目录
+    # alpine tar ... : 在容器内执行 tar 命令进行压缩
+    docker run --rm \
+        -v "${volume_name}:/volume_data:ro" \
+        -v "${backup_dest}:/backup_target" \
+        alpine \
+        tar -czf "/backup_target/${backup_filename}" -C /volume_data .
+
+    if [ -f "$full_backup_path" ]; then
+        log_info "✅ 备份成功！文件大小: $(du -sh "$full_backup_path" | awk '{print $1}')"
+    else
+        log_error "备份过程中发生错误！请检查 Docker 是否能正常运行以及路径权限。"
+    fi
+    press_any_key
+}
+
+# 数据卷管理主菜单
+docker_volume_menu() {
+    while true; do
+        local title="Docker 数据卷管理"
+        local -a options=(
+            "列出所有数据卷"
+            "备份一个指定的数据卷"
+            "清理所有未使用的数据卷 (安全)"
+            "删除一个指定的数据卷 (危险)"
+        )
+        local choice
+        _draw_menu "$title" choice "${options[@]}"
+
+        case $choice in
+            1) clear; log_info "所有 Docker 数据卷:"; docker volume ls; press_any_key ;;
+            2) backup_docker_volume ;;
+            3)
+                read -p "这将删除所有当前未被任何容器使用的数据卷，确定吗？ (y/N): " confirm
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    docker volume prune -af
+                    log_info "清理完成。"
+                else
+                    log_info "操作已取消。"
+                fi
+                press_any_key
+                ;;
+            4)
+                clear
+                docker volume ls
+                echo ""
+                read -p "请输入要删除的数据卷名称: " vol_to_del
+                if [ -n "$vol_to_del" ]; then
+                    read -p "警告：删除数据卷 '$vol_to_del' 将永久丢失其数据！确定吗？ (y/N): " confirm_del
+                    if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
+                        docker volume rm "$vol_to_del"
+                    else
+                        log_info "操作已取消。"
+                    fi
+                fi
+                press_any_key
+                ;;
+            0) break ;;
+            *) log_error "无效选项！"; sleep 1 ;;
+        esac
+    done
+}
+# =================================================
+#      Docker 主菜单 (docker_manage_menu) - 优化版 V2
 # =================================================
 docker_manage_menu() {
     while true; do
@@ -4548,10 +4739,27 @@ docker_manage_menu() {
                 DOCKER_STATUS_COLOR="$RED● 不活动$NC"
             fi
 
-            local title="Docker 通用管理\n  当前状态: $DOCKER_STATUS_COLOR"
+            # === 新增：获取 Docker 概览信息 ===
+            local running_containers
+            running_containers=$(docker ps --format '{{.Names}}' 2>/dev/null | wc -l)
+            local total_containers
+            total_containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null | wc -l)
+            # 使用更可靠的方式获取磁盘占用，并处理 docker system df 可能失败的情况
+            local disk_usage
+            disk_usage=$(docker system df 2>/dev/null | grep "Total Docker disk usage" | awk '{print $5, $6}')
+            if [ -z "$disk_usage" ]; then
+                disk_usage="查询失败"
+            fi
+            # === 信息获取结束 ===
+
+            # === 修改：构建包含新信息的多行标题 ===
+            local title="Docker 通用管理\n  状态: $DOCKER_STATUS_COLOR | 容器: ${GREEN}$running_containers${NC}/$total_containers | 占用: $disk_usage"
+
             local -a options=(
-                "${GREEN}容器管理 (启停/删除/日志)${NC}"
+                "容器管理 (启停/删除/日志)"
+                "${GREEN}Compose 项目管理${NC}"
                 "镜像管理 (删除/清理)"
+                "${YELLOW}数据卷管理 (备份/清理)${NC}"
                 "清理 Docker 系统 (释放空间)"
                 "安装 Portainer 图形化管理面板"
                 "${RED}完全卸载Docker (卸载)${NC}"
@@ -4561,10 +4769,12 @@ docker_manage_menu() {
 
             case $choice in
             1) docker_container_menu ;;
-            2) docker_image_menu ;;
-            3) docker_prune_system ;;
-            4) install_portainer ;;
-            5) uninstall_docker ;;
+            2) docker_compose_menu ;;
+            3) docker_image_menu ;;
+            4) docker_volume_menu ;;
+            5) docker_prune_system ;;
+            6) install_portainer ;;
+            7) uninstall_docker ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
             esac

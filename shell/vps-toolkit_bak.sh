@@ -2278,7 +2278,11 @@ _ensure_time_accuracy() {
     fi
     return 0
 }
-_singbox_handle_reality_setup() {
+# =================================================
+#           函数：自动生成 REALITY 参数 (新增)
+#  (此函数替代 _singbox_handle_reality_setup)
+# =================================================
+_singbox_generate_reality_params_auto() {
     # --- 确保时间准确 ---
     _ensure_time_accuracy
 
@@ -2290,13 +2294,13 @@ _singbox_handle_reality_setup() {
     local -n short_id_ref=$5
 
     clear
-    log_info "正在配置 VLESS + REALITY..."
+    log_info "正在自动配置 VLESS + REALITY 参数..."
     if ! command -v sing-box &>/dev/null; then
         log_error "未找到 sing-box 命令，无法生成 REALITY 密钥对。"
         return 1
     fi
 
-    log_info "正在生成 REALITY 密钥对..."
+    log_info "--> 步骤 1/5: 正在生成 REALITY 密钥对..."
     local key_pair
     key_pair=$(sing-box generate reality-keypair)
     private_key_ref=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}')
@@ -2306,56 +2310,53 @@ _singbox_handle_reality_setup() {
         log_error "REALITY 密钥对生成失败！"
         return 1
     fi
-    log_info "✅ 密钥对生成成功！"
-    echo -e "${GREEN}公钥 (PublicKey):$NC $public_key_ref"
-    echo -e "${RED}私钥 (PrivateKey):$NC $private_key_ref"
+    log_info "    密钥对生成成功！"
     echo ""
 
-    # 选择连接地址 (IP)
-    local ipv4_addr=$(get_public_ip v4)
-    local ipv6_addr=$(get_public_ip v6)
-    if [ -n "$ipv4_addr" ] && [ -n "$ipv6_addr" ]; then
-        echo -e "\n请选择用于节点链接的地址：\n\n1. IPv4: $ipv4_addr\n\n2. IPv6: $ipv6_addr\n"
-        read -p "请输入选项 (1-2): " ip_choice
-        if [ "$ip_choice" == "2" ]; then connect_addr_ref="$ipv6_addr"; else connect_addr_ref="$ipv4_addr"; fi
-    elif [ -n "$ipv4_addr" ]; then log_info "将自动使用 IPv4 地址。"; connect_addr_ref="$ipv4_addr";
-    elif [ -n "$ipv6_addr" ]; then log_info "将自动使用 IPv6 地址。"; connect_addr_ref="[$ipv6_addr]";
-    else log_error "无法获取任何公网 IP 地址！"; return 1; fi
-
-    # --- **核心优化**：获取并验证伪装域名 (serverName) ---
-    while true; do
-        read -p "请输入用于伪装的域名 (serverName) [默认: www.microsoft.com]: " server_name_input
-        server_name_ref=${server_name_input:-"www.microsoft.com"}
-
-        log_info "正在测试与伪装域名 ($server_name_ref) 的连通性..."
-        # 使用curl测试HTTPS连接，-m 5设置5秒超时
-        # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
-        if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
-            log_info "✅ 连通性测试通过。"
-            break
+    log_info "--> 步骤 2/5: 正在自动选择连接地址..."
+    local ipv4_addr
+    ipv4_addr=$(get_public_ip v4)
+    if [ -n "$ipv4_addr" ]; then
+        log_info "    检测到 IPv4 地址，将优先使用：$ipv4_addr"
+        connect_addr_ref="$ipv4_addr"
+    else
+        local ipv6_addr
+        ipv6_addr=$(get_public_ip v6)
+        if [ -n "$ipv6_addr" ]; then
+            log_warn "    未检测到 IPv4 地址，将使用 IPv6 地址：$ipv6_addr"
+            # IPv6 地址在 URL 中需要用方括号括起来
+            connect_addr_ref="[$ipv6_addr]"
         else
-            log_error "无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
-            log_warn "请检查域名拼写，或更换一个可从本机访问的域名 (如 www.apple.com, www.microsoft.com)。"
-            echo ""
+            log_error "无法获取任何公网 IP 地址！"
+            return 1
         fi
-    done
-    # --- **优化结束** ---
+    fi
+    echo ""
 
-    # 自动生成并验证 short_id
-    while true; do
-        local random_short_id=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
-        echo -e -n "请输入 short_id [回车则使用: ${GREEN}${random_short_id}${NC}]: "
-        read short_id_input
-        short_id_input=${short_id_input:-$random_short_id}
-        if [[ "$short_id_input" =~ ^[0-9a-fA-F]*$ ]]; then
-            short_id_ref=${short_id_input}
-            break
-        else
-            log_error "输入无效！short_id 只能包含 0-9 和 a-f 之间的字符，请重新输入。"
-        fi
-    done
+    log_info "--> 步骤 3/5: 正在设置并验证伪装域名 (serverName)..."
+    # 硬编码伪装域名
+    server_name_ref="www.microsoft.com"
+    log_info "    将使用默认伪装域名: $server_name_ref"
+    log_info "    正在测试与伪装域名的连通性..."
+    # 使用curl测试HTTPS连接，-m 5设置5秒超时
+    # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
+    if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
+        log_info "    ✅ 连通性测试通过。"
+    else
+        log_error "    无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
+        log_warn "    请检查服务器网络或更换一个可从本机访问的域名 (如 www.apple.com)。"
+        # 即使失败也继续，但给出强烈警告
+    fi
+    echo ""
 
-    log_info "REALITY 配置信息收集完毕。"
+
+    log_info "--> 步骤 4/5: 正在自动生成 short_id..."
+    short_id_ref=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
+    log_info "    已生成随机 short_id: $short_id_ref"
+    echo ""
+
+    log_info "--> 步骤 5/5: 参数自动配置完成！"
+    sleep 2
     return 0
 }
 _singbox_handle_certificate_setup() {
@@ -2512,7 +2513,7 @@ _singbox_build_protocol_config_and_link() {
     esac
 }
 # =================================================
-#           函数: 节点添加总指挥 (增强版)
+#           函数：节点添加总指挥
 # =================================================
 singbox_add_node_orchestrator() {
     ensure_dependencies "jq" "uuid-runtime" "curl" "openssl"
@@ -2527,19 +2528,20 @@ singbox_add_node_orchestrator() {
 
     # --- 核心逻辑分支：判断是配置 REALITY 还是其他 TLS 协议 ---
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        # 调用 REALITY 专属配置函数
-        if ! _singbox_handle_reality_setup reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
+        # 调用新的、全自动的 REALITY 参数生成函数
+        if ! _singbox_generate_reality_params_auto reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
             press_any_key
             return
         fi
     else
-        # 调用基于证书的 TLS 配置函数
+        # 调用基于证书的 TLS 配置函数 (保持不变)
         if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
             press_any_key
             return
         fi
     fi
 
+    # --- 第一个需要用户输入的地方：端口 ---
     declare -A ports
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
@@ -2552,8 +2554,10 @@ singbox_add_node_orchestrator() {
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
+    # --- 第二个需要用户输入的地方：自定义标识 ---
     local custom_id
-    echo -e -n "请输入自定义标识 [回车则使用运营商: ${GREEN}${operator_name}${NC}]: "
+    echo ""
+    echo -e -n "请输入自定义标识 (用于节点命名) [回车则使用: ${GREEN}${operator_name}${NC}]: "
     read custom_id
     custom_id=${custom_id:-$operator_name}
 
