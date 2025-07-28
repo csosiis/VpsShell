@@ -241,7 +241,7 @@ ensure_dependencies() {
     return 0
 }
 # =================================================
-#           通用菜单绘制函数 (V18 - 内置全局指令)
+#           通用菜单绘制函数 (V18.1 - 最终版)
 # =================================================
 _draw_menu() {
     local title_block="$1"
@@ -308,8 +308,8 @@ _draw_menu() {
 
     # 页脚逻辑 (保持不变)
     if [[ "$instruction" == "main_footer" ]]; then
-        local update_text="${GREEN}9. 更新此脚本${NC}"
-        local exit_text="${RED}0. 退出脚本${NC}"
+        local update_text="${GREEN}9. 更新${NC}"
+        local exit_text="${RED}0. 退出${NC}"
         printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
         printf "\033[35G%b" "$exit_text"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
@@ -328,16 +328,14 @@ _draw_menu() {
     # 4. 读取用户输入
     read -p "请输入选项: " choice_ref
 
-    # --- 【核心修改】在这里直接处理全局指令 ---
-    # 注意：这里的 choice_ref 是变量本身，而不是它的值
+    # 在这里直接处理全局指令
     case $choice_ref in
-        99) do_update_script ;; # 执行更新并重启脚本
+        99) do_update_script ;;
         00)
-            log_info "脚本退出。"
+            # 【核心修改】删除此处的 log_info，因为 trap 会提供退出信息
             exit 0
             ;;
     esac
-    # 对于其他输入 (包括 0), 函数会正常返回，由调用它的子菜单去处理
 }
 
 # =================================================
