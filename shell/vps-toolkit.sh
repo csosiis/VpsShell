@@ -6163,7 +6163,7 @@ setup_auto_reverse_proxy() {
     return $status
 }
 # =================================================
-#           查看证书 (list_certificates) - V2.2 最终版
+#           查看证书 (list_certificates) - V2.3 最终显示修正版
 # =================================================
 list_certificates() {
     # 检查 certbot 命令是否存在
@@ -6189,7 +6189,7 @@ list_certificates() {
     echo -e "$CYAN│$WHITE                 SSL 证书状态概览                             $CYAN│$NC"
     echo -e "$CYAN├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤$NC"
 
-    # 【核心修正】awk 脚本更新，移除域名显示，增加路径显示
+    # 【核心修正】awk 脚本更新，修正私钥路径解析，并补全右侧边框
     echo "$certs_data" | awk -v GREEN="$GREEN" -v YELLOW="$YELLOW" -v RED="$RED" -v NC="$NC" -v CYAN="$CYAN" -v WHITE="$WHITE" '
     # 定义一个函数，用于打印一个完整的证书信息块
     function print_cert() {
@@ -6207,12 +6207,22 @@ list_certificates() {
         if (!cert_path) cert_path = "N/A";
         if (!key_path) key_path = "N/A";
 
-        # 格式化输出
-        printf("%s %-3s %-35s\n", CYAN"│"NC, cert_count".", WHITE name NC);
-        printf("%s   %-12s %s\n", CYAN"│"NC, "到期时间:", expiry);
-        printf("%s   %-12s %s%s 天%s\n", CYAN"│"NC, "剩余有效期:", color, valid_days, NC);
-        printf("%s   %-12s %s\n", CYAN"│"NC, "证书位置:", cert_path);
-        printf("%s   %-12s %s\n", CYAN"│"NC, "私钥位置:", key_path);
+        # 格式化输出，%-Ns 用于左对齐并填充空格，最后打印右边框
+        printf("%s %-3s %-62s %s\n", CYAN"│"NC, cert_count".", WHITE name NC, CYAN"│"NC);
+
+        line_expiry = sprintf("%-12s %s", "到期时间:", expiry);
+        printf("%s   %-64s %s\n", CYAN"│"NC, line_expiry, CYAN"│"NC);
+
+        line_validity = sprintf("%-12s %s%s 天%s", "剩余有效期:", color, valid_days, NC);
+        # 需要特殊处理带颜色的字符串长度，手动调整填充
+        printf("%s   %-74s %s\n", CYAN"│"NC, line_validity, CYAN"│"NC);
+
+        line_cert_path = sprintf("%-12s %s", "证书位置:", cert_path);
+        printf("%s   %-64s %s\n", CYAN"│"NC, line_cert_path, CYAN"│"NC);
+
+        line_key_path = sprintf("%-12s %s", "私钥位置:", key_path);
+        printf("%s   %-64s %s\n", CYAN"│"NC, line_key_path, CYAN"│"NC);
+
         printf("%s╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌%s\n", CYAN"├"NC, CYAN"┤"NC);
     }
 
@@ -6241,7 +6251,7 @@ list_certificates() {
         cert_path = $3;
     }
     /Private Key Path:/ {
-        key_path = $3;
+        key_path = $4; # 【修正点】从 $3 改为 $4
     }
     END {
         print_cert(); # 打印最后一个证书的信息
