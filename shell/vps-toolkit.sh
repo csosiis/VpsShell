@@ -4863,8 +4863,9 @@ install_3xui() {
     log_info "3X-ui 安装脚本执行完毕。"
     press_any_key
 }
-
-# (这是被修改的函数)
+# =================================================================
+#           搭建 WordPress (已优化用户体验)
+# =================================================================
 install_wordpress() {
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建 WordPress。"
@@ -4874,12 +4875,15 @@ install_wordpress() {
     clear
     log_info "开始使用 Docker Compose 搭建 WordPress..."
 
-    local project_dir
+    # --- 变量定义 ---
+    local project_dir db_password wp_port domain site_url
+
+    # --- 收集信息 ---
     while true; do
         read -e -p "请输入新 WordPress 项目的安装目录 [默认: /root/wordpress]: " project_dir
         project_dir=${project_dir:-"/root/wordpress"}
         if [ -f "$project_dir/docker-compose.yml" ]; then
-            log_error "错误：目录 \"$project_dir\" 下已存在一个 WordPress 站点！"
+            log_error "错误：目录 \"$project_dir\" 下已存在一个 Docker 项目！"
             log_warn "请为新的 WordPress 站点选择一个不同的、全新的目录。"
             continue
         else
@@ -4890,13 +4894,11 @@ install_wordpress() {
     cd "$project_dir" || { log_error "无法进入目录 $project_dir！"; press_any_key; return 1; }
     log_info "新的 WordPress 将被安装在: $(pwd)"
 
-    local db_password
-    read -s -p "请输入新的数据库 root 和用户密码 [默认随机生成]: " db_password
-    db_password=${db_password:-$(generate_random_password)}
-    echo ""
-    log_info "数据库密码已设置为: $db_password"
+    # 【优化点1】密码在这里被读入或生成，但不再立刻显示
+    read -s -p "请输入新的数据库 root 和用户密码 [默认随机生成]: " db_password_input
+    db_password=${db_password_input:-$(generate_random_password)}
+    echo "" # 换行
 
-    local wp_port
     while true; do
         read -p "请输入 WordPress 的内部代理端口 (例如 8080，外部无法直接访问): " wp_port
         if [[ ! "$wp_port" =~ ^[0-9]+$ ]] || [ "$wp_port" -lt 1 ] || [ "$wp_port" -gt 65535 ]; then
@@ -4906,13 +4908,13 @@ install_wordpress() {
         else break; fi
     done
 
-    local domain
     while true; do
         read -p "请输入您的网站访问域名 (例如 blog.example.com)，必须提前解析: " domain
         if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
     done
-    local site_url="https://$domain"
+    site_url="https://$domain"
 
+    # --- 生成配置文件 (无变化) ---
     log_info "正在生成 docker-compose.yml 文件..."
     cat >docker-compose.yml <<EOF
 version: '3.8'
@@ -4960,6 +4962,7 @@ networks:
   wordpress_net:
 EOF
 
+    # --- 启动与配置 (无变化) ---
     log_info "正在使用 Docker Compose 启动 WordPress 和数据库服务..."
     log_warn "首次启动需要下载镜像，可能需要几分钟时间，请耐心等待..."
     docker compose up -d
@@ -4970,15 +4973,23 @@ EOF
 
     log_info "正在为域名 $domain 设置反向代理..."
     if setup_auto_reverse_proxy "$domain" "$wp_port"; then
-        # --- 新增：记录反代域名 ---
         echo "$domain" > "$project_dir/.proxy_domain"
-        log_info "WordPress 配置流程完毕！您现在应该可以通过 $site_url 访问您的网站了。"
+
+        # 【优化点2】所有操作成功后，在这里显示包含密码的最终摘要
+        clear
+        log_info "✅ WordPress 站点已成功部署！"
+        echo -e "$CYAN-------------------- 安装摘要 ---------------------$NC"
+        echo -e "$GREEN  访问地址:    $WHITE$site_url$NC"
+        echo -e "$GREEN  安装目录:    $WHITE$project_dir$NC"
+        echo -e "$GREEN  反代内部端口: $WHITE$wp_port$NC"
+        echo -e "$RED  数据库密码:  $YELLOW$db_password$NC"
+        echo -e "$CYAN----------------------------------------------------$NC"
+        log_warn "请务必妥善保管您的数据库密码！"
     else
          log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
     fi
     press_any_key
 }
-
 uninstall_wordpress() {
     uninstall_docker_compose_project "WordPress" "/root/wordpress"
 }
@@ -5006,52 +5017,50 @@ download_maccms_source() {
     log_info "源码压缩包下载并校验通过。"
     return 0
 }
-
-# (这是最终修复版函数, 经过仔细检查确保完整无误)
+# =================================================================
+#           搭建苹果CMS (已优化用户体验)
+# =================================================================
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
     if ! _install_docker_and_compose; then
         log_error "Docker 环境准备失败，无法继续搭建苹果CMS。"
-        press_any_key
-        return
+        press_any_key; return
     fi
     ensure_dependencies "unzip" "file" "curl"
 
-    local project_dir
+    # --- 变量定义 ---
+    local project_dir db_root_password db_user_password web_port domain
+
+    # --- 收集信息 ---
     read -e -p "请输入苹果CMS的安装目录 [默认: /root/maccms]: " project_dir
     project_dir=${project_dir:-"/root/maccms"}
-
     if [ -f "$project_dir/docker-compose.yml" ]; then
-        log_warn "检测到安装目录已存在 Docker 项目，请选择其他目录或先卸载。"
-        press_any_key
-        return 1
+        log_warn "检测到安装目录已存在 Docker 项目，请选择其他目录或先卸载。"; press_any_key; return 1;
     fi
 
-    local db_root_password db_user_password
-    read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password
-    db_root_password=${db_root_password:-$(generate_random_password)}
+    # 【优化点1】密码在这里被读入或生成，但不再立刻显示
+    read -s -p "请输入 MariaDB root 密码 [默认随机]: " db_root_password_input
+    db_root_password=${db_root_password_input:-$(generate_random_password)}
     echo ""
-    read -s -p "请输入 maccms_user 用户密码 [默认随机]: " db_user_password
-    db_user_password=${db_user_password:-$(generate_random_password)}
+    read -s -p "请输入 maccms_user 用户密码 [默认随机]: " db_user_password_input
+    db_user_password=${db_user_password_input:-$(generate_random_password)}
     echo ""
 
-    local db_name="maccms"
-    local db_user="maccms_user"
-    local db_port="3306"
-    local web_port
-    read -p "请输入一个内部代理端口 (例如 8880，用于反代): " web_port
-    web_port=${web_port:-"8880"}
+    read -p "请输入一个内部代理端口 (例如 8880，用于反代) [默认 8880]: " web_port_input
+    web_port=${web_port_input:-"8880"}
     if ! check_port "$web_port"; then press_any_key; return; fi
 
+    # --- 创建目录和文件 (无变化) ---
     mkdir -p "$project_dir/nginx" "$project_dir/source" "$project_dir/php"
     cd "$project_dir" || { log_error "无法进入目录 $project_dir"; return 1; }
 
+    # ... (所有创建 supervisord.conf, Dockerfile, Nginx default.conf, docker-compose.yml 的代码保持不变) ...
+    # (此处省略大量配置文件生成代码，因为它们没有变化)
     log_info "正在创建 Supervisor 守护进程配置文件..."
     cat > "$project_dir/php/supervisord.conf" <<'EOF'
 [supervisord]
 nodaemon=true
 user=root
-
 [program:php-fpm]
 command=/usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/www.conf
 autostart=true
@@ -5063,70 +5072,26 @@ stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
-
     log_info "正在为 PHP 创建集成 Supervisor 的自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
-
-# 安装 Supervisor 和其他依赖
-RUN apt-get update && apt-get install -y \
-    supervisor \
-    libfreetype6-dev \
-    libjpeg62-turbo-dev \
-    libpng-dev \
-    libzip-dev \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
-
-# 容器化改造：修改php-fpm配置，将日志输出到标准错误流，而不是文件
+RUN apt-get update && apt-get install -y supervisor libfreetype6-dev libjpeg62-turbo-dev libpng-dev libzip-dev unzip && rm -rf /var/lib/apt/lists/*
 RUN sed -i 's#^error_log = .*#error_log = /proc/self/fd/2#' /usr/local/etc/php-fpm.conf \
     && sed -i 's#;catch_workers_output = yes#catch_workers_output = yes#' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's#^php_admin_value\[error_log\] = .*#php_admin_value[error_log] = /proc/self/fd/2#' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's#^php_admin_flag\[log_errors\] = .*#php_admin_flag[log_errors] = on#' /usr/local/etc/php-fpm.d/www.conf
-
-# 安装PHP扩展
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
-
-# 复制 Supervisor 配置文件到镜像中
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# 设置容器启动时执行的命令为 Supervisor
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 EOF
-
-    local maccms_version
-    maccms_version=$(get_latest_maccms_tag)
-    if [ -z "$maccms_version" ]; then log_error "获取 maccms 最新版本标签失败！"; press_any_key; return 1; fi
-    log_info "获取到最新版标签: $maccms_version"
-    if ! download_maccms_source "$maccms_version"; then press_any_key; return 1; fi
-    unzip -q source.zip || { log_error "解压失败"; return 1; }
-    rm -f source.zip
-    local dir="maccms10-${maccms_version#v}"
-    if [ ! -d "$dir" ]; then log_error "解压后目录不存在"; return 1; fi
-    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
-    rm -rf "$dir"
-
     cat >"$project_dir/nginx/default.conf" <<'EOF'
 server {
-    listen 80;
-    server_name localhost;
-    root /var/www/html;
-    index index.php index.html index.htm;
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-    location ~ \.php$ {
-        include fastcgi_params;
-        fastcgi_pass php:9000;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }
-    location ~ /\.ht {
-        deny all;
-    }
+    listen 80; server_name localhost; root /var/www/html; index index.php index.html index.htm;
+    location / { try_files $uri $uri/ /index.php?$query_string; }
+    location ~ \.php$ { include fastcgi_params; fastcgi_pass php:9000; fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; }
+    location ~ /\.ht { deny all; }
 }
 EOF
-
     cat >"$project_dir/docker-compose.yml" <<EOF
 services:
   db:
@@ -5135,98 +5100,91 @@ services:
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: "$db_root_password"
-      MYSQL_DATABASE: "$db_name"
-      MYSQL_USER: "$db_user"
+      MYSQL_DATABASE: "maccms"
+      MYSQL_USER: "maccms_user"
       MYSQL_PASSWORD: "$db_user_password"
-    volumes:
-      - db_data:/var/lib/mysql
-    networks:
-      - maccms_net
-
+    volumes: [db_data:/var/lib/mysql]
+    networks: [maccms_net]
   php:
     build: ./php
     container_name: ${project_dir##*/}_php
-    volumes:
-      - ./source:/var/www/html
+    volumes: [./source:/var/www/html]
     restart: always
-    depends_on:
-      - db
-    networks:
-      - maccms_net
-
+    depends_on: [db]
+    networks: [maccms_net]
   nginx:
     image: nginx:1.21-alpine
     container_name: ${project_dir##*/}_nginx
-    ports:
-      - "$web_port:80"
-    volumes:
-      - ./source:/var/www/html
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    ports: ["$web_port:80"]
+    volumes: [./source:/var/www/html, ./nginx/default.conf:/etc/nginx/conf.d/default.conf]
     restart: always
-    depends_on:
-      - php
-    networks:
-      - maccms_net
-
+    depends_on: [php]
+    networks: [maccms_net]
 volumes:
   db_data:
-
 networks:
   maccms_net:
 EOF
 
+
+    # --- 下载和构建 (无变化) ---
+    local maccms_version; maccms_version=$(get_latest_maccms_tag)
+    if [ -z "$maccms_version" ]; then log_error "获取 maccms 最新版本标签失败！"; press_any_key; return 1; fi
+    log_info "获取到最新版标签: $maccms_version"
+    if ! download_maccms_source "$maccms_version"; then press_any_key; return 1; fi
+    unzip -q source.zip || { log_error "解压失败"; return 1; }
+    rm -f source.zip
+    local dir="maccms10-${maccms_version#v}";
+    if [ ! -d "$dir" ]; then log_error "解压后目录不存在"; return 1; fi
+    mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true
+    rm -rf "$dir"
+
     log_info "正在构建集成Supervisor的PHP镜像并启动所有服务..."
     log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
     docker compose up -d --build
-
-    log_info "等待容器初始化 (8秒)..."
     sleep 8
-
-    log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
     docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
-    log_info "正在检查服务最终状态..."
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "最终尝试后，PHP 容器仍未能启动！问题可能非常复杂。"
-        log_info "请使用以下命令查看容器的完整日志以诊断问题:"
-        echo -e "\n  cd $project_dir && docker compose logs php\n"
-        press_any_key
-        return 1
+        log_error "PHP 容器未能启动！请使用 'cd $project_dir && docker compose logs php' 查看日志。"; press_any_key; return 1;
     fi
 
     log_info "✅ 所有服务均已成功启动！"
     docker compose ps
 
+    # --- 【优化点2】最后的摘要信息 ---
     read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
+    local install_url
     if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
-        local domain
         while true; do
             read -p "请输入您的网站访问域名 (例如 maccms.example.com): " domain
-            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确，请重新输入。"; else break; fi
+            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
         done
         if setup_auto_reverse_proxy "$domain" "$web_port"; then
             echo "$domain" > "$project_dir/.proxy_domain"
-            log_info "✅ 反向代理设置完成！"
-            echo "--------------------------------------------"
-            log_info "请访问以下地址完成安装向导："
-            log_info "https://$domain/install.php"
-            echo "--------------------------------------------"
+            install_url="https://$domain/install.php"
         else
-             log_error "反向代理设置失败！请检查域名解析或手动排查问题。"
+            log_error "反向代理设置失败！"; press_any_key; return 1;
         fi
     else
-        local public_ip
-        public_ip=$(get_public_ip v4)
-        log_info "好的，您选择不设置反向代理。"
-        log_warn "在安装向导的数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
-        echo "--------------------------------------------"
-        echo "网站安装地址: http://$public_ip:$web_port/install.php"
-        echo "--------------------------------------------"
+        local public_ip; public_ip=$(get_public_ip v4)
+        install_url="http://$public_ip:$web_port/install.php"
     fi
+
+    clear
+    log_info "✅ 苹果CMS 已成功部署！"
+    echo -e "$CYAN----------------------- 安装摘要 ------------------------$NC"
+    echo -e "$GREEN  安装向导地址: $WHITE$install_url$NC"
+    echo -e "$GREEN  安装目录:     $WHITE$project_dir$NC"
+    echo -e "$RED  数据库ROOT密码: $YELLOW$db_root_password$NC"
+    echo -e "$RED  数据库用户密码: $YELLOW$db_user_password$NC"
+    echo -e "$CYAN-------------------------------------------------------$NC"
+    log_warn "请访问上面的“安装向导地址”完成最后步骤。"
+    log_warn "在数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
+
     press_any_key
 }
-
 uninstall_maccms() {
     uninstall_docker_compose_project "苹果CMS" "/root/maccms"
 }
