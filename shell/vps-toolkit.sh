@@ -2029,6 +2029,7 @@ utility_tools_menu() {
             "VPS 性能测试"
             "手动备份指定目录"
             "简易文件分享"
+            "防火墙助手"
         )
 
         # 3. 调用通用菜单函数
@@ -2043,6 +2044,7 @@ utility_tools_menu() {
             4) performance_test_menu ;;
             5) backup_directory ;;
             6) file_sharing_menu ;;
+            7) firewall_helper_menu ;;
             0) break ;;
             *) log_error "无效选项！"; sleep 1 ;;
         esac
@@ -4358,110 +4360,70 @@ install_portainer() {
 
     press_any_key
 }
-#------------------------------------------------------------------------------------
-# 新增的功能：完全卸载 Docker
-# Author: 编码助手
-# Description: 停止并删除所有容器、镜像、卷，然后卸载 Docker 软件包并清理相关目录。
-#------------------------------------------------------------------------------------
+# =================================================================
+#           (已修正) 完全卸载 Docker
+# =================================================================
 uninstall_docker() {
-    # 在执行危险操作前，向用户请求确认
     read -p "警告：此操作将删除所有 Docker 容器、镜像、卷和网络，并卸载 Docker 本身。数据将无法恢复。您确定要继续吗? [y/N] " confirmation
-    # 如果用户输入的不是 'y' 或 'Y'，则取消操作
     if [[ ! "$confirmation" =~ ^[yY]$ ]]; then
-        echo "卸载操作已取消。"
-        docker_menu # 返回 Docker 菜单
-        return
+        log_info "卸载操作已取消。"
+        press_any_key
+        return # 如果用户取消，则返回
     fi
 
-    echo "开始执行 Docker 完全卸载程序..."
+    log_info "开始执行 Docker 完全卸载程序..."
 
-    # 检查 Docker 是否已安装
-    if ! command -v docker &> /dev/null; then
-        echo "检测到 Docker 未安装，无需卸载。"
-        sleep 2s
-        docker_menu
-        return
-    fi
-
-    # 停止所有正在运行的容器
-    echo "正在停止所有运行中的容器..."
-    # 使用 `docker ps -aq` 列出所有容器的ID，然后传递给 `docker stop`
+    # 1. 停止所有正在运行的容器
+    log_info "正在停止所有正在运行的 Docker 容器..."
     if [ -n "$(docker ps -q)" ]; then
-        docker stop $(docker ps -aq)
+        docker stop $(docker ps -q)
     else
-        echo "没有正在运行的容器。"
+        log_info "没有正在运行的容器。"
     fi
 
-    # 删除所有容器
-    echo "正在删除所有容器..."
+    # 2. 删除所有容器
+    log_info "正在删除所有 Docker 容器..."
     if [ -n "$(docker ps -aq)" ]; then
         docker rm $(docker ps -aq)
     else
-        echo "没有容器需要删除。"
+        log_info "没有容器需要删除。"
     fi
 
-    # 删除所有 Docker 镜像
-    echo "正在删除所有 Docker 镜像..."
+    # 3. 删除所有镜像
+    log_info "正在删除所有 Docker 镜像..."
     if [ -n "$(docker images -q)" ]; then
         docker rmi -f $(docker images -q)
     else
-        echo "没有 Docker 镜像需要删除。"
+        log_info "没有镜像需要删除。"
     fi
 
-    # 删除所有 Docker 卷
-    echo "正在删除所有 Docker 卷..."
-    if [ -n "$(docker volume ls -q)" ]; then
-        docker volume rm $(docker volume ls -q)
-    else
-        echo "没有 Docker 卷需要删除。"
-    fi
+    # 4. 删除所有卷
+    log_info "正在清理所有未使用的 Docker 数据卷..."
+    docker volume prune -af
 
-    # 清理无用的网络
-    echo "正在清理 Docker 网络..."
-    docker network prune -f
-
-    echo "正在卸载 Docker 相关软件包..."
-    # 通过检查 /etc/os-release 文件来判断操作系统类型
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS=$ID
-    else
-        echo "无法确定操作系统类型，请手动卸载 Docker 软件包。"
-        return
-    fi
-
-    # 根据不同的操作系统执行相应的卸载命令
-    case $OS in
-        ubuntu|debian)
-            sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
-            sudo apt-get autoremove -y --purge
+    # 5. 卸载 Docker 相关的软件包
+    log_info "正在卸载 Docker Engine, CLI, 和相关插件..."
+    local docker_packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+    case "$PKG_MANAGER" in
+        apt)
+            apt-get purge -y $docker_packages
+            apt-get autoremove -y --purge
             ;;
-        centos|rhel|fedora)
-            # 对于 CentOS/RHEL/Fedora，使用 yum 或 dnf
-            if command -v dnf &> /dev/null; then
-                sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            else
-                sudo yum remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            fi
-            ;;
-        *)
-            echo "不支持的操作系统: $OS"
-            echo "请手动卸载 Docker 软件包。"
+        yum|dnf)
+            "$PKG_MANAGER" remove -y $docker_packages
             ;;
     esac
 
-    echo "正在删除 Docker 的配置文件和数据目录..."
-    sudo rm -rf /var/lib/docker
-    sudo rm -rf /var/lib/containerd
-    sudo rm -rf /etc/docker
-    sudo rm -rf /var/run/docker.sock
-    # 同时删除用户家目录下的 docker 配置
-    rm -rf ~/.docker
+    # 6. 清理残留目录
+    log_info "正在清理 Docker 的残留目录..."
+    rm -rf /var/lib/docker
+    rm -rf /var/lib/containerd
+    rm -rf /etc/docker
+    rm -f /etc/apt/sources.list.d/docker.list
 
-    echo "Docker 已被完全卸载。"
-    echo "3秒后将返回 Docker 管理菜单..."
+    log_info "✅ Docker 已被完全卸载。"
+    log_info "3秒后将返回 Docker 管理菜单..."
     sleep 3s
-    docker_menu
 }
 # =================================================
 #      容器管理 (docker_container_menu) - 优化版
@@ -4643,11 +4605,6 @@ backup_docker_volume() {
 
     log_info "准备将数据卷 '$volume_name' 备份到 '$full_backup_path' ..."
 
-    # 使用一个轻量的 alpine 容器来执行备份，避免在本机安装不必要的工具
-    # --rm: 容器执行完毕后自动删除
-    # -v volume_name:/volume_data:ro : 将目标数据卷以只读方式挂载到容器的 /volume_data 目录
-    # -v /local/path:/backup_target : 将本机的备份目录挂载到容器的 /backup_target 目录
-    # alpine tar ... : 在容器内执行 tar 命令进行压缩
     docker run --rm \
         -v "${volume_name}:/volume_data:ro" \
         -v "${backup_dest}:/backup_target" \
@@ -5616,38 +5573,6 @@ docker_apps_menu() {
         esac
     done
 }
-# =================================================
-#      UI 面板安装选择 (ui_panels_menu) - 优化版
-# =================================================
-ui_panels_menu() {
-    while true; do
-        local title="UI 面板安装选择"
-        local -a options=(
-            "安装 S-ui 面板"
-            "安装 3X-ui 面板"
-        )
-        local choice
-        _draw_menu "$title" choice "${options[@]}"
-
-        case $choice in
-            1) install_sui; break ;;
-            2) install_3xui; break ;;
-            0) break ;;
-            *) log_error "无效选项！"; sleep 1 ;;
-        esac
-    done
-}
-# =================================================
-#           证书 & 反代 (V2.0 增强版)
-#
-#   - 新增：域名解析预检查，防止 Certbot 因解析错误而失败。
-#   - 新增：“仅申请证书”功能，满足非反代需求。
-#   - 新增：对 Caddy 反代配置的清理功能，使删除操作更完整。
-#   - 优化：删除证书时使用数字菜单选择，避免手动输入错误。
-#   - 优化：反代设置流程，增加操作前摘要确认，防止误操作。
-#   - 优化：为 Nginx 配置添加 HSTS 头，增强安全性。
-#   - 优化：申请证书时可自定义邮箱。
-# =================================================
 
 # --- (新增) 辅助函数：预检查域名DNS解析 ---
 _precheck_domain_dns() {
@@ -5908,25 +5833,23 @@ _ensure_dh_param() {
         fi
     fi
 }
-
-# 辅助函数：在配置完成后测试反向代理连接
+# 辅助函数：在配置完成后测试反向代理连接 (已修正)
 _test_reverse_proxy_connection() {
     local domain="$1"
+    local port="$2" # <-- 新增，接收第二个参数
     if [ -z "$domain" ]; then return; fi
 
     log_info "正在对 https://$domain 进行最终连接测试..."
-    # 使用 curl -I 获取响应头，-s 静默模式，-L 跟随重定向，-m 8 设置8秒超时
     local http_status
     http_status=$(curl -o /dev/null -s -w "%{http_code}" -L -m 8 --insecure "https://$domain")
 
-    # 成功的状态码通常是 2xx (成功), 3xx (重定向), 401/403 (需要认证), 甚至 404 (页面不存在但服务通了)
     if [[ "$http_status" -ge 200 && "$http_status" -lt 500 ]]; then
         log_info "✅ 连接测试成功！HTTP 状态码: $http_status。您的网站应该可以正常访问了。"
     else
         log_error "连接测试失败！HTTP 状态码: $http_status。"
         log_warn "这可能由以下原因导致："
         log_warn "  1. 本机防火墙或云服务商安全组未放行 443 端口。"
-        log_warn "  2. 后端应用 (端口 $local_port) 未能正常启动或响应。"
+        log_warn "  2. 后端应用 (端口 $port) 未能正常启动或响应。" # <-- 修改，使用新的 port 变量
         log_warn "  3. 域名解析尚未在全球生效。"
     fi
 }
@@ -6068,7 +5991,7 @@ _configure_caddy_proxy() {
     log_info "✅ Caddy 反向代理配置成功！Caddy 会自动处理 HTTPS。"
     return 0
 }
-# (这是重写后的函数，增加了模板选择和自动连接测试)
+# (这是最终优化版，整合了模板选择和自动连接测试)
 setup_auto_reverse_proxy() {
     local domain_input="$1"
     local local_port="$2"
@@ -6078,7 +6001,7 @@ setup_auto_reverse_proxy() {
     clear
     log_info "欢迎使用通用反向代理设置向导。\n"
 
-    # --- 收集和验证输入 (此部分不变) ---
+    # --- 收集和验证输入 ---
     if [ -z "$domain_input" ]; then
         while true; do
             read -p "请输入您要设置反代的域名: " domain_input
@@ -6101,7 +6024,7 @@ setup_auto_reverse_proxy() {
         log_info "将代理到预设的本地端口: $local_port"
     fi
 
-    # --- Web服务器选择逻辑 (此部分不变) ---
+    # --- Web服务器选择逻辑 ---
     local has_nginx; has_nginx=$(command -v nginx &>/dev/null)
     local has_caddy; has_caddy=$(command -v caddy &>/dev/null)
 
@@ -6122,7 +6045,7 @@ setup_auto_reverse_proxy() {
     fi
     log_info "将使用 [$web_server_choice] 进行反向代理配置。"
 
-    # === 新增：如果使用 Nginx，则询问模板类型 ===
+    # --- 如果使用 Nginx，则询问模板类型 ---
     if [ "$web_server_choice" == "nginx" ]; then
         echo ""
         echo -e "${CYAN}请为 Nginx 选择反代模板类型：${NC}"
@@ -6134,7 +6057,6 @@ setup_auto_reverse_proxy() {
         fi
         log_info "已选择模板: $proxy_template_choice"
     fi
-    # === 新增逻辑结束 ===
 
     # --- 操作前确认 ---
     echo ""
@@ -6168,9 +6090,9 @@ setup_auto_reverse_proxy() {
         fi
     fi
 
-    # --- 连接测试 (此部分不变) ---
+    # --- 连接测试 ---
     if [ "$status" -eq 0 ]; then
-        _test_reverse_proxy_connection "$domain_input"
+        _test_reverse_proxy_connection "$domain_input" "$local_port"
     fi
 
     if [ -z "$1" ]; then
