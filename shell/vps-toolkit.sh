@@ -6163,7 +6163,7 @@ setup_auto_reverse_proxy() {
     return $status
 }
 # =================================================
-#           查看证书 (list_certificates) - V2.0 美化版
+#           查看证书 (list_certificates) - V2.1 最终修正版
 # =================================================
 list_certificates() {
     # 检查 certbot 命令是否存在
@@ -6177,7 +6177,7 @@ list_certificates() {
     log_info "正在解析由 Certbot 管理的所有证书..."
 
     local certs_data
-    certs_data=$(certbot certificates 2>/dev/null) # 使用 2>/dev/null 忽略烦人的 OCSP 错误信息
+    certs_data=$(certbot certificates 2>/dev/null) # 忽略非关键错误信息
 
     if [[ ! "$certs_data" =~ "Found the following certs:" ]]; then
         log_warn "未找到任何由 Certbot 管理的证书。"
@@ -6189,48 +6189,59 @@ list_certificates() {
     echo -e "$CYAN│$WHITE                 SSL 证书状态概览                             $CYAN│$NC"
     echo -e "$CYAN├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤$NC"
 
-    # 使用 awk 来解析和格式化输出
+    # 【核心修正】使用不依赖行序的 awk 脚本来解析和格式化输出
     echo "$certs_data" | awk -v GREEN="$GREEN" -v YELLOW="$YELLOW" -v RED="$RED" -v NC="$NC" -v CYAN="$CYAN" -v WHITE="$WHITE" '
-    BEGIN {
-        cert_count = 0;
-    }
-    # 以 "Certificate Name:" 行为处理单元的开始
-    /Certificate Name:/ {
-        name = $3;
-        getline; # 读取下一行 (Domains)
-        sub(/^ *Domains: */, "");
-        domains = $0;
-        getline; # 读取下一行 (Expiry)
-        expiry_line = $0;
-
-        valid_days = 0;
-        # 从 "VALID: xx days" 中提取天数
-        if (match(expiry_line, /\(VALID: ([0-9]+) days\)/, arr)) {
-            valid_days = arr[1];
-        }
-        # 清理到期时间字符串，只保留日期和时间
-        sub(/ *\(VALID.*/, "", expiry_line);
-        sub(/^ *Expiry Date: /, "", expiry_line);
-
-        # 根据剩余天数设置颜色
-        color = GREEN;
-        if (valid_days < 30) {
-            color = RED;
-        } else if (valid_days < 60) {
-            color = YELLOW;
-        }
+    # 定义一个函数，用于打印一个完整的证书信息块
+    function print_cert() {
+        if (!name) return; # 如果没有证书名称，则不打印
 
         cert_count++;
+
+        # 设置颜色
+        color = GREEN;
+        if (valid_days < 30) { color = RED; }
+        else if (valid_days < 60) { color = YELLOW; }
+
+        # 处理信息不完整的情况
+        if (!domains) domains = "N/A";
+        if (!expiry) expiry = "N/A (可能已失效)";
 
         # 格式化输出
         printf("%s %-3s %-35s\n", CYAN"│"NC, cert_count".", WHITE name NC);
         printf("%s   %-12s %s\n", CYAN"│"NC, "域名:", domains);
-        printf("%s   %-12s %s\n", CYAN"│"NC, "到期时间:", expiry_line);
+        printf("%s   %-12s %s\n", CYAN"│"NC, "到期时间:", expiry);
         printf("%s   %-12s %s%s 天%s\n", CYAN"│"NC, "剩余有效期:", color, valid_days, NC);
         printf("%s╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌%s\n", CYAN"├"NC, CYAN"┤"NC);
-
     }
-    ' | sed '$d' # 使用 sed 删除由最后一个分隔符产生的多余行
+
+    # 主逻辑：逐行读取 certbot 的输出
+    /Certificate Name:/ {
+        print_cert(); # 打印上一个证书的信息
+        # 重置所有变量，开始记录下一个证书
+        name = $3;
+        domains = "";
+        expiry = "";
+        valid_days = 0;
+    }
+    /Domains:/ {
+        sub(/^ *Domains: */, "");
+        domains = $0;
+    }
+    /Expiry Date:/ {
+        expiry_line = $0;
+        if (match(expiry_line, /\(VALID: ([0-9]+) days\)/, arr)) {
+            valid_days = arr[1];
+        } else {
+            valid_days = 0; # 如果证书无效或格式不同，则有效期为0
+        }
+        sub(/ *\(VALID.*|\(INVALID.*/, "", expiry_line); # 移除 (VALID...) 或 (INVALID...)
+        sub(/^ *Expiry Date: /, "", expiry_line);
+        expiry = expiry_line;
+    }
+    END {
+        print_cert(); # 打印最后一个证书的信息
+    }
+    ' | sed '$d' # 使用 sed 删除由最后一个分隔符产生的多余空行
 
     echo -e "$CYAN└────────────────────────────────────────────────────────────────────┘$NC"
     press_any_key
