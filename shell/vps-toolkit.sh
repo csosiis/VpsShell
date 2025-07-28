@@ -6163,7 +6163,7 @@ setup_auto_reverse_proxy() {
     return $status
 }
 # =================================================
-#           查看证书 (list_certificates) - V3.0 完美对齐版
+#           查看证书 (list_certificates) - V4.0 列对齐修正版
 # =================================================
 list_certificates() {
     # 检查 certbot 命令是否存在
@@ -6185,109 +6185,79 @@ list_certificates() {
         return
     fi
 
-    # 步骤1: 使用 awk 解析数据，但不直接打印，而是生成一个中间格式
+    # 步骤1: AWK 脚本，修正所有解析问题
     local parsed_data
     parsed_data=$(echo "$certs_data" | awk '
     function print_and_reset() {
         if (name) {
+            # 关键修正：在赋值时就清理好多余信息
+            sub(/ *\(VALID.*|\(INVALID.*/, "", expiry);
+            if (!validity) validity = "0";
             printf "name=%s\nexpiry=%s\nvalidity=%s\ncert_path=%s\nkey_path=%s\n---\n", name, expiry, validity, cert_path, key_path;
         }
         name=expiry=validity=cert_path=key_path="";
     }
     /Certificate Name:/   { print_and_reset(); name=$3; }
     /Expiry Date:/        { sub(/^ *Expiry Date: /, ""); expiry=$0; }
-    /VALID: ([0-9]+) days/ { match($0, /VALID: ([0-9]+) days/, arr); validity=arr[1]; }
+    # 使用正则表达式匹配，无论是否在同一行都能获取到有效期天数
+    {
+        if (match($0, /VALID: ([0-9]+) days/, arr)) {
+            validity=arr[1];
+        }
+    }
     /Certificate Path:/   { cert_path=$3; }
     /Private Key Path:/   { key_path=$4; }
     END { print_and_reset(); }
     ')
 
-    # 步骤2: 在 Bash 中处理解析后的数据，生成带颜色的输出行，并计算最大宽度
-    local output_lines=()
-    local max_width=0
-    local cert_count=0
+    # 步骤2: Bash 数组，用于存储解析好的干净数据
+    declare -a NAMES EXPIRIES DAYS CERT_PATHS KEY_PATHS
+    local name expiry validity cert_path key_path
 
-    # 读取 awk 的输出
     while IFS= read -r line; do
-        if [[ "$line" == "---" ]]; then
-            # 如果不是第一个证书，则添加分隔符
-            if [ "$cert_count" -gt 0 ]; then
-                output_lines+=("separator")
-            fi
-            cert_count=$((cert_count + 1))
-            # 重置/初始化变量
-            name="" expiry="" validity="0" cert_path="" key_path=""
-            continue
-        fi
-
-        local key=${line%%=*}
-        local value=${line#*=}
-
-        # 动态赋值
-        declare "$key=$value"
-
-        # 当读完一个证书块的最后一行时，格式化并添加到数组
-        if [[ "$key" == "key_path" ]]; then
-
-            output_lines+=("$(printf "%s. %s" "$cert_count" "$name")")
-
-            # 格式化到期时间行
-            local expiry_display=${expiry:-"N/A (可能已失效)"}
-            output_lines+=("$(printf "  %-12s %s" "到期时间:" "$expiry_display")")
-
-            # 格式化有效期行 (带颜色)
-            local days=${validity:-0}
-            local color=$GREEN
-            if [ "$days" -lt 30 ]; then color=$RED; elif [ "$days" -lt 60 ]; then color=$YELLOW; fi
-            output_lines+=("$(printf "  %-12s %b%s 天%b" "剩余有效期:" "$color" "$days" "$NC")")
-
-            # 格式化路径行
-            output_lines+=("$(printf "  %-12s %s" "证书位置:" "${cert_path:-N/A}")")
-            output_lines+=("$(printf "  %-12s %s" "私钥位置:" "${key_path:-N/A}")")
+        if [[ "$line" == "---" && -n "$name" ]]; then
+            NAMES+=("${name}")
+            EXPIRIES+=("${expiry}")
+            DAYS+=("${validity}")
+            CERT_PATHS+=("${cert_path}")
+            KEY_PATHS+=("${key_path}")
+        else
+            key=${line%%=*}
+            value=${line#*=}
+            declare "$key=$value"
         fi
     done <<< "$parsed_data"
 
-    # 计算所有行中的最大视觉宽度
-    local title="SSL 证书状态概览"
-    max_width=$(_get_visual_width "$title")
+    # 步骤3: 使用固定列宽的 printf 循环打印，确保对齐
+    clear
+    log_info "正在显示已格式化的证书列表..."
+    echo ""
 
-    for line in "${output_lines[@]}"; do
-        [[ "$line" == "separator" ]] && continue
-        local current_width
-        current_width=$(_get_visual_width "$line")
-        (( current_width > max_width )) && max_width=$current_width
-    done
+    for i in "${!NAMES[@]}"; do
+        local cert_name=${NAMES[$i]}
+        local expiry_date=${EXPIRIES[$i]:-"N/A (可能已失效)"}
+        local days=${DAYS[$i]:-0}
+        local cert_path=${CERT_PATHS[$i]:-"N/A"}
+        local key_path=${KEY_PATHS[$i]:-"N/A"}
 
-    # 步骤3: 使用计算出的最大宽度来绘制带边框的表格
-    local box_width=$((max_width + 8)) # 左右各2空格 + 2边框 = 8
-    local top_border="┌$(printf '─%.0s' $(seq 1 $((box_width - 2))))┐"
-    local mid_border="├$(printf '╌%.0s' $(seq 1 $((box_width - 2))))┤"
-    local bottom_border="└$(printf '─%.0s' $(seq 1 $((box_width - 2))))┘"
+        # 设置颜色
+        local color=$GREEN
+        if [ "$days" -lt 30 ]; then color=$RED; elif [ "$days" -lt 60 ]; then color=$YELLOW; fi
 
-    # 打印标题
-    local title_padding_total=$((box_width - 2 - $(_get_visual_width "$title")))
-    local title_padding_left=$((title_padding_total / 2))
-    local title_padding_right=$((title_padding_total - title_padding_left))
-    echo -e "$CYAN$top_border$NC"
-    printf "$CYAN│%*s$WHITE%s$NC%*s$CYAN│$NC\n" "$title_padding_left" "" "$title" "$title_padding_right" ""
-    echo -e "$CYAN$mid_border$NC"
+        # 打印
+        echo -e "${WHITE}$((i + 1)). ${cert_name}${NC}"
+        printf "    %-15s %s\n" "到期时间:" "$expiry_date"
+        printf "    %-15s %b%s 天%b\n" "剩余有效期:" "$color" "$days" "$NC"
+        printf "    %-15s %s\n" "证书位置:" "$cert_path"
+        printf "    %-15s %s\n" "私钥位置:" "$key_path"
 
-    # 打印内容
-    for line in "${output_lines[@]}"; do
-        if [[ "$line" == "separator" ]]; then
-            echo -e "$CYAN$mid_border$NC"
-            continue
+        # 如果不是最后一个，打印分隔符
+        if [ "$i" -lt "$((${#NAMES[@]} - 1))" ]; then
+            echo -e "$CYAN╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌$NC"
         fi
-
-        local visual_len
-        visual_len=$(_get_visual_width "$line")
-        # 使用用户要求的 `最大内容宽度 + 5` 作为对齐基准
-        local padding_len=$((max_width - visual_len + 5))
-
-        printf "$CYAN│$NC  %b%*s$CYAN│$NC\n" "$line" "$padding_len" ""
     done
-    echo -e "$CYAN$bottom_border$NC"
 
+    echo ""
     press_any_key
 }
 # --- (新增) 仅申请证书的工作流函数 ---
