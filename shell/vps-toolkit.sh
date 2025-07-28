@@ -308,8 +308,8 @@ _draw_menu() {
 
     # 页脚逻辑 (保持不变)
     if [[ "$instruction" == "main_footer" ]]; then
-        local update_text="${GREEN}9. 更新${NC}"
-        local exit_text="${RED}0. 退出${NC}"
+        local update_text="${GREEN}99. 更新${NC}"
+        local exit_text="${RED}00. 退出${NC}"
         printf "$CYAN%s$NC  %s" "$border_char" "$update_text"
         printf "\033[35G%b" "$exit_text"
         printf "\033[%sG$CYAN%s$NC\n" "$right_border_col" "$border_char"
