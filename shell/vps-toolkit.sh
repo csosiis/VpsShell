@@ -5018,7 +5018,7 @@ download_maccms_source() {
     return 0
 }
 # =================================================================
-#           搭建苹果CMS (最终修复版 v3)
+#           搭建苹果CMS (最终修复版 v4 - 修正Compose语法)
 # =================================================================
 install_maccms() {
     log_info "开始安装苹果CMS (v10)"
@@ -5065,25 +5065,10 @@ EOF
     log_info "正在为 PHP 创建自定义配置文件 (Dockerfile)..."
     cat > "$project_dir/php/Dockerfile" <<'EOF'
 FROM php:7.4-fpm
-
-RUN apt-get update && apt-get install -y \
-    supervisor \
-    libfreetype6-dev \
-    libjpeg62-turbo-dev \
-    libpng-dev \
-    libzip-dev \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
-
-# --- 修复1：创建日志目录并赋予 www-data 用户权限 ---
+RUN apt-get update && apt-get install -y supervisor libfreetype6-dev libjpeg62-turbo-dev libpng-dev libzip-dev unzip && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/local/var/log && chown -R www-data:www-data /usr/local/var/log
-
-# --- 修复2：强制 PHP-FPM 在前台运行，不进入后台守护模式 ---
 RUN sed -i 's/daemonize = yes/daemonize = no/g' /usr/local/etc/php-fpm.conf
-
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
-
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg && docker-php-ext-install -j$(nproc) gd pdo_mysql zip fileinfo
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 EOF
@@ -5098,69 +5083,7 @@ EOF
     mv "$dir"/* "$project_dir/source/" && mv "$dir"/.* "$project_dir/source/" 2>/dev/null || true; rm -rf "$dir"
 
     cat >"$project_dir/nginx/default.conf" <<'EOF'
-server { listen 80; server_name localhost; root /var/www/html; index index.php index.html index.htm; location / { try_files $uri $uri/ /index.php?$query_string; } location ~ \.php$ { include fastcgi_params; fastcgi_pass php:9000; fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; } location ~ /\.ht { deny all; } }
-EOF
-    cat >"$project_dir/docker-compose.yml" <<EOF
-services:
-  db: {image: mariadb:10.6, container_name: ${project_dir##*/}_db, restart: always, environment: {MYSQL_ROOT_PASSWORD: "$db_root_password", MYSQL_DATABASE: "maccms", MYSQL_USER: "maccms_user", MYSQL_PASSWORD: "$db_user_password"}, volumes: [db_data:/var/lib/mysql], networks: [maccms_net]}
-  php: {build: ./php, container_name: ${project_dir##*/}_php, volumes: [./source:/var/www/html], restart: always, depends_on: [db], networks: [maccms_net]}
-  nginx: {image: nginx:1.21-alpine, container_name: ${project_dir##*/}_nginx, ports: ["$web_port:80"], volumes: [./source:/var/www/html, ./nginx/default.conf:/etc/nginx/conf.d/default.conf], restart: always, depends_on: [php], networks: [maccms_net]}
-volumes: {db_data:}
-networks: {maccms_net:}
-EOF
-
-    log_info "正在构建集成Supervisor的PHP镜像并启动所有服务..."
-    log_warn "首次执行需要构建镜像，耗时可能长达数分钟，请耐心等待..."
-    docker compose up -d --build
-    log_info "等待容器初始化 (8秒)..."
-    sleep 8
-
-    log_info "正在修复容器内文件权限 (确保 www-data 用户可以读写)..."
-    docker exec -i "${project_dir##*/}_php" chown -R www-data:www-data /var/www/html
-    docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
-
-    log_info "正在检查服务最终状态..."
-    if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "最终检查发现 PHP 容器未能保持运行状态！"
-        log_info "问题可能出在容器内部，以下是该容器的最后部分日志以供诊断:"
-        echo -e "$CYAN-------------------- [${project_dir##*/}_php] 容器日志 ---------------------$NC"
-        docker compose logs --no-log-prefix php | tail -n 20
-        echo -e "$CYAN----------------------------------------------------------------------$NC"
-        log_warn "请仔细检查上面的日志，常见的错误包括权限问题或PHP-FPM配置错误。"
-        press_any_key; return 1
-    fi
-
-    log_info "✅ 所有服务均已成功启动！"
-    docker compose ps
-
-    read -p "是否立即为其设置反向代理 (需提前解析好域名)？(Y/n): " setup_proxy_choice
-    local install_url
-    if [[ ! "$setup_proxy_choice" =~ ^[Nn]$ ]]; then
-        while true; do
-            read -p "请输入您的网站访问域名 (例如 maccms.example.com): " domain
-            if [[ -z "$domain" ]]; then log_error "网站域名不能为空！"; elif ! _is_domain_valid "$domain"; then log_error "域名格式不正确。"; else break; fi
-        done
-        if setup_auto_reverse_proxy "$domain" "$web_port"; then
-            echo "$domain" > "$project_dir/.proxy_domain"; install_url="https://$domain/install.php"
-        else
-            log_error "反向代理设置失败！"; press_any_key; return 1
-        fi
-    else
-        local public_ip; public_ip=$(get_public_ip v4); install_url="http://$public_ip:$web_port/install.php"
-    fi
-
-    clear
-    log_info "✅ 苹果CMS 已成功部署！"
-    echo -e "$CYAN----------------------- 安装摘要 ------------------------$NC"
-    echo -e "$GREEN  安装向导地址: $WHITE$install_url$NC"
-    echo -e "$GREEN  安装目录:     $WHITE$project_dir$NC"
-    echo -e "$RED  数据库ROOT密码: $YELLOW$db_root_password$NC"
-    echo -e "$RED  数据库用户密码: $YELLOW$db_user_password$NC"
-    echo -e "$CYAN-------------------------------------------------------$NC"
-    log_warn "请访问上面的“安装向导地址”完成最后步骤。"
-    log_warn "在数据库配置页面，请【不要】修改任何信息，直接点击“测试连接”，然后进行下一步即可。"
-    press_any_key
-}
+server { listen 80; server_name localhost; root /var/www/html; index index.php index.html index.htm; location / { try_files $uri $uri/ /index.php?$query_string; } location ~ \.php$ { include fastcgi_params; fastcgi_pass php:9000; fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; } location ~ /\.ht { deny all
 uninstall_maccms() {
     uninstall_docker_compose_project "苹果CMS" "/root/maccms"
 }
