@@ -2212,8 +2212,8 @@ _singbox_prompt_for_protocols() {
         "Trojan + WebSocket + TLS"
         "Hysteria2 (UDP)"
         "TUIC v5 (UDP)"
-        "${GREEN}一键生成以上全部协议节点${NC}"
         "${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}"
+        "${GREEN}一键生成以上全部协议节点${NC}"
     )
 
     local choice
@@ -2225,12 +2225,12 @@ _singbox_prompt_for_protocols() {
         3) protocols_ref=("Trojan") ;;
         4) protocols_ref=("Hysteria2") ;;
         5) protocols_ref=("TUIC") ;;
-        6)
-            protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
+        6) protocols_ref=("VLESS-REALITY") ;;
+        7)
+            protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC" "VLESS-REALITY")
             is_one_click_ref=true
             ;;
-        7) protocols_ref=("VLESS-REALITY") ;;
-        0) return 1 ;; # 用户选择返回
+        0) return 1 ;;
         *)
             log_error "无效选择，操作中止。"
             press_any_key
@@ -2527,26 +2527,40 @@ singbox_add_node_orchestrator() {
     local is_one_click=false
     if ! _singbox_prompt_for_protocols protocols_to_create is_one_click; then return; fi
 
-    local cert_path key_path connect_addr sni_domain
+    # --- 核心修改点 (Part 1): 为不同类型的协议声明独立的变量 ---
+    local cert_path key_path tls_connect_addr tls_sni_domain
     declare -A insecure_params
-    local reality_private_key reality_public_key reality_short_id
+    local reality_private_key reality_public_key reality_short_id reality_connect_addr reality_sni_domain
 
-    # --- 核心逻辑分支：判断是配置 REALITY 还是其他 TLS 协议 ---
+    # --- 核心修改点 (Part 2): 将 if/else 结构拆分为两个独立的 if 结构 ---
+
+    # 步骤 A: 检查是否需要为 REALITY 生成参数
     if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
-        # 调用新的、全自动的 REALITY 参数生成函数
-        if ! _singbox_generate_reality_params_auto reality_private_key reality_public_key connect_addr sni_domain reality_short_id; then
-            press_any_key
-            return
-        fi
-    else
-        # 调用基于证书的 TLS 配置函数 (保持不变)
-        if ! _singbox_handle_certificate_setup cert_path key_path connect_addr sni_domain insecure_params; then
+        if ! _singbox_generate_reality_params_auto reality_private_key reality_public_key reality_connect_addr reality_sni_domain reality_short_id; then
             press_any_key
             return
         fi
     fi
 
-    # --- 第一个需要用户输入的地方：端口 ---
+    # 步骤 B: 检查是否需要为其他基于 TLS 证书的协议做准备
+    # 1. 创建一个只包含普通 TLS 协议的临时数组
+    local tls_protocols_to_create=()
+    for p in "${protocols_to_create[@]}"; do
+        if [[ "$p" != "VLESS-REALITY" ]]; then
+            tls_protocols_to_create+=("$p")
+        fi
+    done
+
+    # 2. 如果该数组不为空, 才执行证书设置流程
+    if [ ${#tls_protocols_to_create[@]} -gt 0 ]; then
+        if ! _singbox_handle_certificate_setup cert_path key_path tls_connect_addr tls_sni_domain insecure_params; then
+            press_any_key
+            return
+        fi
+    fi
+
+
+    # --- 后续逻辑保持不变，但会使用上面分离的变量 ---
     declare -A ports
     local used_ports_for_this_run=()
     _singbox_prompt_for_ports protocols_to_create ports used_ports_for_this_run "$is_one_click"
@@ -2559,7 +2573,6 @@ singbox_add_node_orchestrator() {
     city=$(echo "$geo_info_json" | jq -r '.city // "N/A"' | sed 's/ //g')
     operator_name=$(echo "$geo_info_json" | jq -r '.org // "Custom"' | sed -e 's/ LLC//g' -e 's/ Inc\.//g' -e 's/,//g' -e 's/\.//g' -e 's/ Limited//g' -e 's/ Ltd//g' | awk '{print $1}')
 
-    # --- 第二个需要用户输入的地方：自定义标识 ---
     local custom_id
     echo ""
     echo -e -n "请输入自定义标识 (用于节点命名) [回车则使用: ${GREEN}${operator_name}${NC}]: "
@@ -2570,7 +2583,7 @@ singbox_add_node_orchestrator() {
     local final_node_link=""
     local protocols_with_self_signed=()
     if [ ${#insecure_params[@]} -gt 0 ]; then
-        protocols_with_self_signed=("${protocols_to_create[@]}")
+        protocols_with_self_signed=("${tls_protocols_to_create[@]}")
     fi
 
     for protocol in "${protocols_to_create[@]}"; do
@@ -2584,14 +2597,17 @@ singbox_add_node_orchestrator() {
         build_args[port]=${ports[$protocol]}
         build_args[uuid]=$(uuidgen)
         build_args[password]=$(generate_random_password)
-        build_args[connect_addr]="$connect_addr"
-        build_args[sni_domain]="$sni_domain"
 
+        # --- 核心修改点 (Part 3): 根据协议类型选择使用哪套变量 ---
         if [ "$protocol" == "VLESS-REALITY" ]; then
+            build_args[connect_addr]="$reality_connect_addr"
+            build_args[sni_domain]="$reality_sni_domain"
             build_args[private_key]="$reality_private_key"
             build_args[public_key]="$reality_public_key"
             build_args[short_id]="$reality_short_id"
         else
+            build_args[connect_addr]="$tls_connect_addr"
+            build_args[sni_domain]="$tls_sni_domain"
             build_args[cert_path]="$cert_path"
             build_args[key_path]="$key_path"
             build_args[insecure_ws]=${insecure_params[ws]}
@@ -2611,7 +2627,6 @@ singbox_add_node_orchestrator() {
 
     if [ "$success_count" -gt 0 ]; then
         log_info "共成功添加 $success_count 个节点，正在重启 Sing-Box..."
-        # 备份旧配置，以防新配置导致启动失败
         cp "$SINGBOX_CONFIG_FILE" "$SINGBOX_CONFIG_FILE.bak"
         systemctl restart sing-box
         sleep 2
@@ -2627,7 +2642,6 @@ singbox_add_node_orchestrator() {
                 sleep 1
             fi
 
-            # --- **核心优化**：增加 REALITY 和其他协议的最终提醒 ---
             if [[ " ${protocols_to_create[*]} " =~ " VLESS-REALITY " ]]; then
                 echo -e "\n$YELLOW=================== VLESS+REALITY 重要提示 ===================$NC"
                 log_warn "请务必确保您的服务器防火墙 (及云服务商安全组)"
@@ -2666,13 +2680,11 @@ singbox_add_node_orchestrator() {
                 done
                 echo -e "$YELLOW==============================================================$NC"
             fi
-            # --- **优化结束** ---
 
             if [ "$success_count" -gt 1 ] || $is_one_click; then view_node_info; else press_any_key; fi
         else
             log_error "Sing-Box 重启失败！您的新配置可能存在问题。"
             log_error "旧的配置文件已自动恢复。请使用 'journalctl -u sing-box -f' 查看详细日志。"
-            # 回滚操作
             mv "$SINGBOX_CONFIG_FILE.bak" "$SINGBOX_CONFIG_FILE"
             press_any_key
         fi
