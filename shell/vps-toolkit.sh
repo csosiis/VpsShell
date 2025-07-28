@@ -243,12 +243,6 @@ ensure_dependencies() {
 # =================================================
 #           通用菜单绘制函数 (V16 - 特殊页脚最终版)
 # =================================================
-# 函数: 绘制一个标准的、完美对齐的菜单
-#
-# @param $1: 菜单标题 (字符串)
-# @param $2: 用于接收用户选择的变量名 (引用)
-# @param $3: (可选) 特殊指令 "exit" 或 "main_footer"
-# @param $...: 菜单选项数组
 _draw_menu() {
     local title_block="$1"
     local -n choice_ref=$2
@@ -5671,7 +5665,7 @@ _cleanup_caddy_proxy_config() {
     fi
 }
 # =================================================
-#      删除证书 (delete_certificate_and_proxy) - 优化版
+#      删除证书 (delete_certificate_and_proxy) - 简洁版
 # =================================================
 delete_certificate_and_proxy() {
     clear
@@ -5686,17 +5680,17 @@ delete_certificate_and_proxy() {
         log_warn "未找到任何由 Certbot 管理的证书。"; press_any_key; return;
     fi
 
-    # 1. 动态构建证书名称数组和菜单选项数组
+    # 1. 动态构建证书名称数组和菜单选项数组 (已修改)
     local cert_names=()
     local options_for_menu=()
     while read -r line; do
         if [[ $line =~ "Certificate Name:" ]]; then
-            local name=$(echo "$line" | awk '{print $3}')
-            # 从原始数据中提取与该证书相关的域名信息
-            local domains_line
-            domains_line=$(echo "$certs_data" | grep -A1 "Certificate Name: $name" | grep "Domains:")
+            # 直接提取证书名称
+            local name
+            name=$(echo "$line" | awk '{print $3}')
             cert_names+=("$name")
-            options_for_menu+=("$name ($domains_line)")
+            # 【核心修改】只将证书名称添加到菜单选项中
+            options_for_menu+=("$name")
         fi
     done <<< "$certs_data"
 
