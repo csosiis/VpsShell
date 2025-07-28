@@ -2207,29 +2207,29 @@ _singbox_prompt_for_protocols() {
 
     local title="Sing-Box 节点协议选择"
     local -a options=(
-        "${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}"
-        "VLESS + WSS"
-        "VMess + WSS"
-        "Trojan + WSS"
+        "Vless + WebSocket + TLS"
+        "VMess + WebSocket + TLS"
+        "Trojan + WebSocket + TLS"
         "Hysteria2 (UDP)"
         "TUIC v5 (UDP)"
-        "${GREEN}一键生成 (除REALITY外) 全部节点${NC}"
+        "${GREEN}一键生成以上全部协议节点${NC}"
+        "${YELLOW}VLESS + REALITY (推荐, 无需域名)${NC}"
     )
 
     local choice
     _draw_menu "$title" choice "${options[@]}"
 
     case $choice in
-        1) protocols_ref=("VLESS-REALITY") ;;
-        2) protocols_ref=("VLESS") ;;
-        3) protocols_ref=("VMess") ;;
-        4) protocols_ref=("Trojan") ;;
-        5) protocols_ref=("Hysteria2") ;;
-        6) protocols_ref=("TUIC") ;;
-        7)
+        1) protocols_ref=("VLESS") ;;
+        2) protocols_ref=("VMess") ;;
+        3) protocols_ref=("Trojan") ;;
+        4) protocols_ref=("Hysteria2") ;;
+        5) protocols_ref=("TUIC") ;;
+        6)
             protocols_ref=("VLESS" "VMess" "Trojan" "Hysteria2" "TUIC")
             is_one_click_ref=true
             ;;
+        7) protocols_ref=("VLESS-REALITY") ;;
         0) return 1 ;; # 用户选择返回
         *)
             log_error "无效选择，操作中止。"
