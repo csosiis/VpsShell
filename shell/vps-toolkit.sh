@@ -5147,7 +5147,15 @@ EOF
     docker exec -i "${project_dir##*/}_php" chmod -R 777 /var/www/html/runtime
 
     if ! docker ps -a | grep -q "${project_dir##*/}_php.*Up"; then
-        log_error "PHP 容器未能启动！请使用 'cd $project_dir && docker compose logs php' 查看日志。"; press_any_key; return 1;
+        log_error "最终检查发现 PHP 容器未能保持运行状态！"
+        log_info "问题可能出在容器内部，以下是该容器的最后部分日志以供诊断:"
+        echo -e "$CYAN-------------------- [${project_dir##*/}_php] 容器日志 ---------------------$NC"
+        # 使用 tail 显示最后20行，避免信息刷屏
+        docker compose logs --no-log-prefix php | tail -n 20
+        echo -e "$CYAN----------------------------------------------------------------------$NC"
+        log_warn "请仔细检查上面的日志，常见的错误包括权限问题或PHP-FPM配置错误。"
+        press_any_key
+        return 1
     fi
 
     log_info "✅ 所有服务均已成功启动！"
