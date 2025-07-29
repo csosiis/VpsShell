@@ -2284,8 +2284,7 @@ _ensure_time_accuracy() {
     return 0
 }
 # =================================================
-#           函数：自动生成 REALITY 参数 (新增)
-#  (此函数替代 _singbox_handle_reality_setup)
+#           函数：自动生成 REALITY 参数 (最终修改版)
 # =================================================
 _singbox_generate_reality_params_auto() {
     # --- 确保时间准确 ---
@@ -2339,23 +2338,21 @@ _singbox_generate_reality_params_auto() {
     echo ""
 
     log_info "--> 步骤 3/5: 正在设置并验证伪装域名 (serverName)..."
-    # 硬编码伪装域名
-    server_name_ref="www.microsoft.com"
+    # 【唯一的修改点】将这里的域名改成您想要的即可
+    server_name_ref="www.iij.ad.jp"
     log_info "    将使用默认伪装域名: $server_name_ref"
     log_info "    正在测试与伪装域名的连通性..."
-    # 使用curl测试HTTPS连接，-m 5设置5秒超时
-    # 只要收到HTTP头（状态码2xx, 3xx, 4xx都行），就证明网络是通的
     if curl -s --head -m 5 "https://$server_name_ref" > /dev/null; then
         log_info "    ✅ 连通性测试通过。"
     else
         log_error "    无法从本机连接到 $server_name_ref。REALITY 依赖此连接。"
         log_warn "    请检查服务器网络或更换一个可从本机访问的域名 (如 www.apple.com)。"
-        # 即使失败也继续，但给出强烈警告
     fi
     echo ""
 
 
     log_info "--> 步骤 4/5: 正在自动生成 short_id..."
+    # 【保持不变】保留原有的随机 short_id 生成逻辑
     short_id_ref=$(tr -dc '0-9a-f' < /dev/urandom | head -c 8)
     log_info "    已生成随机 short_id: $short_id_ref"
     echo ""
