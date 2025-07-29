@@ -2997,7 +2997,9 @@ _get_nginx_user() {
         echo "nginx"    # CentOS/RHEL 默认用户
     fi
 }
-# (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
+# =================================================================
+#           (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
+# =================================================================
 generate_subscription_link() {
     ensure_dependencies "nginx" "curl"
     if ! command -v nginx &>/dev/null; then
