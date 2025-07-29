@@ -2998,35 +2998,40 @@ _get_nginx_user() {
     fi
 }
 # =================================================================
-#           (V7 - 终极版, 使用独立安全路径和精简配置，杜绝冲突和权限问题)
+#           (终极解决方案 - 使用Python提供链接，绕过Nginx)
 # =================================================================
 generate_subscription_link() {
-    ensure_dependencies "nginx" "curl"
-    if ! command -v nginx &>/dev/null; then
-        log_error "Nginx 未安装，无法执行此功能。"
-        press_any_key
-        return
-    fi
+    # 1. 检查依赖
+    ensure_dependencies "python3" "curl"
     if [[ ! -f "$SINGBOX_NODE_LINKS_FILE" || ! -s "$SINGBOX_NODE_LINKS_FILE" ]]; then
         log_warn "没有可用的节点来生成订阅链接。"
         press_any_key
         return
     fi
 
-    # 1. 主动询问一个您确定已在防火墙/安全组中开放的端口
+    # 2. 在一个安全的临时目录中创建订阅文件
+    local temp_dir
+    temp_dir=$(mktemp -d) # 使用 mktemp 创建一个安全的临时目录
+    register_temp_file "$temp_dir" # 注册该目录，以便脚本退出时自动删除
+
+    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
+    local sub_filepath="$temp_dir/$sub_filename"
+
+    # 3. 生成Base64编码的订阅内容
+    mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
+    local all_links_str=$(printf "%s\n" "${node_lines[@]}")
+    local base64_content=$(echo -n "$all_links_str" | base64 -w0)
+    echo "$base64_content" >"$sub_filepath"
+
+    # 4. 询问一个确定开放的端口
     local listen_port
     while true; do
-        echo ""
-        read -p "请输入一个您确定已在防火墙/安全组中开放的TCP端口: " listen_port
-        if ! [[ "$listen_port" =~ ^[0-9]+$ ]] || [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
-            log_error "无效的端口号。请输入 1-65535 之间的数字。"
-        elif ss -tln | grep -q -E "(:|:::)$listen_port\b"; then
-            log_error "端口 $listen_port 已被本机其他服务占用，请更换一个。"
-        else
-            break
-        fi
+        read -p "请输入一个您确定已在防火墙/安全组中开放的TCP端口 [默认: 8000]: " port_input
+        listen_port=${port_input:-"8000"}
+        if check_port "$listen_port"; then break; fi
     done
 
+    # 5. 获取公网IP并生成URL
     local host
     host=$(get_public_ip v4)
     if [ -z "$host" ]; then
@@ -3034,70 +3039,22 @@ generate_subscription_link() {
         press_any_key
         return
     fi
-
-    # 2. 在 Nginx 自己的工作目录中创建临时文件，避免一切权限问题
-    local temp_sub_dir="/var/lib/nginx/vps-toolkit-subs"
-    mkdir -p "$temp_sub_dir"
-    local sub_filename=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
-    local sub_filepath="$temp_sub_dir/$sub_filename"
-
-    register_temp_file "$sub_filepath"
-    register_temp_file "$temp_sub_dir"
-
-    mapfile -t node_lines <"$SINGBOX_NODE_LINKS_FILE"
-    local all_links_str=$(printf "%s\n" "${node_lines[@]}")
-    local base64_content=$(echo -n "$all_links_str" | base64 -w0)
-    echo "$base64_content" >"$sub_filepath"
-
-    # 确保 Nginx 用户可以读取
-    if command -v chown &>/dev/null; then
-        local nginx_user="www-data"
-        if [ "$PKG_MANAGER" != "apt" ]; then
-           nginx_user="nginx"
-        fi
-        chown -R ${nginx_user}:${nginx_user} "$temp_sub_dir"
-    fi
-    chmod 644 "$sub_filepath"
-
-
-    # 3. 创建一个极其精简、无冲突的 Nginx 临时配置
-    local nginx_temp_conf="/etc/nginx/conf.d/000-vps-toolkit-temp.conf"
-
-    log_info "正在创建 Nginx 临时配置以监听端口 ${listen_port}..."
-    cat > "$nginx_temp_conf" <<EOF
-# 由 vps-toolkit 自动生成，退出后会自动删除
-server {
-    listen ${listen_port} default_server;
-    listen [::]:${listen_port} default_server;
-
-    # 直接将根路径映射到我们创建的临时文件上
-    location /${sub_filename} {
-        alias ${sub_filepath};
-        default_type text/plain;
-    }
-}
-EOF
-    register_temp_file "$nginx_temp_conf"
-
-    # 测试并重载 Nginx
-    if ! nginx -t; then
-        log_error "Nginx 配置测试失败！您的 Nginx 主配置可能存在问题。"
-        rm -f "$nginx_temp_conf"
-        press_any_key
-        return
-    fi
-    systemctl reload nginx
-    log_info "Nginx 配置已成功加载。"
-
-    # 生成最终链接
     local sub_url="http://${host}:${listen_port}/${sub_filename}"
 
+    # 6. 启动Python的http.server来提供服务
     clear
-    log_info "已生成临时订阅链接，请立即复制使用！"
-    log_warn "此链接将在您退出脚本后被自动删除。"
+    log_info "已为您生成临时订阅链接，由 Python 临时服务器提供服务。"
+    log_warn "请注意：此服务器将在您按下 Ctrl+C 后停止，链接也将失效。"
     echo -e "$CYAN--------------------------------------------------------------$NC"
     echo -e "\n$YELLOW$sub_url$NC\n"
     echo -e "$CYAN--------------------------------------------------------------$NC"
+    echo -e "\n$GREEN服务器正在运行中... 按 ${RED}Ctrl+C${GREEN} 即可停止服务并返回菜单。$NC"
+
+    # 进入临时目录，然后启动服务器。这样URL中就不需要带目录路径。
+    # 这个命令会一直运行，直到用户按下 Ctrl+C
+    (cd "$temp_dir" && python3 -m http.server "$listen_port")
+
+    log_info "\nPython 临时服务器已停止。"
     press_any_key
 }
 # (已完善)
