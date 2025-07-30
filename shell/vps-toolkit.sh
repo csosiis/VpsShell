@@ -225,6 +225,7 @@ ensure_dependencies() {
         log_warn "检测到以下缺失的依赖包: ${missing_dependencies[*]}"
         if [ "$PKG_MANAGER" == "apt" ]; then
             log_info "正在更新软件包列表 (apt)..."
+            # 错误就发生在这条命令
             if ! apt-get update -y; then
                 log_error "软件包列表更新失败，请检查网络或源配置！"
                 return 1
@@ -1252,6 +1253,7 @@ network_priority_menu() {
         esac
     done
 }
+# (已优化)
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
     mkdir -p ~/.ssh
@@ -1276,12 +1278,24 @@ setup_ssh_key() {
     printf "%s\n" "$public_key" >>~/.ssh/authorized_keys
     sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
     log_info "公钥已成功添加到 authorized_keys 文件中。\n"
+
+    # 总是确保密钥登录是启用的
+    local sshd_config_file="/etc/ssh/sshd_config"
+    log_info "正在确保 SSH 配置允许密钥登录..."
+    sed -i '/^#\?PubkeyAuthentication/d' "$sshd_config_file"
+    echo "PubkeyAuthentication yes" >> "$sshd_config_file"
+
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" =~ ^[Yy]$ ]]; then
         log_info "正在修改 SSH 配置以禁用密码登录..."
-        # 使用 .bak 后缀自动备份
-        sed -i.bak -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
-               -e 's/^#?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+        # --- 核心修正：先删除旧行，再追加新行 ---
+        sed -i '/^#\?PasswordAuthentication/d' "$sshd_config_file"
+        echo "PasswordAuthentication no" >> "$sshd_config_file"
+
+        sed -i '/^#\?PermitRootLogin/d' "$sshd_config_file"
+        echo "PermitRootLogin prohibit-password" >> "$sshd_config_file"
+        log_info "  -> 已将 PermitRootLogin 设置为 'prohibit-password' (仅允许密钥登录)"
+        # --- 修正结束 ---
 
         log_info "正在重启 SSH 服务..."
         if systemctl restart sshd || systemctl restart ssh; then
@@ -1331,6 +1345,7 @@ manage_root_login() {
         esac
     done
 }
+# (已优化)
 set_root_password() {
     log_info "开始设置 root 密码..."
     read -s -p "请输入新的 root 密码: " new_password
@@ -1360,13 +1375,25 @@ set_root_password() {
 
     log_info "正在修改 SSH 配置文件以允许 root 用户通过密码登录..."
 
+    local sshd_config_file="/etc/ssh/sshd_config"
+
+    # --- 核心修正：先删除旧行，再追加新行，确保生效 ---
     # 自动备份
-    sed -i.bak -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' \
-           -e 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    cp "$sshd_config_file" "${sshd_config_file}.bak_$(date +%Y%m%d_%H%M%S)"
+
+    log_info "  -> 确保 PermitRootLogin 设置为 yes"
+    sed -i '/^#\?PermitRootLogin/d' "$sshd_config_file"
+    echo "PermitRootLogin yes" >> "$sshd_config_file"
+
+    log_info "  -> 确保 PasswordAuthentication 设置为 yes"
+    sed -i '/^#\?PasswordAuthentication/d' "$sshd_config_file"
+    echo "PasswordAuthentication yes" >> "$sshd_config_file"
+    # --- 修正结束 ---
 
     log_info "配置修改完成，正在重启 SSH 服务以应用更改..."
     if systemctl restart sshd || systemctl restart ssh; then
         log_info "✅ SSH 服务已重启。root 密码登录功能已成功设置！"
+        log_warn "您现在应该可以使用新设置的 root 密码通过 SSH 登录了。"
     else
         log_error "SSH 服务重启失败！请手动执行 'sudo systemctl status sshd' 进行检查。"
     fi
