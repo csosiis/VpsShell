@@ -1253,33 +1253,42 @@ network_priority_menu() {
         esac
     done
 }
-# (已优化)
+# (最终完美版 - 采用覆盖模式写入密钥)
 setup_ssh_key() {
     log_info "开始设置 SSH 密钥登录..."
-    mkdir -p ~/.ssh
-    touch ~/.ssh/authorized_keys
-    chmod 700 ~/.ssh
-    chmod 600 ~/.ssh/authorized_keys
+    # 确保 /root/.ssh 目录存在且权限正确
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+
     log_warn "请粘贴您的公钥 (例如 id_rsa.pub 的内容)，粘贴完成后，按 Enter 换行，再按一次 Enter 即可结束输入:"
     local public_key=""
     local line
+    # 读取用户粘贴的公钥
     while IFS= read -r line; do
         if [[ -z "$line" ]]; then
             break
         fi
         public_key+="$line"$'\n'
     done
+    # 移除可能因粘贴产生的空行
     public_key=$(echo -e "$public_key" | sed '/^$/d')
+
     if [ -z "$public_key" ]; then
         log_error "没有输入公钥，操作已取消。"
         press_any_key
         return
     fi
-    printf "%s\n" "$public_key" >>~/.ssh/authorized_keys
-    sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
-    log_info "公钥已成功添加到 authorized_keys 文件中。\n"
 
-    # 总是确保密钥登录是启用的
+    # --- 核心修改：使用 > (覆盖) 而不是 >> (追加) ---
+    # 这会清空文件并只写入用户提供的公钥，从而移除所有云服务商预留的密钥。
+    log_info "正在以覆盖模式将您的公钥写入 authorized_keys 文件..."
+    printf "%s\n" "$public_key" > /root/.ssh/authorized_keys
+
+    # 确保 authorized_keys 文件的权限是 600
+    chmod 600 /root/.ssh/authorized_keys
+    log_info "✅ 公钥已成功写入 authorized_keys 文件中。\n"
+
+    # 确保 SSHD 配置允许密钥认证
     local sshd_config_file="/etc/ssh/sshd_config"
     log_info "正在确保 SSH 配置允许密钥登录..."
     sed -i '/^#\?PubkeyAuthentication/d' "$sshd_config_file"
@@ -1288,14 +1297,12 @@ setup_ssh_key() {
     read -p "是否要禁用密码登录 (强烈推荐)? (y/N): " disable_pwd
     if [[ "$disable_pwd" =~ ^[Yy]$ ]]; then
         log_info "正在修改 SSH 配置以禁用密码登录..."
-        # --- 核心修正：先删除旧行，再追加新行 ---
         sed -i '/^#\?PasswordAuthentication/d' "$sshd_config_file"
         echo "PasswordAuthentication no" >> "$sshd_config_file"
 
         sed -i '/^#\?PermitRootLogin/d' "$sshd_config_file"
         echo "PermitRootLogin prohibit-password" >> "$sshd_config_file"
         log_info "  -> 已将 PermitRootLogin 设置为 'prohibit-password' (仅允许密钥登录)"
-        # --- 修正结束 ---
 
         log_info "正在重启 SSH 服务..."
         if systemctl restart sshd || systemctl restart ssh; then
@@ -1303,7 +1310,12 @@ setup_ssh_key() {
         else
              log_error "SSH 服务重启失败！请手动检查 'systemctl status ssh' 或 'sshd'。"
         fi
+    else
+        # 如果用户选择不禁用密码，我们依然需要重启ssh服务以确保PubkeyAuthentication yes生效
+        log_info "正在重启 SSH 服务以应用密钥认证设置..."
+        systemctl restart sshd || systemctl restart ssh
     fi
+
     log_info "✅ SSH 密钥登录设置完成。"
     press_any_key
 }
@@ -1345,7 +1357,7 @@ manage_root_login() {
         esac
     done
 }
-# (已优化)
+# (最终修复版 - 自动处理 include 目录冲突)
 set_root_password() {
     log_info "开始设置 root 密码..."
     read -s -p "请输入新的 root 密码: " new_password
@@ -1376,19 +1388,37 @@ set_root_password() {
     log_info "正在修改 SSH 配置文件以允许 root 用户通过密码登录..."
 
     local sshd_config_file="/etc/ssh/sshd_config"
+    local sshd_include_dir="/etc/ssh/sshd_config.d"
 
-    # --- 核心修正：先删除旧行，再追加新行，确保生效 ---
-    # 自动备份
-    cp "$sshd_config_file" "${sshd_config_file}.bak_$(date +%Y%m%d_%H%M%S)"
-
-    log_info "  -> 确保 PermitRootLogin 设置为 yes"
-    sed -i '/^#\?PermitRootLogin/d' "$sshd_config_file"
+    # 1. 确保主配置文件中的设置是正确的
+    log_info "  -> 正在处理主配置文件: $sshd_config_file"
+    # 使用 .bak 后缀自动备份
+    sed -i.bak -e '/^#\?PermitRootLogin/d' -e '/^#\?PasswordAuthentication/d' "$sshd_config_file"
     echo "PermitRootLogin yes" >> "$sshd_config_file"
-
-    log_info "  -> 确保 PasswordAuthentication 设置为 yes"
-    sed -i '/^#\?PasswordAuthentication/d' "$sshd_config_file"
     echo "PasswordAuthentication yes" >> "$sshd_config_file"
-    # --- 修正结束 ---
+    log_info "  -> 主配置文件设置完毕。"
+
+    # 2. 【核心新增逻辑】检查并处理 include 目录中的覆盖配置
+    if [ -d "$sshd_include_dir" ]; then
+        log_info "  -> 正在检查并处理 include 目录: $sshd_include_dir"
+
+        # 查找所有包含冲突配置的文件，并注释掉它们
+        # 使用-E开启扩展正则，-i直接修改文件，-l只列出文件名
+        local conflicting_files
+        conflicting_files=$(grep -lE "^\s*(PasswordAuthentication|PermitRootLogin)" "$sshd_include_dir"/*.conf 2>/dev/null)
+
+        if [ -n "$conflicting_files" ]; then
+            for file in $conflicting_files; do
+                log_warn "    -> 在文件 [$file] 中发现冲突配置，正在注释掉..."
+                # 在所有匹配的行前加上'#'，使用.bak后缀备份
+                sed -i.bak -E 's/^\s*(PasswordAuthentication|PermitRootLogin)/#&/' "$file"
+            done
+            log_info "  -> include 目录处理完毕。"
+        else
+            log_info "  -> include 目录中未发现冲突配置。"
+        fi
+    fi
+    # --- 新增逻辑结束 ---
 
     log_info "配置修改完成，正在重启 SSH 服务以应用更改..."
     if systemctl restart sshd || systemctl restart ssh; then
