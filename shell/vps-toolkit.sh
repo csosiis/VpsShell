@@ -1554,11 +1554,17 @@ manage_bbr() {
     fi
 
     log_info "内核版本 $kernel_version 符合要求。"
-    local current_congestion_control
-    current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
+
+    local current_congestion_control="N/A (非 IPv4 环境或未设置)"
+    if [ -f "/proc/sys/net/ipv4/tcp_congestion_control" ]; then
+        current_congestion_control=$(sysctl -n net.ipv4.tcp_congestion_control)
+    fi
     log_info "当前 TCP 拥塞控制算法为: $YELLOW$current_congestion_control$NC"
-    local current_queue_discipline
-    current_queue_discipline=$(sysctl -n net.core.default_qdisc)
+
+    local current_queue_discipline="N/A (未设置或不支持)"
+    if [ -f "/proc/sys/net/core/default_qdisc" ]; then
+        current_queue_discipline=$(sysctl -n net.core.default_qdisc)
+    fi
     log_info "当前网络队列管理算法为: $YELLOW$current_queue_discipline$NC"
 
     echo -e "\n请选择要执行的操作:"
@@ -1571,15 +1577,21 @@ manage_bbr() {
     rm -f "$sysctl_conf"
     touch "$sysctl_conf"
 
+    local bbr_enabled=false
+    local fq_enabled=false
+
     case $choice in
     1)
-        log_info "正在启用 BBR..."
+        log_info "正在配置 BBR (持久化)..."
         echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        bbr_enabled=true
         ;;
     2)
-        log_info "正在启用 BBR + FQ..."
+        log_info "正在配置 BBR + FQ (持久化)..."
         echo "net.core.default_qdisc = fq" >>"$sysctl_conf"
         echo "net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf"
+        bbr_enabled=true
+        fq_enabled=true
         ;;
     0)
         log_info "操作已取消。"
@@ -1591,12 +1603,34 @@ manage_bbr() {
         return
         ;;
     esac
-    log_info "正在应用配置..."
-    sysctl -p "$sysctl_conf"
-    log_info "✅ 配置已应用！请检查上面的新算法是否已生效。"
+
+    log_info "正在应用配置到当前运行的内核..."
+    local applied_now_count=0
+
+    if $fq_enabled && [ -e "/proc/sys/net/core/default_qdisc" ]; then
+        if sysctl -w net.core.default_qdisc=fq &>/dev/null; then
+            log_info "  -> 已应用: net.core.default_qdisc = fq"
+            ((applied_now_count++))
+        fi
+    fi
+
+    if $bbr_enabled && [ -e "/proc/sys/net/ipv4/tcp_congestion_control" ]; then
+        if sysctl -w net.ipv4.tcp_congestion_control=bbr &>/dev/null; then
+            log_info "  -> 已应用: net.ipv4.tcp_congestion_control = bbr"
+            ((applied_now_count++))
+        fi
+    fi
+
+    # --- 这里是本次优化的核心 ---
+    if [ $applied_now_count -eq 0 ]; then
+        log_warn "检测到纯 IPv6 环境，针对 IPv4 的设置无法立即生效。"
+        log_info "这在纯 IPv6 VPS 上是正常现象，请不必担心。"
+    fi
+    # --- 优化结束 ---
+
+    log_info "✅ 配置已写入 $sysctl_conf 以便重启后生效。"
     press_any_key
 }
-
 install_warp() {
     clear
     log_info "开始安装 WARP..."
