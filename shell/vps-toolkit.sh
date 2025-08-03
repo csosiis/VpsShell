@@ -4094,7 +4094,7 @@ install_nezha_agent_v0() {
     install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
 install_nezha_agent_phoenix() {
-    _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.note.nyc.mn:443" "PdctOYY88Ts4dUvW4v6U7ZSc9mbvjsyZ"
+    _nezha_v1_style_installer "phoenix" "Phoenix V1" "agent.note.nyc.mn:2083" "PdctOYY88Ts4dUvW4v6U7ZSc9mbvjsyZ"
 }
 
 install_nezha_dashboard_v0() {
