@@ -3980,7 +3980,7 @@ uninstall_nezha_agent_phoenix() {
         rm -f /etc/systemd/system/nezha-agent-phoenix.service
         rm -rf /opt/nezha/agent-phoenix
         systemctl daemon-reload
-        log_info "✅ Phoenix Nezha V1 探针已成功卸载。"
+        log_info "✅ Nezha V1 探针已成功卸载。"
     fi
     press_any_key
 }
@@ -4062,7 +4062,7 @@ _nezha_v1_style_installer() {
     local server_secret="$4"
 
     local user_command
-    read -p "您正在安装 $friendly_name 探针，请输入安装指令以继续: " user_command
+    read -p "您正在安装 V1 探针，请输入安装指令以继续: " user_command
     if [ "$user_command" != "csos" ]; then
         log_error "指令错误，安装已中止。"
         press_any_key
@@ -4094,7 +4094,7 @@ install_nezha_agent_v0() {
     install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
 install_nezha_agent_phoenix() {
-    _nezha_v1_style_installer "phoenix" "Phoenix V1" "agent.note.nyc.mn:2083" "PdctOYY88Ts4dUvW4v6U7ZSc9mbvjsyZ"
+    _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.note.nyc.mn:8008" "PdctOYY88Ts4dUvW4v6U7ZSc9mbvjsyZ"
 }
 
 install_nezha_dashboard_v0() {
