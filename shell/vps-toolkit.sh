@@ -4069,7 +4069,7 @@ _nezha_v1_style_installer() {
         return 1
     fi
 
-    local NZ_TLS="true"
+    local NZ_TLS="false"
     local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh"
     local command_to_run="export NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'; bash /tmp/nezha_install_${version_id}.sh"
 
