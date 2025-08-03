@@ -4069,7 +4069,7 @@ _nezha_v1_style_installer() {
         return 1
     fi
 
-    local NZ_TLS="false"
+    local NZ_TLS="true"
     local script_url="https://raw.githubusercontent.com/nezhahq/scripts/main/agent/install.sh"
     local command_to_run="export NZ_SERVER='$server_info' NZ_TLS='$NZ_TLS' NZ_CLIENT_SECRET='$server_secret'; bash /tmp/nezha_install_${version_id}.sh"
 
@@ -4094,7 +4094,7 @@ install_nezha_agent_v0() {
     install_and_adapt_nezha_agent "v0" "$script_url" "$command_to_run"
 }
 install_nezha_agent_phoenix() {
-    _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.chat.nyc.mn:8008" "XuqVRw4XcOtDDFwz8ipJN9v7HcQZe7M3"
+    _nezha_v1_style_installer "phoenix" "Phoenix V1" "nz.note.nyc.mn:443" "PdctOYY88Ts4dUvW4v6U7ZSc9mbvjsyZ"
 }
 
 install_nezha_dashboard_v0() {
